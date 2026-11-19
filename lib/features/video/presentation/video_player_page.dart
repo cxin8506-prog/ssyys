@@ -65,6 +65,17 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       // 损坏视频跳过并写日志
       appLogger.error('视频播放失败，已跳过', error: e, stack: st);
       await ctrl.dispose();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('视频加载失败，已跳过。若来自网络源，可尝试修改 UA 后重试'),
+            action: SnackBarAction(
+              label: 'UA 设置',
+              onPressed: () => Navigator.of(context).pushNamed('/ua-settings'),
+            ),
+          ),
+        );
+      }
       _next();
     }
   }

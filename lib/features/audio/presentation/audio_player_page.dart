@@ -118,6 +118,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
                 _buildControls(),
                 const SizedBox(height: 8),
                 _buildSpeedRow(),
+                if (_chapters.any((c) => c.isCorrupted)) _buildUaHint(),
                 const SizedBox(height: 16),
                 Expanded(child: _buildChapterList()),
               ],
@@ -184,6 +185,29 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
           }).toList(),
         );
       },
+    );
+  }
+
+  /// 有章节损坏/加载受限时，给一个温和的 UA 引导（本地场景不打扰正常播放）
+  Widget _buildUaHint() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed('/ua-settings'),
+        child: Row(
+          children: const [
+            Icon(Icons.info_outline, size: 14, color: AppTheme.darkTextSub),
+            SizedBox(width: 6),
+            Expanded(
+              child: Text('部分章节加载失败？若是网络源，可修改 UA 后重试',
+                  style: TextStyle(
+                      fontSize: 11, color: AppTheme.darkTextSub)),
+            ),
+            Text('UA 设置',
+                style: TextStyle(fontSize: 11, color: AppTheme.primary)),
+          ],
+        ),
+      ),
     );
   }
 

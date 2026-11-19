@@ -43,6 +43,14 @@ class SettingsPage extends ConsumerWidget {
               prefs.setBool(AppConstants.keyVideoEnabled, v);
             },
           ),
+          const _SectionTitle(title: '网络与源'),
+          ListTile(
+            leading:
+                const Icon(Icons.http_outlined, color: AppTheme.primary),
+            title: const Text('UA 设置'),
+            subtitle: const Text('按源自动切换 UA / 管理手机与电脑 UA，加载受限时可修改重试'),
+            onTap: () => Navigator.of(context).pushNamed('/ua-settings'),
+          ),
           const _SectionTitle(title: '存储与缓存'),
           ListTile(
             leading:

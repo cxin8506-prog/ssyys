@@ -19,6 +19,7 @@ import 'features/onboarding/onboarding_page.dart';
 import 'features/presentation/home_page.dart';
 import 'features/search/search_page.dart';
 import 'features/settings/settings_page.dart';
+import 'features/ua/presentation/ua_settings_page.dart';
 import 'features/video/presentation/video_library_page.dart';
 
 Future<void> main() async {
@@ -93,6 +94,9 @@ class MyApp extends ConsumerWidget {
       case '/logs':
         return MaterialPageRoute(
             builder: (_) => const LogPage(), settings: settings);
+      case '/ua-settings':
+        return MaterialPageRoute(
+            builder: (_) => const UaSettingsPage(), settings: settings);
       case '/favorite-audio':
         return MaterialPageRoute(
             builder: (_) => const CollectionPage(

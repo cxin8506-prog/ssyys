@@ -2,6 +2,8 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../features/ua/data/ua_repository.dart';
+import '../../features/ua/data/ua_resolver.dart';
 import '../constants/app_constants.dart';
 import '../database/app_database.dart';
 import '../log/app_logger.dart';
@@ -36,6 +38,16 @@ final cacheLimitProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);
   return prefs.getInt(AppConstants.keyCacheLimitMb) ??
       AppConstants.defaultCacheLimitMb;
+});
+
+/// UA 配置仓储（基于 drift kv_settings，随数据库一起备份）
+final uaRepositoryProvider = Provider<UaRepository>((ref) {
+  return UaRepository(ref.read(databaseProvider));
+});
+
+/// 按源解析 UA 的解析器
+final uaResolverProvider = Provider<UaResolver>((ref) {
+  return UaResolver(ref.read(uaRepositoryProvider));
 });
 
 /// 将 ThemeMode 整数转换为 Flutter 枚举
