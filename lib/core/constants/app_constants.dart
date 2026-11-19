@@ -2,7 +2,7 @@
 class AppConstants {
   AppConstants._();
 
-  static const String appName = '本地影音';
+  static const String appName = '随意听书';
   static const String version = '1.0.0';
 
   /// 应用包名，用于拼接私有数据目录

@@ -34,7 +34,7 @@ Future<void> main() async {
     builder: () => MyAudioHandler(),
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'com.localreader.channel.audio',
-      androidNotificationChannelName: '本地听书播放',
+      androidNotificationChannelName: '随意听书播放',
       androidNotificationOngoing: true,
     ),
   );

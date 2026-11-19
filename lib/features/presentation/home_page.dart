@@ -20,7 +20,7 @@ class HomePage extends ConsumerWidget {
     final videoEnabled = ref.watch(videoEnabledProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('本地影音')),
+      appBar: AppBar(title: const Text('随意听书')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

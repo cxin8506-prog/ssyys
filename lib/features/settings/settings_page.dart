@@ -86,7 +86,7 @@ class SettingsPage extends ConsumerWidget {
           ),
           const SizedBox(height: 24),
           ListTile(
-            title: Text('本地影音 v${AppConstants.version}'),
+            title: Text('随意听书 v${AppConstants.version}'),
             subtitle: const Text('全本地 · 无需登录 · 数据可迁移'),
           ),
         ],

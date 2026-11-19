@@ -21,7 +21,7 @@ class OnboardingPage extends ConsumerWidget {
             children: [
               const Icon(Icons.headphones, color: AppTheme.primary, size: 96),
               const SizedBox(height: 24),
-              Text('本地影音', style: Theme.of(context).textTheme.headlineLarge),
+              Text('随意听书', style: Theme.of(context).textTheme.headlineLarge),
               const SizedBox(height: 12),
               Text(
                 '一个完全属于自己的播放器。\n听书、看视频，所有数据只保存在本机，\n不用登录，也不依赖服务器。',

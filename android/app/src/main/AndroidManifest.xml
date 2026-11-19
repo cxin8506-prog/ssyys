@@ -14,7 +14,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:label="本地影音"
+        android:label="随意听书"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">
