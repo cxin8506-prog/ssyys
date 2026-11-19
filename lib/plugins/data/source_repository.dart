@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/log/app_logger.dart';
 import '../model/plugin_source.dart';
+import 'ting_shu_bridge.dart';
 
 /// 插件源安装与索引管理。
 ///
@@ -181,19 +182,81 @@ class SourceRepository {
 
   // ---------------------------------------------------------------- 安装 JAR
 
-  /// 安装 JAR 插件。JAR 需为 dex 化包（含 classes.dex）才能被 Android 加载。
-  Future<PluginSource> installJar(String filePath,
+  /// 安装 JAR 插件。
+  ///
+  /// 「我的听书」格式：一个 JAR 里有 SourceEntry.getSources() 返回的一串源，
+  /// 这里把它们拆成多条 PluginSource，共用同一份 plugin.jar。
+  /// 其余静态方法式 JAR 仍按单个源安装。
+  Future<List<PluginSource>> installJar(String filePath,
       {String? typeOverride, String? mainClass}) async {
     final baseName = p.basenameWithoutExtension(filePath);
-    final id = _slug('${baseName}_${DateTime.now().millisecondsSinceEpoch % 100000}');
-    final target = Directory(p.join((await pluginsRoot()).path, id));
-    if (await target.exists()) await target.delete(recursive: true);
-    await target.create(recursive: true);
+    final root = await pluginsRoot();
+    // 文件名可能是中文，_slug 会把它整成空串，这里用哈希保证唯一且稳定
+    final sig = baseName.hashCode.abs().toRadixString(36);
 
-    final jarFile = File(p.join(target.path, 'plugin.jar'));
+    // 同一个包共用一份 jar，放在 _jar_<签名> 下
+    final groupDir = Directory(p.join(root.path, '_jar_$sig'));
+    if (await groupDir.exists()) await groupDir.delete(recursive: true);
+    await groupDir.create(recursive: true);
+    final jarFile = File(p.join(groupDir.path, 'plugin.jar'));
     await File(filePath).copy(jarFile.path);
 
-    // 读 JAR 内的 MANIFEST / dex 情况
+    // 先按「我的听书」格式解析：一个包 -> 多个源
+    final entries = await TingShuBridge.scanEntryClasses(jarFile.path);
+    final entryClass = entries.isEmpty ? null : entries.first;
+    final found = entryClass == null
+        ? <Map<String, dynamic>>[]
+        : await TingShuBridge.listSources(jarFile.path, entryClass);
+
+    if (entryClass != null && found.isNotEmpty) {
+      final totalSize = await _dirSize(groupDir);
+      final each = (totalSize / found.length).round();
+      final all = await loadAll();
+      // 重装同一个包：先清掉这个包的旧条目，以及旧版把它当成单文件 JAR 的那条
+      all.removeWhere((e) => e.isTingShu && e.group == baseName);
+      final legacy = all
+          .where((e) => e.isJar && e.name == baseName)
+          .map((e) => e.id)
+          .toList();
+      all.removeWhere((e) => legacy.contains(e.id));
+      for (final id in legacy) {
+        final d = Directory(await sourceDirPath(id));
+        if (await d.exists()) await d.delete(recursive: true);
+      }
+
+      final list = <PluginSource>[];
+      for (final m in found) {
+        final index = int.tryParse('${m['index']}') ?? 0;
+        var name = '${m['name'] ?? ''}'.trim();
+        if (name.isEmpty) name = '$baseName ${index + 1}';
+        final desc = '${m['desc'] ?? ''}'.trim();
+        final url = '${m['url'] ?? ''}';
+        final type = typeOverride ?? _detectType('$name\n$desc\n$url');
+        list.add(PluginSource(
+          id: 'ts_${sig}_$index',
+          name: name,
+          type: type,
+          format: 'tingShu',
+          version: '1.0.0',
+          description: desc,
+          entry: entryClass,
+          entryClass: entryClass,
+          jarPath: jarFile.path,
+          sourceIndex: index,
+          group: baseName,
+          installedAt: DateTime.now().millisecondsSinceEpoch,
+          sizeBytes: each,
+        ));
+      }
+      all.addAll(list);
+      await _saveIndex(all);
+      appLogger.info('安装我的听书源包成功',
+          detail: '$baseName 共 ${list.length} 个源，入口 $entryClass');
+      return list;
+    }
+
+    // 旧格式：单个主类的静态方法插件
+    final target = groupDir;
     String entry = mainClass ?? '';
     bool hasDex = false;
     final probe = StringBuffer(baseName);
@@ -204,7 +267,6 @@ class SourceRepository {
         final n = f.name.toLowerCase();
         if (n.endsWith('classes.dex')) {
           hasDex = true;
-          // dex 里的字符串常量能反映源的能力（m3u8 / mp3 / 影视 …）
           if (probe.length < 400000) {
             final content = f.content as List<int>;
             probe.write(String.fromCharCodes(
@@ -230,6 +292,7 @@ class SourceRepository {
       type = _detectType(probe.toString());
     }
 
+    final id = _slug('jar_${sig}_${DateTime.now().millisecondsSinceEpoch % 100000}');
     final size = await _dirSize(target);
     final source = PluginSource(
       id: id,
@@ -247,7 +310,7 @@ class SourceRepository {
     all.add(source);
     await _saveIndex(all);
     appLogger.info('安装 JAR 源成功', detail: '${source.name} dex=$hasDex entry=$entry');
-    return source;
+    return [source];
   }
 
   // ---------------------------------------------------------------- 其他操作

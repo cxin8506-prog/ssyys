@@ -215,13 +215,51 @@ class _MainShellState extends ConsumerState<MainShell> {
     if (_index >= pages.length) _index = 0;
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
-      floatingActionButton: _NowPlayingFab(onTap: _openRecent),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      bottomNavigationBar: _AppBottomBar(
-        index: _index,
-        onTap: (i) => setState(() => _index = i),
+      bottomNavigationBar: StreamBuilder<PlaybackState>(
+        stream: audioHandler.playbackState,
+        initialData: audioHandler.playbackState.valueOrNull,
+        builder: (context, snap) {
+          final state = snap.data;
+          return _AppBottomBar(
+            index: _index,
+            playing: state?.playing ?? false,
+            hasMedia: state?.playing ?? false,
+            onPlayTap: () => _openPlayer(),
+            onTap: (i) => setState(() => _index = i),
+          );
+        },
       ),
     );
+  }
+
+  /// 中间大播放键：有在播的直接回播放页，没有就打开最近听/看的那条
+  Future<void> _openPlayer() async {
+    final playing = audioHandler.playbackState.valueOrNull?.playing ?? false;
+    if (playing) {
+      await audioHandler.pause();
+      return;
+    }
+    final audio = await ref
+        .read(continueListProvider(AppConstants.typeAudio).future)
+        .catchError((_) => <domain.MediaItem>[]);
+    final video = await ref
+        .read(continueListProvider(AppConstants.typeVideo).future)
+        .catchError((_) => <domain.MediaItem>[]);
+    final items = <domain.MediaItem>[...audio, ...video]..sort((a, b) {
+        final x = a.lastReadAt ?? a.addedAt;
+        final y = b.lastReadAt ?? b.addedAt;
+        return y.compareTo(x);
+      });
+    if (items.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('还没有在播的内容，先去搜一部吧'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      setState(() => _index = 0);
+      return;
+    }
+    await _openRecent(items.first);
   }
 
   /// 打开最近在听/在看的那一条
@@ -246,158 +284,136 @@ class _MainShellState extends ConsumerState<MainShell> {
   }
 }
 
-/// 底部导航上方的圆形「继续播放」浮钮
-///
-/// 最近有在听/在看的内容才出现；外圈是进度，点了直接回到播放页。
-class _NowPlayingFab extends ConsumerWidget {
-  final ValueChanged<domain.MediaItem> onTap;
-
-  const _NowPlayingFab({required this.onTap});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final videoEnabled = ref.watch(videoEnabledProvider);
-    final audio = ref
-            .watch(continueListProvider(AppConstants.typeAudio))
-            .valueOrNull ??
-        const <domain.MediaItem>[];
-    final video = videoEnabled
-        ? (ref
-                .watch(continueListProvider(AppConstants.typeVideo))
-                .valueOrNull ??
-            const <domain.MediaItem>[])
-        : const <domain.MediaItem>[];
-
-    final items = <domain.MediaItem>[...audio, ...video]..sort((a, b) {
-        final x = a.lastReadAt ?? a.addedAt;
-        final y = b.lastReadAt ?? b.addedAt;
-        return y.compareTo(x);
-      });
-    if (items.isEmpty) return const SizedBox.shrink();
-
-    final item = items.first;
-    final primary = Theme.of(context).colorScheme.primary;
-    final raw = item.progress > 1 ? item.progress / 100 : item.progress;
-
-    return SizedBox(
-      width: 56,
-      height: 56,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          SizedBox(
-            width: 56,
-            height: 56,
-            child: CircularProgressIndicator(
-              value: raw.clamp(0.0, 1.0),
-              strokeWidth: 2.5,
-              backgroundColor: context.palette.outline,
-              valueColor: AlwaysStoppedAnimation<Color>(primary),
-            ),
-          ),
-          Material(
-            color: primary,
-            shape: const CircleBorder(),
-            elevation: 6,
-            shadowColor: primary.withOpacity(0.45),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: () => onTap(item),
-              child: SizedBox(
-                width: 46,
-                height: 46,
-                child: Icon(
-                  item.isAudio
-                      ? Icons.headphones_rounded
-                      : Icons.play_arrow_rounded,
-                  size: 24,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 悬浮式底部导航：选中项有主色胶囊底
+/// 悬浮式底部导航：首页 / 书架 / 大播放键 / 发现 / 我的
 class _AppBottomBar extends StatelessWidget {
   final int index;
+  final bool playing;
+  final bool hasMedia;
   final ValueChanged<int> onTap;
+  final VoidCallback onPlayTap;
 
-  const _AppBottomBar({required this.index, required this.onTap});
+  const _AppBottomBar({
+    required this.index,
+    required this.playing,
+    required this.hasMedia,
+    required this.onTap,
+    required this.onPlayTap,
+  });
+
+  static const _items = <Map<String, dynamic>>[
+    {'label': '首页', 'icon': Icons.home_outlined, 'active': Icons.home},
+    {'label': '书架', 'icon': Icons.menu_book_outlined, 'active': Icons.menu_book},
+    {'label': '发现', 'icon': Icons.explore_outlined, 'active': Icons.explore},
+    {'label': '我的', 'icon': Icons.person_outline, 'active': Icons.person},
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    final items = <Map<String, dynamic>>[
-      {'label': '首页', 'icon': Icons.home_outlined, 'active': Icons.home},
-      {'label': '书架', 'icon': Icons.menu_book_outlined, 'active': Icons.menu_book},
-      {'label': '发现', 'icon': Icons.explore_outlined, 'active': Icons.explore},
-      {'label': '我的', 'icon': Icons.person_outline, 'active': Icons.person},
-    ];
+    final bar = Container(
+      height: 62,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: context.palette.outline),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(child: _tab(context, 0)),
+          Expanded(child: _tab(context, 1)),
+          const SizedBox(width: 66),
+          Expanded(child: _tab(context, 2)),
+          Expanded(child: _tab(context, 3)),
+        ],
+      ),
+    );
 
     return SafeArea(
       top: false,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 20, 14, 10),
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.topCenter,
+          children: [
+            Padding(padding: const EdgeInsets.only(top: 16), child: bar),
+            Positioned(top: 0, child: _playButton(context)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tab(BuildContext context, int i) {
+    final selected = i == index;
+    final primary = Theme.of(context).colorScheme.primary;
+    final it = _items[i];
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => onTap(i),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(vertical: 5),
         decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: context.palette.outline),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.18),
-              blurRadius: 20,
-              offset: const Offset(0, 6),
+          color: selected ? context.palette.primarySoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              (selected ? it['active'] : it['icon']) as IconData,
+              size: 20,
+              color: selected ? primary : context.subtleColor,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              it['label'] as String,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                color: selected ? primary : context.subtleColor,
+              ),
             ),
           ],
         ),
-        child: Row(
-          children: List.generate(items.length, (i) {
-            final selected = i == index;
-            final it = items[i];
-            return Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: () => onTap(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  padding: const EdgeInsets.symmetric(vertical: 7),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? context.palette.primarySoft
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        (selected ? it['active'] : it['icon']) as IconData,
-                        size: 21,
-                        color: selected ? primary : context.subtleColor,
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        it['label'] as String,
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight:
-                              selected ? FontWeight.w600 : FontWeight.w400,
-                          color: selected ? primary : context.subtleColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+      ),
+    );
+  }
+
+  /// 中间凸起的大圆钮：在播显示暂停，暂停/空闲显示播放
+  Widget _playButton(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return SizedBox(
+      width: 56,
+      height: 56,
+      child: Material(
+        color: primary,
+        shape: const CircleBorder(),
+        elevation: 8,
+        shadowColor: primary.withOpacity(0.45),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPlayTap,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(
+                playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                size: hasMedia && !playing ? 28 : 30,
+                color: Colors.white,
               ),
-            );
-          }),
+            ],
+          ),
         ),
       ),
     );

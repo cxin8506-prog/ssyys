@@ -19,6 +19,18 @@ class PluginSource {
 
   /// JS：入口脚本相对路径；JAR：主类名（可空，运行时再探测）
   final String entry;
+
+  /// 我的听书格式：JAR 的绝对路径（同一个包里的多个源共用一份）
+  final String? jarPath;
+
+  /// 我的听书格式：源入口类（含 getSources 的类）
+  final String? entryClass;
+
+  /// 我的听书格式：在 getSources() 列表里的下标
+  final int sourceIndex;
+
+  /// 所属包名（JAR 文件名），选源时用来分组
+  final String group;
   final String? icon;
   bool enabled;
   final int installedAt;
@@ -33,6 +45,10 @@ class PluginSource {
     this.author = '',
     this.description = '',
     this.entry = '',
+    this.jarPath,
+    this.entryClass,
+    this.sourceIndex = 0,
+    this.group = '',
     this.icon,
     this.enabled = true,
     required this.installedAt,
@@ -42,9 +58,11 @@ class PluginSource {
   bool get isAudio => type == 'audio';
   bool get isJar => format == 'jar';
   bool get isJsZip => format == 'jsZip';
+  bool get isTingShu => format == 'tingShu';
 
-  String get formatLabel =>
-      isJar ? 'JAR 插件' : (format == 'rule' ? '规则插件' : 'JS/ZIP 插件');
+  String get formatLabel => isTingShu
+      ? 'JAR 源包'
+      : (isJar ? 'JAR 插件' : (format == 'rule' ? '规则插件' : 'JS/ZIP 插件'));
 
   PluginSource copyWith({bool? enabled, String? name, String? type}) =>
       PluginSource(
@@ -56,6 +74,10 @@ class PluginSource {
         author: author,
         description: description,
         entry: entry,
+        jarPath: jarPath,
+        entryClass: entryClass,
+        sourceIndex: sourceIndex,
+        group: group,
         icon: icon,
         enabled: enabled ?? this.enabled,
         installedAt: installedAt,
@@ -71,6 +93,10 @@ class PluginSource {
         'author': author,
         'description': description,
         'entry': entry,
+        'jarPath': jarPath,
+        'entryClass': entryClass,
+        'sourceIndex': sourceIndex,
+        'group': group,
         'icon': icon,
         'enabled': enabled,
         'installedAt': installedAt,
@@ -86,6 +112,10 @@ class PluginSource {
         author: (j['author'] ?? '').toString(),
         description: (j['description'] ?? '').toString(),
         entry: (j['entry'] ?? '').toString(),
+        jarPath: j['jarPath']?.toString(),
+        entryClass: j['entryClass']?.toString(),
+        sourceIndex: int.tryParse('${j['sourceIndex']}') ?? 0,
+        group: (j['group'] ?? '').toString(),
         icon: j['icon']?.toString(),
         enabled: j['enabled'] == null ? true : j['enabled'] == true,
         installedAt: int.tryParse('${j['installedAt']}') ?? 0,

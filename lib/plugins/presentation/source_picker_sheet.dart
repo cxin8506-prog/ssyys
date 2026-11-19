@@ -88,24 +88,7 @@ class _SourcePickerSheet extends StatelessWidget {
             if (sources.isEmpty)
               Flexible(child: _empty(context))
             else
-              Flexible(
-                child: GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                  itemCount: sources.length,
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 14,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 0.94,
-                  ),
-                  itemBuilder: (_, i) => _SourceTile(
-                    source: sources[i],
-                    selected: sources[i].id == selectedId,
-                    onTap: () => Navigator.of(context).pop(sources[i].id),
-                  ),
-                ),
-              ),
+              Flexible(child: _sourceList(context)),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
               child: SizedBox(
@@ -125,6 +108,63 @@ class _SourcePickerSheet extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+
+  /// 源多的时候按「包名」分组：一个 JAR 里的多个源排在一起
+  Widget _sourceList(BuildContext context) {
+    final groups = <String, List<PluginSource>>{};
+    for (final s in sources) {
+      groups.putIfAbsent(s.group, () => []).add(s);
+    }
+    if (groups.length <= 1) return _grid(context, sources);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+      children: [
+        for (final e in groups.entries) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 10, 2, 8),
+            child: Row(
+              children: [
+                Text(
+                  e.key.isEmpty ? '单个源' : e.key,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: context.subtleColor,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text('${e.value.length} 个',
+                    style: TextStyle(fontSize: 11, color: context.subtleColor)),
+              ],
+            ),
+          ),
+          _grid(context, e.value),
+        ],
+      ],
+    );
+  }
+
+  Widget _grid(BuildContext context, List<PluginSource> list) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      itemCount: list.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 10,
+        childAspectRatio: 0.94,
+      ),
+      itemBuilder: (_, i) => _SourceTile(
+        source: list[i],
+        selected: list[i].id == selectedId,
+        onTap: () => Navigator.of(context).pop(list[i].id),
       ),
     );
   }

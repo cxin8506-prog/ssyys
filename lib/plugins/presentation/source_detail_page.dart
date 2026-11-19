@@ -64,8 +64,14 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     super.dispose();
   }
 
-  PluginEngine _engineFor(PluginSource s) => s.isJar
+  PluginEngine _engineFor(PluginSource s) => s.isTingShu
+
+      ? ref.read(tingShuEngineProvider)
+
+      : s.isJar
+
       ? ref.read(jarPluginEngineProvider)
+
       : ref.read(jsPluginEngineProvider);
 
   Future<void> _load() async {
@@ -350,7 +356,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
                 color: context.palette.primarySoft,
                 borderRadius: BorderRadius.circular(13),
               ),
-              child: Icon(s.isJar ? Icons.archive_outlined : Icons.code,
+              child: Icon((s.isJar || s.isTingShu) ? Icons.archive_outlined : Icons.code,
                   color: primary),
             ),
             const SizedBox(width: 12),

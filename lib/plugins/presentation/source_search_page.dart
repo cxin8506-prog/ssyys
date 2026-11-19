@@ -213,7 +213,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
           final s = sources[i - 1];
           return chip(
             label: s.name,
-            icon: s.isJar ? Icons.archive_outlined : Icons.code,
+            icon: (s.isJar || s.isTingShu) ? Icons.archive_outlined : Icons.code,
             selected: !_isAll && _sourceId == s.id,
             onTap: () {
               setState(() => _sourceId = s.id);
@@ -292,7 +292,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
       padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
       child: Row(
         children: [
-          Icon(g.source.isJar ? Icons.archive_outlined : Icons.code,
+          Icon((g.source.isJar || g.source.isTingShu) ? Icons.archive_outlined : Icons.code,
               size: 14, color: context.subtleColor),
           const SizedBox(width: 6),
           Text(g.source.name,
@@ -547,8 +547,14 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
 
   Future<_Group> _searchOne(PluginSource source, String kw, int page) async {
     try {
-      final engine = source.isJar
+      final engine = source.isTingShu
+
+          ? ref.read(tingShuEngineProvider)
+
+          : source.isJar
+
           ? ref.read(jarPluginEngineProvider)
+
           : ref.read(jsPluginEngineProvider);
       await engine.attach(source);
       final raw = await engine

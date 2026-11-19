@@ -73,4 +73,8 @@ flutter {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    // 「我的听书」源 SDK 依赖：源里直接 import Jsoup / Fuel
+    implementation "org.jsoup:jsoup:1.15.3"
+    implementation "com.github.kittinunf.fuel:fuel-android:2.3.1"
+    implementation "com.github.kittinunf.fuel:fuel-json:2.3.1"
 }

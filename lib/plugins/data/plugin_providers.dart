@@ -5,6 +5,7 @@ import '../../core/di/providers.dart';
 import '../engine/jar_plugin_engine.dart';
 import '../engine/js_plugin_engine.dart';
 import '../engine/plugin_engine.dart';
+import '../engine/tingshu_plugin_engine.dart';
 import '../model/plugin_source.dart';
 import 'config_schema_loader.dart';
 import 'source_config_repository.dart';
@@ -65,6 +66,18 @@ final jarPluginEngineProvider = Provider<JarPluginEngine>((ref) {
     ref.read(sourceConfigRepositoryProvider),
   );
 });
+
+/// 「我的听书」格式 JAR 引擎（一个包多个源）
+final tingShuEngineProvider = Provider<TingShuPluginEngine>((ref) {
+  return TingShuPluginEngine(ref.read(sourceRepositoryProvider));
+});
+
+/// 按源格式挑引擎
+PluginEngine engineForSource(WidgetRef ref, PluginSource s) {
+  if (s.isTingShu) return ref.read(tingShuEngineProvider);
+  if (s.isJar) return ref.read(jarPluginEngineProvider);
+  return ref.read(jsPluginEngineProvider);
+}
 
 /// 源配置声明读取（源自己声明要哪些配置项）
 final configSchemaLoaderProvider = Provider<ConfigSchemaLoader>((ref) {

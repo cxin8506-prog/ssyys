@@ -254,7 +254,7 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  s.isJar ? Icons.archive_outlined : Icons.code,
+                  (s.isJar || s.isTingShu) ? Icons.archive_outlined : Icons.code,
                   size: 20,
                   color: primary,
                 ),
@@ -394,11 +394,17 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
       final repo = ref.read(sourceRepositoryProvider);
       final ext = PathUtils.ext(path);
       // 类型交给仓储自动识别，不再让用户选听书/视频
-      final PluginSource s = ext == 'jar'
+      final list = ext == 'jar'
           ? await repo.installJar(path)
-          : await repo.installZip(path);
+          : [await repo.installZip(path)];
       ref.invalidate(sourceListProvider);
-      _toast('已安装「${s.name}」· ${s.isAudio ? '听书源' : '视频源'}');
+      if (list.isEmpty) {
+        _toast('这个包没有可用的源');
+      } else if (list.length == 1) {
+        _toast('已安装「${list.first.name}」· ${list.first.isAudio ? '听书源' : '视频源'}');
+      } else {
+        _toast('已导入 ${list.length} 个源（${list.first.group}）');
+      }
     } catch (e) {
       _toast('安装失败：$e');
     } finally {

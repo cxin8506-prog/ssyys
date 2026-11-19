@@ -25,8 +25,14 @@ final discoverCategoriesProvider =
         (ref, sourceId) async {
   final source = await ref.read(sourceRepositoryProvider).byId(sourceId);
   if (source == null) return const [];
-  final engine = source.isJar
+  final engine = source.isTingShu
+
+      ? ref.read(tingShuEngineProvider)
+
+      : source.isJar
+
       ? ref.read(jarPluginEngineProvider)
+
       : ref.read(jsPluginEngineProvider);
   try {
     await engine.attach(source);
@@ -387,8 +393,14 @@ class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
       final source = _source ?? await ref.read(sourceRepositoryProvider).byId(widget.sourceId);
       if (source == null) throw Exception('源已删除');
       _source = source;
-      final engine = source.isJar
+      final engine = source.isTingShu
+
+          ? ref.read(tingShuEngineProvider)
+
+          : source.isJar
+
           ? ref.read(jarPluginEngineProvider)
+
           : ref.read(jsPluginEngineProvider);
       await engine.attach(source);
 

@@ -288,8 +288,14 @@ final homeFeedProvider =
   final source = await repo.byId(sourceId);
   if (source == null) throw Exception('源已不存在，请重新导入');
 
-  final engine = source.isJar
+  final engine = source.isTingShu
+
+      ? ref.read(tingShuEngineProvider)
+
+      : source.isJar
+
       ? ref.read(jarPluginEngineProvider)
+
       : ref.read(jsPluginEngineProvider);
   await engine.attach(source);
 

@@ -82,8 +82,14 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
       }
     } catch (_) {}
     try {
-      final engine = s.isJar
+      final engine = s.isTingShu
+
+          ? ref.read(tingShuEngineProvider)
+
+          : s.isJar
+
           ? ref.read(jarPluginEngineProvider)
+
           : ref.read(jsPluginEngineProvider);
       await engine.attach(s);
 
@@ -585,8 +591,14 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     if (s == null) return '';
     if (index < 0 || index >= _chapters.length) return '';
     final ch = _chapters[index];
-    final engine = s.isJar
+    final engine = s.isTingShu
+
+        ? ref.read(tingShuEngineProvider)
+
+        : s.isJar
+
         ? ref.read(jarPluginEngineProvider)
+
         : ref.read(jsPluginEngineProvider);
     await engine.attach(s);
     final r = await engine.invoke('content', params: {

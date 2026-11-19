@@ -21,8 +21,12 @@ class MainActivity : FlutterActivity() {
     private var dexLoader: DexClassLoader? = null
     private var loadedJar: String? = null
 
+    /** 我的听书源调用都是网络请求，统一放后台线程 */
+    private val tingShuExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        TingShuRuntime.init(this)
 
         // 全面屏：内容铺到状态栏/导航栏/刘海下面，由 Flutter 侧 SafeArea 避让。
         // 部分 ROM（MIUI/EMUI）会强制给透明系统栏加对比度遮罩，这里一起关掉。
@@ -78,6 +82,42 @@ class MainActivity : FlutterActivity() {
                     }
                 } catch (t: Throwable) {
                     result.error("JAR_ERROR", t.message ?: t.toString(), null)
+                }
+            }
+
+        // ---------- 我的听书格式 JAR 源：一个包内多个源 ----------
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "suishou/tingshu")
+            .setMethodCallHandler { call, result ->
+                val path = call.argument<String>("path") ?: ""
+                val entryClass = call.argument<String>("entryClass") ?: ""
+                val index = call.argument<Int>("index") ?: 0
+                val sourceMethod = call.argument<String>("method") ?: ""
+                @Suppress("UNCHECKED_CAST")
+                val params = call.argument<Map<String, Any?>>("params") ?: emptyMap()
+                if (path.isEmpty()) {
+                    result.error("TINGSHU_ERROR", "缺少 JAR 路径", null)
+                    return@setMethodCallHandler
+                }
+                tingShuExecutor.execute {
+                    try {
+                        val out = when (call.method) {
+                            "scanSources" -> JSONArray(TingShuRuntime.findEntryClasses(path)).toString()
+                            "listSources" -> {
+                                val arr = JSONArray()
+                                for (m in TingShuRuntime.listSources(path, entryClass)) {
+                                    arr.put(JSONObject(m as Map<*, *>))
+                                }
+                                arr.toString()
+                            }
+                            "callSource" -> TingShuRuntime.call(path, entryClass, index, sourceMethod, params)
+                            else -> throw IllegalArgumentException("未知方法 ${call.method}")
+                        }
+                        runOnUiThread { result.success(out) }
+                    } catch (t: Throwable) {
+                        val cause = t.cause ?: t
+                        val msg = cause.message ?: cause.toString()
+                        runOnUiThread { result.error("TINGSHU_ERROR", msg, null) }
+                    }
                 }
             }
 
