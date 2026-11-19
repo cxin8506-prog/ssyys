@@ -1,119 +1,26 @@
-# 随意听书（local_media_app）
+# 随意听书
 
-一个**本地优先、无需登录、不依赖服务器**的多媒体播放器，目前聚焦**安卓端**，支持**听书**和**视频**两大模块（严格分开）。数据全部保存在本机，可整体备份迁移。
+安卓端听书 / 视频播放器。内容来自导入的插件源（JS/ZIP、JAR），在线流式播放，不下载到本地。
 
-> 详细需求与技术方案见 [`本地多媒体App-技术方案.md`](本地多媒体App-技术方案.md)。
+## 安装
 
-## 已完成功能（第一版）
+到 [Releases](https://github.com/cxin8506-prog/ssyys/releases/latest) 下载 apk，Android 7 及以上。
 
-### 基础
-- Flutter 项目，最低 **安卓 7（API 24）**
-- 深色优先的现代界面、首次使用引导
-- 本地数据目录统一管理（数据库 / 封面 / 缓存 / 日志 / 备份）
-- 日志系统：关键操作与错误落盘，可查看、清空、导出
+## 功能
 
-### 听书
-- 导入本地音频（MP3 / M4A / M4B / FLAC / AAC / WAV 等）
-- 导入音频文件夹、JAR / ZIP 音频包（当压缩包解析）
-- **文件名自然排序**（1、2、10 正确排列）
-- 书架（封面 / 进度 / 状态）、排序筛选、改名、删除（可撤销）、详情
-- 播放：断点续播、倍速（0.75x~3x）、定时关闭（结束前渐弱）、自动下一章
-- 安卓通知栏控制、后台播放（audio_service + just_audio）
-- 听书书签、收藏、历史
+- 首页：当前源推荐、继续收听
+- 发现：按当前源分类浏览
+- 书架：收藏与进度
+- 搜索：可搜全部源，按源分组
+- 播放：倍速、断点续播、后台播放、多线路切换
+- 源登录：内嵌网页登录，登录后自动同步 Cookie
 
-### 视频
-- 导入本地视频、文件夹连续播放
-- 播放控制、倍速、断点续播
-- 手势：左右滑进度、上下滑音量/亮度
-- 画面比例切换、全屏、界面锁定、视频总开关
-- 损坏视频自动跳过并记日志
+## 源格式
 
-### 通用管理
-- 首页"继续听/继续看"快捷入口
-- 收藏 / 历史 / 书签独立管理，听书与视频分开
-- 听书 / 视频各自独立搜索
-- 设置：主题、视频开关、缓存上限、缓存清理
-- 本地 zip 备份 / 恢复
+见 [docs/source-config.md](docs/source-config.md)。
 
-## 第二版新增（v2.0.0）
+## 构建
 
-### 插件/源
-- **源管理**：导入 JS/ZIP 插件（manifest.json + JS）与 JAR 插件（dex 化），支持启用/停用/改名/改类型/删除
-- **JS 引擎**：QuickJS 执行，宿主注入 `host.httpGet/httpJson/httpPost/log/ua/config`，
-  兼容 `java.ajax/java.get/java.post` 别名；方法名自动匹配 `search/detail/chapters/content`
-- **JAR 引擎**：Android `DexClassLoader` 反射调用，支持列类、手填主类
-- **源配置中心**：登录态（Cookie/token）、音色选择、视频线路选择，均落库随备份迁移
-- **源搜索**：首页搜索框 + 顶部源切换；搜索 → 详情 → 目录 → 在线播放
-- **首页源切换**：横向胶囊选择当前源，管理入口直达
-
-### UA
-- 按源自动选择（B 站等 PC-only 源用电脑 UA，其余手机 UA），可整体关闭
-- 手机 / 电脑两套 UA 库，内置 **39 条手机 + 22 条电脑** UA（含微信/QQ/UC/夸克/各大浏览器）
-- 支持搜索过滤、点选即生效、自定义新增/编辑/删除
-
-### 界面
-- **6 套配色**（青玉/海蓝/樱粉/琥珀/紫韵/朱砂）× 跟随系统/浅色/深色，实时预览
-- 全面屏适配：透明状态栏、edge-to-edge、刘海屏延伸，去掉顶部白边
-- 专属图标（耳机 + 声波），含 Android 8+ 自适应图标
-- 底部导航改为悬浮胶囊式四项：首页 / 书架 / 源 / 我的
-- 书架合并为「听书 / 视频」分栏，收藏/历史支持分栏与网格卡片
-
-### 视频
-- 画中画（Android 8.0+，视频页右上角）
-
-### 同步
-- **坚果云 WebDAV**：应用密码登录、测试连接、上传备份、云端列表、下载并恢复
-- 本地 zip 备份/恢复完整实现（含 plugins 目录），恢复后提示重启
-
-## 项目结构
-
-```
-lib/
-├── core/                  # 常量、主题、日志、数据库、工具、DI
-│   ├── database/          # drift 表定义 + 生成的 app_database.g.dart
-│   ├── utils/             # natural_sort.dart（自然排序）、path_utils.dart
-│   └── theme/             # 深色/浅色主题
-├── features/
-│   ├── audio/             # 听书：导入器、仓库、播放服务、书架/播放页
-│   ├── video/             # 视频：书架、播放页
-│   ├── library/           # 收藏/历史/书签
-│   ├── search/ settings/ backup/ onboarding/ presentation/  # 通用页面
-├── shared/widgets/        # 通用组件（封面、空状态等）
-└── plugins/               # 二期插件引擎骨架（不实现业务逻辑）
-```
-
-## 编译与运行
-
-### 环境要求
-- Flutter（本项目在 **Flutter 3.0.0 / Dart 2.17** 上开发与验证）
-- Android SDK（compileSdk 32、build-tools 32.0.0）
-- JDK 11（Flutter 3.0 的 Gradle 7.4 对高版本 JDK 兼容性差，推荐 JDK 11）
-
-### 步骤
 ```bash
-flutter pub get
-# 生成 drift 数据库代码
-dart run build_runner build --delete-conflicting-outputs
-
-# 连接安卓设备/模拟器后运行
-flutter run
-
-# 或打包
-flutter build apk --debug
 flutter build apk --release
 ```
-
-> 说明：`android/local.properties` 指向 Flutter 与 Android SDK 路径。本仓库当前配置为沙箱环境路径，换机器时请按实际情况修改。
-
-### 依赖版本说明
-本项目受限于沙箱中 Flutter 3.0.0 的较老版本，依赖做了精确版本锁定，并用 `dependency_overrides` 处理了 `string_scanner` 冲突。若升级到较新 Flutter，可放宽约束。
-
-## 验证状态
-- `flutter analyze`：**0 个 error**（仅少量 const / lint 提示，不影响运行）
-- `dart run build_runner`：数据库代码生成成功
-- APK 编译：需在你本地 Android Studio / SDK 环境完成（沙箱内 Gradle 发行版下载受限）
-
-## 后续用 AI 迭代的建议
-- 代码按 feature-first 分层；改数据库先改 `core/database/tables.dart` 再重新 codegen
-- 插件相关只改 `lib/plugins/`，第一版不实现业务逻辑
-- 新增功能先写测试（见 `test/`），重点覆盖自然排序、断点续播、损坏文件跳过
