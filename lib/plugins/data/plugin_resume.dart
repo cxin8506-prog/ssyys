@@ -192,7 +192,6 @@ Future<void> openResume(
     final url = extractMediaUrl(raw);
     if (url.isEmpty) throw Exception('源没有返回可播放地址');
     final headers = extractMediaHeaders(raw);
-    if (!context.mounted) return;
     if (r.isAudio) {
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => NetworkAudioPage(
@@ -221,10 +220,8 @@ Future<void> openResume(
       ));
     }
   } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('续播失败：$e')));
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('续播失败：$e')));
   }
 }
 
@@ -256,7 +253,6 @@ Future<void> openMostRecentResume(BuildContext context, WidgetRef ref) async {
       : (local.lastReadAt ?? local.addedAt).millisecondsSinceEpoch;
 
   if (plugin.isEmpty && local == null) {
-    if (!context.mounted) return;
     await Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const EmptyPlayerPage()));
     return;
@@ -273,7 +269,7 @@ Future<void> openLocalItem(
     BuildContext context, WidgetRef ref, domain.MediaItem item) async {
   final chapters =
       await ref.read(libraryRepositoryProvider).chapters(item.id);
-  if (!context.mounted || chapters.isEmpty) return;
+  if (chapters.isEmpty) return;
   final progress =
       await ref.read(libraryRepositoryProvider).getProgress(item.id);
   if (item.isAudio) {

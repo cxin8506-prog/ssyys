@@ -270,7 +270,7 @@ class _MainShellState extends ConsumerState<MainShell> {
             playing: state?.playing ?? false,
             sourceName: source?.name ?? '发现',
             onPlayTap: () => openMostRecentResume(context, ref),
-            onPlayLongPress: () => ListenStats.showDialog(context),
+            onPlayLongPress: () => ListenStats.showStatsDialog(context),
             onTap: (i) => ref.read(shellTabProvider.notifier).state = i,
           );
         },

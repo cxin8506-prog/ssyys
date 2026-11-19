@@ -39,7 +39,7 @@ Drawer buildAppDrawer(BuildContext context) {
           _drawerTile(context, Icons.travel_explore, '源搜索',
               () => Navigator.of(context).pushNamed('/source-search')),
           _drawerTile(context, Icons.bar_chart_outlined, '收听统计',
-              () => ListenStats.showDialog(context)),
+              () => ListenStats.showStatsDialog(context)),
         ],
       ),
     ),

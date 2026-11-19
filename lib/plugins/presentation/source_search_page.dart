@@ -210,7 +210,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
           TextButton(
             onPressed: _toggleType,
             style: TextButton.styleFrom(
-              foregroundColor: Colors.white,
+              primary: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 36),
             ),
@@ -363,7 +363,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     // 正在搜、一个结果都还没回来
     if (_loading && _groups.isEmpty) {
       return const Center(
-        child: Column(
+        child: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircularProgressIndicator(),

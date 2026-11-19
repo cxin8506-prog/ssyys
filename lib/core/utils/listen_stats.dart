@@ -7,6 +7,12 @@ import '../../core/constants/app_constants.dart';
 ///
 /// 今日：按自然日（yyyy-MM-dd）记；一共：累计秒数。
 /// 播放页在播的时候每 5 秒记一次。
+class ListenSummary {
+  final int today;
+  final int total;
+  const ListenSummary(this.today, this.total);
+}
+
 class ListenStats {
   static String _todayKey() {
     final now = DateTime.now();
@@ -31,14 +37,14 @@ class ListenStats {
     await prefs.setInt(AppConstants.keyListenDaySecs, daySecs + seconds);
   }
 
-  static Future<(int, int)> summary() async {
+  static Future<ListenSummary> summary() async {
     final prefs = await SharedPreferences.getInstance();
     final total = prefs.getInt(AppConstants.keyListenTotalSecs) ?? 0;
     final today = _todayKey();
     final savedDay = prefs.getString(AppConstants.keyListenDay) ?? '';
     final daySecs =
         savedDay == today ? (prefs.getInt(AppConstants.keyListenDaySecs) ?? 0) : 0;
-    return (daySecs, total);
+    return ListenSummary(daySecs, total);
   }
 
   static String format(int seconds) {
@@ -49,15 +55,14 @@ class ListenStats {
   }
 
   /// 弹出“今日收听了 X，一共收听了 X”
-  static Future<void> showDialog(BuildContext context) async {
-    final (today, total) = await summary();
-    if (!context.mounted) return;
+  static Future<void> showStatsDialog(BuildContext context) async {
+    final s = await summary();
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('收听统计'),
         content: Text(
-          '今日收听了 ${format(today)}，一共收听了 ${format(total)}',
+          '今日收听了 ${format(s.today)}，一共收听了 ${format(s.total)}',
           style: const TextStyle(fontSize: 15, height: 1.6),
         ),
         actions: [

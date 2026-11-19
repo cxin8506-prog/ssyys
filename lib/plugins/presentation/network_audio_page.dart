@@ -8,11 +8,11 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/di/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/path_utils.dart';
-import '../../audio/data/repository_providers.dart';
+import '../../features/audio/data/repository_providers.dart';
 import '../data/plugin_resume.dart';
 
 /// 网络音频播放页（插件源直接播放 URL）
-class NetworkAudioPage extends StatefulWidget {
+class NetworkAudioPage extends ConsumerStatefulWidget {
   final String url;
 
   /// 播放这个地址要带的请求头（Referer/UA 等），没有就是空

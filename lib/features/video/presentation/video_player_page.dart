@@ -243,7 +243,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
             ? _controller!.value.position
             : _lastPosition);
     final ctrl = widget.network
-        ? VideoPlayerController.networkUrl(Uri.parse(url),
+        ? VideoPlayerController.network(url,
             httpHeaders: widget.headers)
         : VideoPlayerController.file(File(url));
     try {
@@ -579,7 +579,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                     _fallbackLine();
                   },
                   style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
+                      primary: Colors.white,
                       side: const BorderSide(color: Colors.white54)),
                   child: const Text('换线路重试'),
                 ),
@@ -884,7 +884,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         _armHideTimer();
       },
       style: TextButton.styleFrom(
-        foregroundColor: Colors.white,
+        primary: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         minimumSize: const Size(0, 36),
       ),
