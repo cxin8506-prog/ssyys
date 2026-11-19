@@ -1,0 +1,57 @@
+name: local_media_app
+description: 本地优先的多媒体阅读/播放器（听书 + 视频）
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.17.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: 1.0.5
+
+  # 状态管理 & 路由（锁定兼容 Flutter 3.0.0 / Dart 2.17）
+  flutter_riverpod: 2.1.0
+  go_router: 4.5.1
+
+  # 数据库
+  drift: 2.4.0
+  sqlite3_flutter_libs: 0.5.15
+  path_provider: 2.0.11
+
+  # 音频（听书）
+  just_audio: 0.9.32
+  audio_service: 0.18.0
+  audio_session: 0.1.13
+
+  # 视频
+  video_player: 2.4.5
+
+  # 文件 & 压缩包
+  file_picker: 4.6.0
+  archive: 3.3.0
+  permission_handler: 10.2.0
+
+  # 设置 & 工具
+  shared_preferences: 2.0.17
+  logging: 1.0.2
+  intl: 0.17.0
+  uuid: 3.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 2.0.0
+  drift_dev: 2.4.0
+  build_runner: 2.3.3
+
+# Flutter 3.0.0 的 flutter_test 把 string_scanner 锁在 1.1.0，
+# 而 drift_dev 需要 ^1.1.1。仅需覆盖这一个包即可解决冲突，
+# 其余传递依赖保持 flutter_test 自带版本（均满足 drift/analyzer 的宽泛约束），
+# 且语言版本都 <= 2.17，可被当前 SDK 编译。
+dependency_overrides:
+  string_scanner: 1.1.1
+
+flutter:
+  uses-material-design: true
