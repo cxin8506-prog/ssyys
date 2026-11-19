@@ -7,102 +7,243 @@ import '../../core/utils/path_utils.dart';
 import '../../shared/widgets/common.dart';
 import '../audio/data/repository_providers.dart';
 import '../audio/domain/media_item.dart';
+import '../audio/presentation/audio_player_page.dart';
+import '../video/presentation/video_player_page.dart';
 
-/// 收藏 / 历史 / 书签 页面集合。听书与视频用 type 严格分开。
+/// 收藏 / 历史 通用页面：听书与视频分栏，网格卡片
 enum CollectionKind { favorite, history, bookmark }
 
 class CollectionPage extends ConsumerStatefulWidget {
   final CollectionKind kind;
-  final String type; // audio | video
-  const CollectionPage({super.key, required this.kind, required this.type});
+  final String initialType;
+
+  const CollectionPage({
+    super.key,
+    required this.kind,
+    this.initialType = AppConstants.typeAudio,
+  });
 
   @override
   ConsumerState<CollectionPage> createState() => _CollectionPageState();
 }
 
-class _CollectionPageState extends ConsumerState<CollectionPage> {
+class _CollectionPageState extends ConsumerState<CollectionPage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabs;
+  late String _type;
+
+  @override
+  void initState() {
+    super.initState();
+    _type = widget.initialType;
+    _tabs = TabController(
+        length: 2,
+        vsync: this,
+        initialIndex: _type == AppConstants.typeVideo ? 1 : 0);
+    _tabs.addListener(() {
+      if (!_tabs.indexIsChanging) {
+        setState(() {
+          _type = _tabs.index == 0
+              ? AppConstants.typeAudio
+              : AppConstants.typeVideo;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final repo = ref.read(libraryRepositoryProvider);
-    final future = widget.kind == CollectionKind.favorite
-        ? repo.favorites(widget.type)
-        : repo.history(widget.type);
-    final title = _title();
-
+    final primary = Theme.of(context).colorScheme.primary;
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Text(_title),
+        bottom: TabBar(
+          controller: _tabs,
+          indicatorColor: primary,
+          indicatorSize: TabBarIndicatorSize.label,
+          labelColor: primary,
+          unselectedLabelColor: context.subtleColor,
+          tabs: const [Tab(text: '听书'), Tab(text: '视频')],
+        ),
+      ),
       body: FutureBuilder<List<MediaItem>>(
-        future: future,
+        future: _load(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(
-                child: CircularProgressIndicator(color: AppTheme.primary));
+            return const Center(child: CircularProgressIndicator());
           }
           final items = snap.data ?? [];
           if (items.isEmpty) {
-            return EmptyState(icon: _icon(), message: '暂无$title记录');
+            return EmptyState(
+              icon: _icon,
+              message: '还没有${widget.kind == CollectionKind.favorite ? '收藏' : '记录'}',
+              hint: _type == AppConstants.typeAudio
+                  ? '在听书页长按条目，或播放页点收藏'
+                  : '在视频页长按条目即可加入',
+            );
           }
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
+          return GridView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
             itemCount: items.length,
-            itemBuilder: (context, i) => _buildTile(items[i]),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 18,
+              childAspectRatio: 0.62,
+            ),
+            itemBuilder: (_, i) => _card(items[i]),
           );
         },
       ),
     );
   }
 
-  String _title() {
-    String base;
-    switch (widget.kind) {
-      case CollectionKind.favorite:
-        base = '收藏';
-        break;
-      case CollectionKind.history:
-        base = '历史';
-        break;
-      case CollectionKind.bookmark:
-        base = '书签';
-        break;
+  Future<List<MediaItem>> _load() {
+    final repo = ref.read(libraryRepositoryProvider);
+    if (widget.kind == CollectionKind.favorite) {
+      return repo.favorites(_type);
     }
-    return '$base · ${widget.type == AppConstants.typeAudio ? '听书' : '视频'}';
+    return repo.history(_type);
   }
 
-  IconData _icon() {
-    switch (widget.kind) {
-      case CollectionKind.favorite:
-        return Icons.favorite_border;
-      case CollectionKind.history:
-        return Icons.history;
-      case CollectionKind.bookmark:
-        return Icons.bookmark_border;
-    }
+  String get _title =>
+      widget.kind == CollectionKind.favorite ? '收藏' : '历史';
+
+  IconData get _icon => widget.kind == CollectionKind.favorite
+      ? Icons.favorite_border
+      : Icons.history;
+
+  Widget _card(MediaItem item) {
+    final p = item.progress > 1 ? item.progress / 100 : item.progress;
+    return GestureDetector(
+      onTap: () async {
+        final chapters =
+            await ref.read(libraryRepositoryProvider).chapters(item.id);
+        if (chapters.isEmpty) return;
+        if (item.isAudio) {
+          Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => AudioPlayerPage(item: item)));
+        } else {
+          final paths = chapters.map((c) => c.path!).toList();
+          Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => VideoPlayerPage(
+                  path: paths.first, playlist: paths, title: item.title)));
+        }
+      },
+      onLongPress: () => _menu(item),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (ctx, c) => CoverImage(
+                        path: item.coverPath,
+                        title: item.title,
+                        size: c.maxWidth,
+                        isVideo: item.isVideo),
+                  ),
+                ),
+                if (p > 0)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(8)),
+                      child: LinearProgressIndicator(
+                        value: p,
+                        minHeight: 4,
+                        color: Theme.of(context).colorScheme.primary,
+                        backgroundColor: Colors.black38,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
+          Text(
+            widget.kind == CollectionKind.favorite
+                ? '${item.chapterCount} 章'
+                : '${item.statusLabel} · ${item.chapterCount} 章',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontSize: 11),
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildTile(MediaItem item) {
-    return Card(
-      color: AppTheme.darkSurface,
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CoverImage(
-            path: item.coverPath,
-            title: item.title,
-            size: 44,
-            isVideo: item.isVideo),
-        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-            '${item.chapterCount} 章 · ${PathUtils.formatSize(item.sizeBytes)}'),
-        trailing: widget.kind == CollectionKind.favorite
-            ? IconButton(
-                icon: const Icon(Icons.favorite, color: AppTheme.primary),
-                onPressed: () async {
-                  await ref
-                      .read(libraryRepositoryProvider)
-                      .removeFavorite(item.id);
-                  setState(() {});
-                },
-              )
-            : null,
+  void _menu(MediaItem item) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
+                  ),
+                  Text(PathUtils.formatSize(item.sizeBytes),
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('查看路径'),
+              subtitle: Text(item.path,
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            ListTile(
+              leading: Icon(Icons.favorite_border,
+                  color: Theme.of(context).colorScheme.primary),
+              title: Text(widget.kind == CollectionKind.favorite
+                  ? '取消收藏'
+                  : '加入收藏'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final repo = ref.read(libraryRepositoryProvider);
+                if (widget.kind == CollectionKind.favorite) {
+                  await repo.removeFavorite(item.id);
+                } else {
+                  await repo.addFavorite(item.id, item.type);
+                }
+                setState(() {});
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -114,29 +255,72 @@ class BookmarkListPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final db = ref.read(libraryRepositoryProvider);
+    final repo = ref.read(libraryRepositoryProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('书签')),
       body: FutureBuilder<List<dynamic>>(
-        future: db.bookmarks('').then((v) => v.cast<dynamic>()),
+        future: repo.bookmarks('').then((v) => v.cast<dynamic>()),
         builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final rows = snap.data ?? [];
           if (rows.isEmpty) {
             return const EmptyState(
-                icon: Icons.bookmark_border, message: '暂无书签');
+                icon: Icons.bookmark_border,
+                message: '还没有书签',
+                hint: '播放时点书签按钮，会在当前位置留一个标记');
           }
-          return ListView.builder(
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
             itemCount: rows.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, i) {
               final b = rows[i];
-              return ListTile(
-                leading: const Icon(Icons.bookmark, color: AppTheme.primary),
-                title:
-                    Text('位置 ${PathUtils.formatDuration(b.positionMs as int)}'),
-                subtitle: Text(b.note as String? ?? '书签'),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () {},
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: context.cardColor,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: context.palette.outline),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: context.palette.primarySoft,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.bookmark,
+                          size: 17,
+                          color: Theme.of(context).colorScheme.primary),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                              PathUtils.formatDuration(
+                                  (b.positionMs as int?) ?? 0),
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 2),
+                          Text((b.note as String?) ?? '书签',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               );
             },

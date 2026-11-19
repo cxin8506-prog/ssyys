@@ -11,14 +11,18 @@ import 'core/log/app_logger.dart';
 import 'core/theme/app_theme.dart';
 import 'features/audio/data/audio_handler.dart';
 import 'features/audio/presentation/audio_library_page.dart';
-import 'features/audio/presentation/import_picker_page.dart';
 import 'features/backup/backup_page.dart';
 import 'features/backup/log_page.dart';
 import 'features/library/collection_pages.dart';
+import 'features/library/library_page.dart';
 import 'features/onboarding/onboarding_page.dart';
 import 'features/presentation/home_page.dart';
 import 'features/search/search_page.dart';
 import 'features/settings/settings_page.dart';
+import 'features/settings/theme_picker_page.dart';
+import 'features/sync/sync_page.dart';
+import 'plugins/presentation/source_center_page.dart';
+import 'plugins/presentation/source_search_page.dart';
 import 'features/ua/presentation/ua_settings_page.dart';
 import 'features/video/presentation/video_library_page.dart';
 
@@ -54,6 +58,9 @@ Future<void> main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
+  // 全面屏：内容延伸到状态栏/导航栏下方，由各页面自己避让
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
   final onboardDone = prefs.getBool(AppConstants.keyOnboardDone) ?? false;
 
   runApp(ProviderScope(
@@ -72,22 +79,35 @@ class MyApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
-    return MaterialApp(
-      title: AppConstants.appName,
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
-      themeMode: resolveThemeMode(themeMode),
-      home: onboardDone ? const MainShell() : const OnboardingPage(),
-      onGenerateRoute: _onGenerateRoute,
+    final themeColor = ref.watch(themeColorProvider);
+    final systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+        Brightness.dark;
+    final isDark = themeMode == 2 || (themeMode == 0 && systemDark);
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarDividerColor: Colors.transparent,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        systemNavigationBarIconBrightness:
+            isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+      ),
+      child: MaterialApp(
+        title: AppConstants.appName,
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light(themeColor),
+        darkTheme: AppTheme.dark(themeColor),
+        themeMode: resolveThemeMode(themeMode),
+        home: onboardDone ? const MainShell() : const OnboardingPage(),
+        onGenerateRoute: _onGenerateRoute,
+      ),
     );
   }
 
   Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
-      case '/import-picker':
-        return MaterialPageRoute(
-            builder: (_) => const ImportPickerPage(), settings: settings);
       case '/audio-search':
         return MaterialPageRoute(
             builder: (_) => const SearchPage(type: AppConstants.typeAudio),
@@ -105,25 +125,53 @@ class MyApp extends ConsumerWidget {
       case '/ua-settings':
         return MaterialPageRoute(
             builder: (_) => const UaSettingsPage(), settings: settings);
+      case '/theme':
+        return MaterialPageRoute(
+            builder: (_) => const ThemePickerPage(), settings: settings);
+      case '/sources':
+        return MaterialPageRoute(
+            builder: (_) => const SourceCenterPage(), settings: settings);
+      case '/sync':
+        return MaterialPageRoute(
+            builder: (_) => const SyncPage(), settings: settings);
+      case '/source-search':
+        return MaterialPageRoute(
+            builder: (_) => const SourceSearchPage(
+                type: AppConstants.typeAudio),
+            settings: settings);
+      case '/source-search-video':
+        return MaterialPageRoute(
+            builder: (_) => const SourceSearchPage(
+                type: AppConstants.typeVideo),
+            settings: settings);
       case '/favorite-audio':
         return MaterialPageRoute(
             builder: (_) => const CollectionPage(
-                kind: CollectionKind.favorite, type: AppConstants.typeAudio),
+                kind: CollectionKind.favorite, initialType: AppConstants.typeAudio),
             settings: settings);
       case '/favorite-video':
         return MaterialPageRoute(
             builder: (_) => const CollectionPage(
-                kind: CollectionKind.favorite, type: AppConstants.typeVideo),
+                kind: CollectionKind.favorite, initialType: AppConstants.typeVideo),
             settings: settings);
       case '/history-audio':
         return MaterialPageRoute(
             builder: (_) => const CollectionPage(
-                kind: CollectionKind.history, type: AppConstants.typeAudio),
+                kind: CollectionKind.history, initialType: AppConstants.typeAudio),
             settings: settings);
       case '/history-video':
         return MaterialPageRoute(
             builder: (_) => const CollectionPage(
-                kind: CollectionKind.history, type: AppConstants.typeVideo),
+                kind: CollectionKind.history, initialType: AppConstants.typeVideo),
+            settings: settings);
+      case '/favorites':
+        return MaterialPageRoute(
+            builder: (_) => const CollectionPage(
+                kind: CollectionKind.favorite),
+            settings: settings);
+      case '/history':
+        return MaterialPageRoute(
+            builder: (_) => const CollectionPage(kind: CollectionKind.history),
             settings: settings);
       case '/bookmarks':
         return MaterialPageRoute(
@@ -133,7 +181,7 @@ class MyApp extends ConsumerWidget {
   }
 }
 
-/// 主壳：底部导航
+/// 主壳：底部导航（首页 / 书架 / 源 / 我的）
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
 
@@ -146,38 +194,100 @@ class _MainShellState extends ConsumerState<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    final videoEnabled = ref.watch(videoEnabledProvider);
     final pages = <Widget>[
       const HomePage(),
-      const AudioLibraryPage(),
-      if (videoEnabled) const VideoLibraryPage(),
-      const LibraryHubPage(),
+      const LibraryPage(),
+      const SourceCenterPage(),
       const SettingsPage(),
     ];
-    final items = <BottomNavigationBarItem>[
-      const BottomNavigationBarItem(
-          icon: Icon(Icons.home_outlined), label: '首页'),
-      const BottomNavigationBarItem(
-          icon: Icon(Icons.headphones_outlined), label: '听书'),
-      if (videoEnabled)
-        const BottomNavigationBarItem(
-            icon: Icon(Icons.movie_outlined), label: '视频'),
-      const BottomNavigationBarItem(
-          icon: Icon(Icons.library_books_outlined), label: '管理'),
-      const BottomNavigationBarItem(
-          icon: Icon(Icons.settings_outlined), label: '设置'),
-    ];
-
     if (_index >= pages.length) _index = 0;
-
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
+      bottomNavigationBar: _AppBottomBar(
+        index: _index,
         onTap: (i) => setState(() => _index = i),
-        items: items,
-        selectedFontSize: 12,
-        unselectedFontSize: 11,
+      ),
+    );
+  }
+}
+
+/// 悬浮式底部导航：选中项有主色胶囊底
+class _AppBottomBar extends StatelessWidget {
+  final int index;
+  final ValueChanged<int> onTap;
+
+  const _AppBottomBar({required this.index, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final items = <Map<String, dynamic>>[
+      {'label': '首页', 'icon': Icons.home_outlined, 'active': Icons.home},
+      {'label': '书架', 'icon': Icons.menu_book_outlined, 'active': Icons.menu_book},
+      {'label': '源', 'icon': Icons.extension_outlined, 'active': Icons.extension},
+      {'label': '我的', 'icon': Icons.person_outline, 'active': Icons.person},
+    ];
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: context.palette.outline),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.18),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: List.generate(items.length, (i) {
+            final selected = i == index;
+            final it = items[i];
+            return Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => onTap(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  padding: const EdgeInsets.symmetric(vertical: 7),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? context.palette.primarySoft
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        (selected ? it['active'] : it['icon']) as IconData,
+                        size: 21,
+                        color: selected ? primary : context.subtleColor,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        it['label'] as String,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.w400,
+                          color: selected ? primary : context.subtleColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
       ),
     );
   }
@@ -229,9 +339,9 @@ class LibraryHubPage extends StatelessWidget {
   Widget _tile(
           BuildContext context, IconData icon, String title, String route) =>
       Card(
-        color: AppTheme.darkSurface,
+        color: Theme.of(context).cardColor,
         child: ListTile(
-          leading: Icon(icon, color: AppTheme.primary),
+          leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
           title: Text(title),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.of(context).pushNamed(route),

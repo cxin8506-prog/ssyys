@@ -11,7 +11,9 @@ import 'video_player_page.dart';
 
 /// 视频书架页
 class VideoLibraryPage extends ConsumerStatefulWidget {
-  const VideoLibraryPage({super.key});
+  /// 作为「书架」Tab 内嵌时隐藏自己的 AppBar
+  final bool embedded;
+  const VideoLibraryPage({super.key, this.embedded = false});
 
   @override
   ConsumerState<VideoLibraryPage> createState() => _VideoLibraryPageState();
@@ -27,7 +29,7 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
     final future = repo.query(type: AppConstants.typeVideo, sortBy: _sortBy);
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: widget.embedded ? null : AppBar(
         title: const Text('视频'),
         actions: [
           PopupMenuButton<String>(
@@ -45,7 +47,7 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _import,
-        backgroundColor: AppTheme.primary,
+        backgroundColor: Theme.of(context).colorScheme.primary,
         child: const Icon(Icons.add, color: Colors.black87),
       ),
       body: Stack(
@@ -54,17 +56,17 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
             future: future,
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary));
+                return Center(
+                    child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary));
               }
               final items = snap.data ?? [];
               if (items.isEmpty) {
                 return EmptyState(
                   icon: Icons.movie_outlined,
                   message: '还没有视频',
-                  hint: '点右下角 + 导入本地视频文件或文件夹',
+                  hint: '点右下角 + 在视频源里搜索，在线播放',
                   onAction: _import,
-                  actionLabel: '导入',
+                  actionLabel: '找视频',
                 );
               }
               return GridView.builder(
@@ -105,7 +107,7 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
         }
       },
       child: Card(
-        color: AppTheme.darkSurface,
+        color: Theme.of(context).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -139,7 +141,8 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
   }
 
   Future<void> _import() async {
-    final result = await Navigator.of(context).pushNamed('/import-picker');
-    if (result != null && mounted) setState(() {});
+    // 只从插件源在线获取内容
+    await Navigator.of(context).pushNamed('/source-search-video');
+    if (mounted) setState(() {});
   }
 }

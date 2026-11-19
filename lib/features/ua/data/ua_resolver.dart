@@ -26,12 +26,8 @@ class UaResolver {
     final isPcOnly = UaConstants.pcOnlyKeywords
         .any((k) => lower.contains(k.toLowerCase()));
 
-    if (isPcOnly) {
-      final list = await _repo.desktopUas();
-      return list.isNotEmpty ? list.first : null;
-    }
-    final list = await _repo.mobileUas();
-    return list.isNotEmpty ? list.first : null;
+    if (isPcOnly) return _repo.desktopCurrent();
+    return _repo.mobileCurrent();
   }
 
   /// 该源是否为"只认电脑 UA"的源（供 UI 展示/调试）

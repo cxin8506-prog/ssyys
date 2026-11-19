@@ -66,7 +66,7 @@ class _LogPageState extends ConsumerState<LogPage> {
                   ? Colors.redAccent
                   : r.level == 'warning'
                       ? Colors.orange
-                      : AppTheme.darkTextSub;
+                      : context.subtleColor;
               return ListTile(
                 leading: Icon(Icons.circle, size: 10, color: color),
                 title: Text(r.message, style: TextStyle(color: color)),

@@ -12,14 +12,13 @@ class OnboardingPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      backgroundColor: AppTheme.darkBg,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.headphones, color: AppTheme.primary, size: 96),
+              Icon(Icons.headphones, color: Theme.of(context).colorScheme.primary, size: 96),
               const SizedBox(height: 24),
               Text('随意听书', style: Theme.of(context).textTheme.headlineLarge),
               const SizedBox(height: 12),
@@ -63,7 +62,7 @@ class OnboardingPage extends ConsumerWidget {
           BuildContext context, IconData icon, String title, String subtitle) =>
       Row(
         children: [
-          Icon(icon, color: AppTheme.primary, size: 28),
+          Icon(icon, color: Theme.of(context).colorScheme.primary, size: 28),
           const SizedBox(width: 16),
           Expanded(
             child: Column(

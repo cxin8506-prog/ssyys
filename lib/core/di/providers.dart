@@ -33,6 +33,12 @@ final videoEnabledProvider = StateProvider<bool>((ref) {
       AppConstants.defaultVideoEnabled;
 });
 
+/// 主题配色（0=青玉 1=海蓝 2=樱粉 3=琥珀 4=紫韵 5=朱砂）
+final themeColorProvider = StateProvider<int>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getInt(AppConstants.keyThemeColor) ?? 0;
+});
+
 /// 缓存上限（MB）
 final cacheLimitProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);

@@ -11,7 +11,9 @@ import 'audio_player_page.dart';
 
 /// 听书书架页
 class AudioLibraryPage extends ConsumerStatefulWidget {
-  const AudioLibraryPage({super.key});
+  /// 作为「书架」Tab 内嵌时隐藏自己的 AppBar
+  final bool embedded;
+  const AudioLibraryPage({super.key, this.embedded = false});
 
   @override
   ConsumerState<AudioLibraryPage> createState() => _AudioLibraryPageState();
@@ -32,7 +34,7 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
     );
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: widget.embedded ? null : AppBar(
         title: const Text('听书'),
         actions: [
           PopupMenuButton<String>(
@@ -56,7 +58,7 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _import,
-        backgroundColor: AppTheme.primary,
+        backgroundColor: Theme.of(context).colorScheme.primary,
         child: const Icon(Icons.add, color: Colors.black87),
       ),
       body: Stack(
@@ -65,17 +67,17 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
             future: future,
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(
-                    child: CircularProgressIndicator(color: AppTheme.primary));
+                return Center(
+                    child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary));
               }
               final items = snap.data ?? [];
               if (items.isEmpty) {
                 return EmptyState(
                   icon: Icons.headphones_outlined,
                   message: '书架还是空的',
-                  hint: '点右下角 + 导入音频文件、文件夹或 JAR/ZIP 音频包',
+                  hint: '点右下角 + 在源里搜书，在线收听',
                   onAction: _import,
-                  actionLabel: '导入',
+                  actionLabel: '找书',
                 );
               }
               return Column(
@@ -86,7 +88,7 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
               );
             },
           ),
-          if (_loading) const LoadingOverlay(message: '正在导入...'),
+          if (_loading) const LoadingOverlay(message: '处理中...'),
         ],
       ),
     );
@@ -115,7 +117,7 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
       child: ChoiceChip(
         label: Text(label),
         selected: selected,
-        selectedColor: AppTheme.primary.withOpacity(0.25),
+        selectedColor: Theme.of(context).colorScheme.primary.withOpacity(0.25),
         onSelected: (_) => setState(() => _filter = value),
       ),
     );
@@ -160,7 +162,7 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
                       value: item.progress > 1
                           ? item.progress / 100
                           : item.progress,
-                      color: AppTheme.primary,
+                      color: Theme.of(context).colorScheme.primary,
                       backgroundColor: Colors.black38,
                     ),
                   ),
@@ -259,8 +261,8 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
   }
 
   Future<void> _import() async {
-    // 通过文件选择器导入（file_picker），支持文件与文件夹
-    final result = await Navigator.of(context).pushNamed('/import-picker');
-    if (result != null && mounted) setState(() {});
+    // 只从插件源在线获取内容
+    await Navigator.of(context).pushNamed('/source-search');
+    if (mounted) setState(() {});
   }
 }

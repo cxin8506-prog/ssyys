@@ -99,8 +99,8 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
         ],
       ),
       body: !_ready
-          ? const Center(
-              child: CircularProgressIndicator(color: AppTheme.primary))
+          ? Center(
+              child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary))
           : Column(
               children: [
                 const SizedBox(height: 20),
@@ -144,7 +144,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
                 onPressed: () => audioHandler.skipToPrevious()),
             CircleAvatar(
               radius: 32,
-              backgroundColor: AppTheme.primary,
+              backgroundColor: Theme.of(context).colorScheme.primary,
               child: IconButton(
                 icon: Icon(playing ? Icons.pause : Icons.play_arrow,
                     color: Colors.black87),
@@ -195,16 +195,16 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
       child: InkWell(
         onTap: () => Navigator.of(context).pushNamed('/ua-settings'),
         child: Row(
-          children: const [
-            Icon(Icons.info_outline, size: 14, color: AppTheme.darkTextSub),
+          children: [
+            Icon(Icons.info_outline, size: 14, color: context.subtleColor),
             SizedBox(width: 6),
             Expanded(
               child: Text('部分章节加载失败？若是网络源，可修改 UA 后重试',
                   style: TextStyle(
-                      fontSize: 11, color: AppTheme.darkTextSub)),
+                      fontSize: 11, color: context.subtleColor)),
             ),
             Text('UA 设置',
-                style: TextStyle(fontSize: 11, color: AppTheme.primary)),
+                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary)),
           ],
         ),
       ),
@@ -224,14 +224,14 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
             return ListTile(
               leading: CircleAvatar(
                 backgroundColor:
-                    selected ? AppTheme.primary : AppTheme.darkSurfaceAlt,
+                    selected ? Theme.of(context).colorScheme.primary : context.palette.surfaceAlt,
                 child: Text('${i + 1}',
                     style: TextStyle(
                         color:
-                            selected ? Colors.black87 : AppTheme.darkTextSub)),
+                            selected ? Colors.black87 : context.subtleColor)),
               ),
               title: Text(c.title,
-                  style: TextStyle(color: selected ? AppTheme.primary : null)),
+                  style: TextStyle(color: selected ? Theme.of(context).colorScheme.primary : null)),
               subtitle: c.isCorrupted
                   ? const Text('损坏，已跳过',
                       style: TextStyle(color: Colors.redAccent))

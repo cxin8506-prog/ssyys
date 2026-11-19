@@ -22,19 +22,47 @@ class UaRepository {
   Future<void> setAutoSelect(bool enabled) =>
       _db.writeSetting(UaConstants.keyAutoSelect, enabled ? '1' : '0');
 
-  /// 手机 UA 列表：未配置时返回内置库
+  /// 「我的 UA」列表（仅用户自定义/手动添加的，未配置时为空）
   Future<List<String>> mobileUas() =>
-      _readList(UaConstants.keyMobileList, UaConstants.builtinMobileUas);
+      _readList(UaConstants.keyMobileList, const []);
 
   Future<void> setMobileUas(List<String> list) =>
       _writeList(UaConstants.keyMobileList, list);
 
-  /// 电脑 UA 列表：未配置时返回内置库
+  /// 「我的 UA」列表（仅用户自定义/手动添加的，未配置时为空）
   Future<List<String>> desktopUas() =>
-      _readList(UaConstants.keyDesktopList, UaConstants.builtinDesktopUas);
+      _readList(UaConstants.keyDesktopList, const []);
 
   Future<void> setDesktopUas(List<String> list) =>
       _writeList(UaConstants.keyDesktopList, list);
+
+  /// 当前生效的手机 UA（未显式选择时取列表第一项）
+  Future<String?> mobileCurrent() async {
+    final v = await _db.readSetting(UaConstants.keyMobileCurrent);
+    if (v != null && v.trim().isNotEmpty) return v;
+    final list = await mobileUas();
+    if (list.isNotEmpty) return list.first;
+    return UaConstants.builtinMobileUas.isEmpty
+        ? null
+        : UaConstants.builtinMobileUas.first;
+  }
+
+  Future<void> setMobileCurrent(String ua) =>
+      _db.writeSetting(UaConstants.keyMobileCurrent, ua);
+
+  /// 当前生效的电脑 UA
+  Future<String?> desktopCurrent() async {
+    final v = await _db.readSetting(UaConstants.keyDesktopCurrent);
+    if (v != null && v.trim().isNotEmpty) return v;
+    final list = await desktopUas();
+    if (list.isNotEmpty) return list.first;
+    return UaConstants.builtinDesktopUas.isEmpty
+        ? null
+        : UaConstants.builtinDesktopUas.first;
+  }
+
+  Future<void> setDesktopCurrent(String ua) =>
+      _db.writeSetting(UaConstants.keyDesktopCurrent, ua);
 
   Future<List<String>> _readList(String key, List<String> fallback) async {
     final raw = await _db.readSetting(key);

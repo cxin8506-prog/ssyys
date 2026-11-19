@@ -3,7 +3,7 @@ class AppConstants {
   AppConstants._();
 
   static const String appName = '随意听书';
-  static const String version = '1.0.0';
+  static const String version = '2.0.0';
 
   /// 应用包名，用于拼接私有数据目录
   static const String packageName = 'com.localreader.local_media_app';
@@ -31,12 +31,21 @@ class AppConstants {
 
   // ---------- 设置项 key ----------
   static const String keyThemeMode = 'theme_mode';
+  static const String keyThemeColor = 'theme_color';
   static const String keyVideoEnabled = 'video_enabled';
   static const String keyCacheLimitMb = 'cache_limit_mb';
   static const String keyPlaybackSpeed = 'playback_speed';
   static const String keySleepTimerMin = 'sleep_timer_min';
   static const String keyOnboardDone = 'onboard_done';
   static const String keyNaturalSort = 'natural_sort';
+  static const String keyCurrentSourceAudio = 'current_source_audio';
+  static const String keyCurrentSourceVideo = 'current_source_video';
+
+  // ---------- 坚果云（WebDAV）----------
+  static const String keySyncUrl = 'sync_url';
+  static const String keySyncUser = 'sync_user';
+  static const String keySyncPass = 'sync_pass';
+  static const String defaultSyncUrl = 'https://dav.jianguoyun.com/dav/';
 
   // ---------- 默认值 ----------
   static const int defaultCacheLimitMb = 512;

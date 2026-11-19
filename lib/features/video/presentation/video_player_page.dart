@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/log/app_logger.dart';
+import '../../../core/platform/pip_service.dart';
 import '../../../core/theme/app_theme.dart';
 
 enum ScreenFit { fit, fill, original }
@@ -17,12 +18,16 @@ class VideoPlayerPage extends ConsumerStatefulWidget {
   final int initialIndex;
   final String title;
 
+  /// true 表示 path/playlist 是网络地址（插件源在线播放）
+  final bool network;
+
   const VideoPlayerPage({
     super.key,
     required this.path,
     this.playlist = const [],
     this.initialIndex = 0,
     required this.title,
+    this.network = false,
   });
 
   @override
@@ -38,18 +43,24 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   double _speed = 1.0;
   double _brightness = 1.0;
   double _volume = 1.0;
+  bool _pipAvailable = false;
 
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
     _initController();
+    PipService.isAvailable().then((v) {
+      if (mounted && v) setState(() => _pipAvailable = v);
+    });
   }
 
   Future<void> _initController() async {
     final paths = widget.playlist.isNotEmpty ? widget.playlist : [widget.path];
     final safeIndex = _index.clamp(0, paths.length - 1);
-    final ctrl = VideoPlayerController.file(File(paths[safeIndex]));
+    final ctrl = widget.network
+        ? VideoPlayerController.network(paths[safeIndex])
+        : VideoPlayerController.file(File(paths[safeIndex]));
     try {
       await ctrl.initialize();
       await ctrl.setPlaybackSpeed(_speed);
@@ -123,13 +134,32 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
             _buildVideoSurface(),
             if (!_locked && _showControls) _buildControls(),
             Positioned(
-              top: 16,
-              right: 16,
-              child: IconButton(
-                icon: Icon(_locked ? Icons.lock : Icons.lock_open),
-                color: Colors.white,
-                onPressed: () => setState(() => _locked = !_locked),
-                tooltip: _locked ? '解锁界面' : '锁定界面防误触',
+              top: 12,
+              right: 12,
+              child: Column(
+                children: [
+                  if (_pipAvailable && !_locked)
+                    IconButton(
+                      icon: const Icon(Icons.picture_in_picture_alt),
+                      color: Colors.white,
+                      tooltip: '画中画',
+                      onPressed: () async {
+                        final ok = await PipService.enter();
+                        if (!ok && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('当前设备不支持画中画')),
+                          );
+                        }
+                      },
+                    ),
+                  IconButton(
+                    icon: Icon(_locked ? Icons.lock : Icons.lock_open),
+                    color: Colors.white,
+                    onPressed: () => setState(() => _locked = !_locked),
+                    tooltip: _locked ? '解锁界面' : '锁定界面防误触',
+                  ),
+                ],
               ),
             ),
           ],
@@ -141,8 +171,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   Widget _buildVideoSurface() {
     final c = _controller;
     if (c == null || !c.value.isInitialized) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppTheme.primary));
+      return Center(
+          child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary));
     }
     return GestureDetector(
       onTap: () => setState(() => _showControls = !_showControls),
@@ -185,8 +215,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
             const SizedBox(height: 8),
             VideoProgressIndicator(c!,
                 allowScrubbing: true,
-                colors: const VideoProgressColors(
-                    playedColor: AppTheme.primary,
+                colors: VideoProgressColors(
+                    playedColor: Theme.of(context).colorScheme.primary,
                     bufferedColor: Colors.white38,
                     backgroundColor: Colors.white12)),
             Row(
@@ -235,7 +265,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         child: ChoiceChip(
           label: Text('${s}x', style: const TextStyle(fontSize: 11)),
           selected: (_speed - s).abs() < 0.01,
-          selectedColor: AppTheme.primary.withOpacity(0.3),
+          selectedColor: Theme.of(context).colorScheme.primary.withOpacity(0.3),
           onSelected: (_) {
             setState(() => _speed = s);
             _controller?.setPlaybackSpeed(s);
