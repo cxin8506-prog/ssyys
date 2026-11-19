@@ -32,6 +32,8 @@ class AppConstants {
   // ---------- 设置项 key ----------
   static const String keyThemeMode = 'theme_mode';
   static const String keyThemeColor = 'theme_color';
+  static const String keyFollowSystemDark = 'follow_system_dark';
+  static const String keyPlayerTint = 'player_tint';
   static const String keyVideoEnabled = 'video_enabled';
   static const String keyCacheLimitMb = 'cache_limit_mb';
   static const String keyPlaybackSpeed = 'playback_speed';
@@ -41,6 +43,54 @@ class AppConstants {
   static const String keyCurrentSourceAudio = 'current_source_audio';
   static const String keyCurrentSourceVideo = 'current_source_video';
   static const String keyHomeSourceId = 'home_source_id';
+
+  // ---------- 搜索设置 ----------
+  static const String keyAggregateSearch = 'aggregate_search';
+  static const String keyExactSearch = 'exact_search';
+
+  // ---------- 自动缓存 ----------
+  static const String keyAutoCache = 'auto_cache';
+  static const String keyAutoCacheCount = 'auto_cache_count';
+  static const String keyAutoCacheWifiOnly = 'auto_cache_wifi_only';
+
+  // ---------- 播放设置 ----------
+  static const String keyAutoNext = 'auto_next';
+  static const String keyLockScreenShow = 'lockscreen_show';
+  static const String keyHeadsetPause = 'headset_pause';
+  static const String keySleepTimerDefault = 'sleep_timer_default';
+  static const String keyResumeEnabled = 'resume_enabled';
+  static const String keySkipSilence = 'skip_silence';
+  static const String keyPauseOnLeave = 'pause_on_leave';
+  static const String keySleepTimerExitApp = 'sleep_timer_exit_app';
+
+  // ---------- 桌面小工具 / 锁屏 ----------
+  static const String keyWidgetFollowCover = 'widget_follow_cover';
+  static const String keyWidgetButtonSize = 'widget_button_size';
+  static const String keyLockScreenCoverBg = 'lockscreen_cover_bg';
+  static const String keyForceDefaultCover = 'force_default_cover';
+  static const String keyDefaultCoverPath = 'default_cover_path';
+  static const String keyLaunchIcon = 'launch_icon';
+
+  // ---------- 显示 ----------
+  static const String keyFontSize = 'font_size';
+  static const String keySourceColumns = 'source_columns';
+  static const String keySourceGroup = 'home_source_group';
+  static const String keyDisplayModePrefix = 'display_mode_';
+
+  // ---------- WebDAV 播放 ----------
+  static const String keyWebDavPlayUrl = 'webdav_play_url';
+  static const String keyWebDavPlayUser = 'webdav_play_user';
+  static const String keyWebDavPlayPass = 'webdav_play_pass';
+
+  // ---------- 断点续播（插件源） ----------
+  static const String keyPluginResumeList = 'plugin_resume_list';
+  static const String keyPluginBookmarks = 'plugin_bookmarks';
+  static const String keyAutoCacheMap = 'auto_cache_map';
+
+  // ---------- 收听统计 ----------
+  static const String keyListenTotalSecs = 'listen_total_secs';
+  static const String keyListenDay = 'listen_day';
+  static const String keyListenDaySecs = 'listen_day_secs';
 
   // ---------- 坚果云（WebDAV）----------
   static const String keySyncUrl = 'sync_url';

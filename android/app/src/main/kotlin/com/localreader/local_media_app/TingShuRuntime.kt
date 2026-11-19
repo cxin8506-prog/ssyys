@@ -2,6 +2,14 @@ package com.localreader.local_media_app
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Toast
 import dalvik.system.DexClassLoader
 import dalvik.system.DexFile
 import org.json.JSONArray
@@ -11,6 +19,8 @@ import java.io.File
 import java.lang.reflect.Modifier
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 
 /**
@@ -39,6 +49,32 @@ object TingShuRuntime {
 
     fun prefs(): SharedPreferences? =
         appContext?.getSharedPreferences("tingshu_ext", Context.MODE_PRIVATE)
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * 读 WebView 的 Cookie：登录态、cf_clearance 都存在这里，
+     * 和登录页、验证页是同一份 CookieManager。
+     */
+    fun getCookie(url: String): String {
+        return try {
+            val cm = CookieManager.getInstance()
+            cm.setAcceptCookie(true)
+            cm.getCookie(url) ?: ""
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    fun showToast(msg: String) {
+        val ctx = appContext ?: return
+        mainHandler.post {
+            try {
+                Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+            } catch (_: Throwable) {
+            }
+        }
+    }
 
     // ------------------------------------------------------------ 音频地址回传
 
@@ -71,8 +107,22 @@ object TingShuRuntime {
                 setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9")
                 setRequestProperty("Accept-Encoding", "gzip")
                 if (!referer.isNullOrEmpty()) setRequestProperty("Referer", referer)
+                // 登录态 / cf_clearance 都在 WebView 的 Cookie 里，请求要带上
+                val cookie = getCookie(current)
+                if (cookie.isNotEmpty()) setRequestProperty("Cookie", cookie)
             }
             val code = conn.responseCode
+            // 响应里带回的 Cookie 也写进 CookieManager，和 WebView 共用
+            try {
+                val cm = CookieManager.getInstance()
+                conn.headerFields["Set-Cookie"]?.forEach { c ->
+                    if (c.isNotEmpty()) cm.setCookie(current, c)
+                }
+                conn.headerFields["set-cookie"]?.forEach { c ->
+                    if (c.isNotEmpty()) cm.setCookie(current, c)
+                }
+            } catch (_: Throwable) {
+            }
             if (code in 300..399) {
                 val loc = conn.getHeaderField("Location")
                 conn.disconnect()
@@ -109,6 +159,137 @@ object TingShuRuntime {
         )
         val hit = re.find(html)?.value ?: return null
         return if (hit.startsWith("//")) "https:$hit" else hit
+    }
+
+    // ------------------------------------------------------------ 真 WebView
+
+    /**
+     * 主线程起一个隐藏 WebView 加载 url，页面跑完后执行 script，
+     * 返回脚本返回值解码后的字符串；超时或失败返回 null。
+     * evaluateJavascript 的返回值是 JSON 编码的，字符串要先解一层。
+     */
+    fun webViewEval(
+        url: String,
+        isDesktop: Boolean = false,
+        script: String,
+        timeoutMs: Long = 30000
+    ): String? {
+        val ctx = appContext ?: return null
+        val latch = CountDownLatch(1)
+        var result: String? = null
+        var webView: WebView? = null
+        mainHandler.post {
+            try {
+                val wv = WebView(ctx)
+                webView = wv
+                val settings = wv.settings
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.userAgentString = if (isDesktop) desktopUA else mobileUA
+                CookieManager.getInstance().setAcceptCookie(true)
+                var done = false
+                wv.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView, finishedUrl: String) {
+                        if (done) return
+                        done = true
+                        try {
+                            view.evaluateJavascript(script) { value ->
+                                result = decodeJsString(value)
+                                latch.countDown()
+                            }
+                        } catch (_: Throwable) {
+                            latch.countDown()
+                        }
+                    }
+                }
+                wv.loadUrl(url)
+                mainHandler.postDelayed({
+                    if (latch.count > 0) latch.countDown()
+                }, timeoutMs)
+            } catch (_: Throwable) {
+                latch.countDown()
+            }
+        }
+        latch.await(timeoutMs + 5000, TimeUnit.MILLISECONDS)
+        mainHandler.post {
+            try {
+                webView?.stopLoading()
+                webView?.destroy()
+            } catch (_: Throwable) {
+            }
+        }
+        return result
+    }
+
+    /** evaluateJavascript 返回的 JSON 编码字符串解一层；"null" 返回 null。 */
+    private fun decodeJsString(value: String?): String? {
+        if (value == null || value == "null" || value.isEmpty()) return null
+        return try {
+            JSONArray("[$value]").optString(0).takeIf { it.isNotEmpty() }
+        } catch (_: Throwable) {
+            value.trim('"')
+        }
+    }
+
+    /**
+     * 真 WebView 加载页面，拦截资源请求，抓第一个音频/视频地址。
+     * 页面加载完再等几秒，让播放器请求发出来。
+     */
+    fun webViewSniff(
+        url: String,
+        isDesktop: Boolean = false,
+        timeoutMs: Long = 30000
+    ): String? {
+        val ctx = appContext ?: return null
+        val mediaRe = Regex("\\.(m3u8|mp4|mp3|m4a)([?#]|$)", RegexOption.IGNORE_CASE)
+        val found = ArrayList<String>()
+        val pageDone = CountDownLatch(1)
+        var webView: WebView? = null
+        mainHandler.post {
+            try {
+                val wv = WebView(ctx)
+                webView = wv
+                val settings = wv.settings
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.userAgentString = if (isDesktop) desktopUA else mobileUA
+                CookieManager.getInstance().setAcceptCookie(true)
+                wv.webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest
+                    ): WebResourceResponse? {
+                        val u = request.url.toString()
+                        if (mediaRe.containsMatchIn(u)) {
+                            synchronized(found) {
+                                if (u !in found) found.add(u)
+                            }
+                        }
+                        return super.shouldInterceptRequest(view, request)
+                    }
+
+                    override fun onPageFinished(view: WebView, finishedUrl: String) {
+                        pageDone.countDown()
+                    }
+                }
+                wv.loadUrl(url)
+            } catch (_: Throwable) {
+                pageDone.countDown()
+            }
+        }
+        pageDone.await(timeoutMs, TimeUnit.MILLISECONDS)
+        val deadline = System.currentTimeMillis() + 5000
+        while (found.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(300)
+        }
+        mainHandler.post {
+            try {
+                webView?.stopLoading()
+                webView?.destroy()
+            } catch (_: Throwable) {
+            }
+        }
+        return found.firstOrNull()
     }
 
     // ------------------------------------------------------------ JAR / 源
@@ -233,6 +414,67 @@ object TingShuRuntime {
             )
         }
         return out
+    }
+
+    /** 源有没有登录入口（ILogin），有就返回登录地址和是否用电脑版 UA */
+    fun loginInfo(path: String, entryClass: String, index: Int): Map<String, Any?>? {
+        val s = sourceInstance(path, entryClass, index)
+        return try {
+            val m = s.javaClass.getMethod("getLoginUrl")
+            val url = m.invoke(s) as? String ?: ""
+            if (url.isEmpty()) return null
+            val desktop = try {
+                s.javaClass.getMethod("isLoginDesktop").invoke(s) as? Boolean ?: false
+            } catch (_: Throwable) {
+                false
+            }
+            mapOf("url" to url, "desktop" to desktop)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** 源有没有搜索验证（ISearchVerification），有就返回验证地址等 */
+    fun verificationInfo(
+        path: String,
+        entryClass: String,
+        index: Int,
+        keywords: String
+    ): Map<String, Any?>? {
+        val s = sourceInstance(path, entryClass, index)
+        return try {
+            val m = s.javaClass.getMethod("getSearchVerificationUrl", String::class.java)
+            val url = m.invoke(s, keywords) as? String ?: ""
+            if (url.isEmpty()) return null
+            val ua = try {
+                s.javaClass.getMethod("getSearchVerificationUA").invoke(s) as? String ?: ""
+            } catch (_: Throwable) {
+                ""
+            }
+            val delay = try {
+                s.javaClass.getMethod("getSearchDelayMs").invoke(s) as? Long ?: 0L
+            } catch (_: Throwable) {
+                0L
+            }
+            val validated = try {
+                s.javaClass.getMethod("isSearchValidated").invoke(s) as? Boolean ?: false
+            } catch (_: Throwable) {
+                false
+            }
+            mapOf("url" to url, "ua" to ua, "delayMs" to delay, "validated" to validated)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** 搜索验证过没有（源自己读 cf_clearance 之类的 Cookie 判断） */
+    fun isSearchValidated(path: String, entryClass: String, index: Int): Boolean {
+        val s = sourceInstance(path, entryClass, index)
+        return try {
+            s.javaClass.getMethod("isSearchValidated").invoke(s) as? Boolean ?: false
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     // ------------------------------------------------------------ 调用
@@ -391,7 +633,18 @@ object TingShuRuntime {
                 xm.invoke(extractor, url, false, false)
                 val audio = takeDelivered()
                     ?: throw RuntimeException("未能解析出音频地址")
-                JSONObject().put("url", audio).toString()
+                val out = JSONObject().put("url", audio)
+                // 有的源要带请求头播（Referer/UA），一起回给播放器
+                try {
+                    val hm = s.javaClass.getMethod("headers", String::class.java)
+                    @Suppress("UNCHECKED_CAST")
+                    val headers = hm.invoke(s, audio) as? Map<String, String>
+                    if (!headers.isNullOrEmpty()) {
+                        out.put("headers", JSONObject(headers as Map<*, *>))
+                    }
+                } catch (_: Throwable) {
+                }
+                out.toString()
             }
             else -> throw RuntimeException("不支持的调用：$method")
         }

@@ -128,7 +128,14 @@ class TingShuPluginEngine implements PluginEngine {
         final r = await _call('audio', {'url': p['url'] ?? p['chapterUrl'] ?? ''});
         final url = '${r?['url'] ?? ''}';
         if (url.isEmpty) throw Exception('这个源没有解析出播放地址');
-        return {'url': url};
+        final headers = <String, String>{};
+        final rawHeaders = r?['headers'];
+        if (rawHeaders is Map) {
+          for (final e in rawHeaders.entries) {
+            headers['${e.key}'] = '${e.value}';
+          }
+        }
+        return {'url': url, 'headers': headers};
 
       case 'lines':
       case 'voices':
@@ -137,6 +144,44 @@ class TingShuPluginEngine implements PluginEngine {
       default:
         throw Exception('该源不支持${PluginMethods.labels[method] ?? method}');
     }
+  }
+
+  /// 登录入口（ILogin）：没有返回 null，有返回 {url, desktop}
+  Future<Map<String, dynamic>?> loginInfo() async {
+    final path = _jarPath;
+    final entry = _entryClass;
+    if (path == null || entry == null) return null;
+    return TingShuBridge.loginInfo(
+      jarPath: path,
+      entryClass: entry,
+      index: _source?.sourceIndex ?? 0,
+    );
+  }
+
+  /// 搜索验证（ISearchVerification）：没有返回 null，
+  /// 有返回 {url, ua, delayMs, validated}
+  Future<Map<String, dynamic>?> verificationInfo(String keyword) async {
+    final path = _jarPath;
+    final entry = _entryClass;
+    if (path == null || entry == null) return null;
+    return TingShuBridge.verificationInfo(
+      jarPath: path,
+      entryClass: entry,
+      index: _source?.sourceIndex ?? 0,
+      keyword: keyword,
+    );
+  }
+
+  /// 搜索验证过没有
+  Future<bool> isSearchValidated() async {
+    final path = _jarPath;
+    final entry = _entryClass;
+    if (path == null || entry == null) return false;
+    return TingShuBridge.isSearchValidated(
+      jarPath: path,
+      entryClass: entry,
+      index: _source?.sourceIndex ?? 0,
+    );
   }
 
   Future<Map<String, dynamic>> _detail(String url) async {

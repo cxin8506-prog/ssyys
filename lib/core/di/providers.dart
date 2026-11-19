@@ -33,11 +33,105 @@ final videoEnabledProvider = StateProvider<bool>((ref) {
       AppConstants.defaultVideoEnabled;
 });
 
-/// 主题配色（0=青玉 1=海蓝 2=樱粉 3=琥珀 4=紫韵 5=朱砂）
+/// 主题配色（0=暖阳橙 1=海蓝 2=青竹绿 3=樱花粉 4=墨夜）
 final themeColorProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);
   return prefs.getInt(AppConstants.keyThemeColor) ?? 0;
 });
+
+/// 跟随系统深色（默认关；墨夜主题一直保持黑色，不跟随）
+final followSystemDarkProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyFollowSystemDark) ?? false;
+});
+
+/// 播放页取色偏向（默认开：暗色主题播放页偏暗，亮色偏亮）
+final playerTintProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyPlayerTint) ?? true;
+});
+
+/// 聚合搜索（默认开）
+final aggregateSearchProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyAggregateSearch) ?? true;
+});
+
+/// 精确搜索（默认开）
+final exactSearchProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyExactSearch) ?? true;
+});
+
+/// 自动缓存（默认关）
+final autoCacheProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyAutoCache) ?? false;
+});
+
+/// 自动缓存集数（1/3/5，默认 1）
+final autoCacheCountProvider = StateProvider<int>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getInt(AppConstants.keyAutoCacheCount) ?? 1;
+});
+
+/// 仅 WiFi 下缓存（默认开）
+final autoCacheWifiOnlyProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyAutoCacheWifiOnly) ?? true;
+});
+
+/// 自动播放下一集（默认开）
+final autoNextProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyAutoNext) ?? true;
+});
+
+/// 断点续播（默认开）
+final resumeEnabledProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool(AppConstants.keyResumeEnabled) ?? true;
+});
+
+/// 默认倍速（默认 1.0）
+final defaultSpeedProvider = StateProvider<double>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getDouble(AppConstants.keyPlaybackSpeed) ?? 1.0;
+});
+
+/// 定时关闭默认值（分钟，0=不设置）
+final sleepTimerDefaultProvider = StateProvider<int>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getInt(AppConstants.keySleepTimerDefault) ?? 0;
+});
+
+/// 字体大小：small / standard / large（默认 standard）
+final fontSizeProvider = StateProvider<String>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getString(AppConstants.keyFontSize) ?? 'standard';
+});
+
+/// 书源页源列表列数（1-5，默认 3）
+final sourceColumnsProvider = StateProvider<int>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  final v = prefs.getInt(AppConstants.keySourceColumns) ?? 3;
+  return v.clamp(1, 5);
+});
+
+/// 主壳底部导航当前 tab（0=书源 1=源内容 2=收藏 3=历史）
+final shellTabProvider = StateProvider<int>((ref) => 0);
+
+/// 字体缩放倍数（供详情页简介/选集用）
+double fontScaleFor(String size) {
+  switch (size) {
+    case 'small':
+      return 0.9;
+    case 'large':
+      return 1.15;
+    default:
+      return 1.0;
+  }
+}
 
 /// 缓存上限（MB）
 final cacheLimitProvider = StateProvider<int>((ref) {

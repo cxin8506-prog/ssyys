@@ -28,3 +28,14 @@ fun getMobileUA(): String = TingShuRuntime.mobileUA
 
 /** 加载多页章节时用来给宿主报进度，这里不需要，留空实现。 */
 fun notifyLoadingEpisodes(pageInfo: String?) {}
+
+/**
+ * 读宿主 WebView 的 Cookie（登录态 / cf_clearance 都在这里）。
+ * 没有时返回空串，不抛错。
+ */
+fun getCookie(url: String): String = TingShuRuntime.getCookie(url)
+
+/** 在主线程弹一个短提示。 */
+fun showToast(msg: String) {
+    TingShuRuntime.showToast(msg)
+}

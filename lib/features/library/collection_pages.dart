@@ -1,16 +1,23 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/path_utils.dart';
+import '../../plugins/data/plugin_resume.dart';
 import '../../shared/widgets/common.dart';
 import '../audio/data/repository_providers.dart';
 import '../audio/domain/media_item.dart';
 import '../audio/presentation/audio_player_page.dart';
 import '../video/presentation/video_player_page.dart';
 
-/// 收藏 / 历史 通用页面：听书与视频分栏，网格卡片
+/// 收藏 / 历史 通用页面：听书与视频分栏
+/// 收藏是网格/列表卡片，历史是列表行（上次播放：线路名 + 进度时间 + 源标签）
 enum CollectionKind { favorite, history, bookmark }
 
 class CollectionPage extends ConsumerStatefulWidget {
@@ -32,6 +39,15 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
   late TabController _tabs;
   late String _type;
 
+  // 收藏：分组、排序、布局
+  List<String> _groups = ['默认'];
+  String _group = '全部';
+  int _sort = 0; // 0 按加入时间，1 按名称，2 按最近阅读
+  bool _grid = true; // true 网格，false 列表
+
+  // 历史：插件源最近播放（断点）
+  List<PluginResume> _resumes = [];
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +65,12 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
         });
       }
     });
+    if (widget.kind == CollectionKind.favorite) _loadGroups();
+  }
+
+  Future<void> _loadGroups() async {
+    final groups = await ref.read(libraryRepositoryProvider).favoriteGroups();
+    if (mounted) setState(() => _groups = groups);
   }
 
   @override
@@ -59,57 +81,90 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
     return Scaffold(
+      drawer: buildAppDrawer(context),
       appBar: AppBar(
+        leading: Builder(
+          builder: (ctx) => IconButton(
+            icon: const Icon(Icons.menu),
+            tooltip: '菜单',
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
+          ),
+        ),
         title: Text(_title),
+        actions: [
+          if (widget.kind == CollectionKind.favorite) _favoriteMenu(),
+          if (widget.kind == CollectionKind.history)
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: '清空历史',
+              onPressed: _confirmClear,
+            ),
+        ],
         bottom: TabBar(
           controller: _tabs,
-          indicatorColor: primary,
+          indicatorColor: Colors.white,
           indicatorSize: TabBarIndicatorSize.label,
-          labelColor: primary,
-          unselectedLabelColor: context.subtleColor,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
           tabs: const [Tab(text: '听书'), Tab(text: '视频')],
         ),
       ),
-      body: FutureBuilder<List<MediaItem>>(
-        future: _load(),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final items = snap.data ?? [];
-          if (items.isEmpty) {
-            return EmptyState(
-              icon: _icon,
-              message: '还没有${widget.kind == CollectionKind.favorite ? '收藏' : '记录'}',
-              hint: _type == AppConstants.typeAudio
-                  ? '在听书页长按条目，或播放页点收藏'
-                  : '在视频页长按条目即可加入',
-            );
-          }
-          return GridView.builder(
-            padding: pagePadding(context, top: 14, bottom: 24),
-            itemCount: items.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 18,
-              childAspectRatio: 0.62,
+      body: Column(
+        children: [
+          if (widget.kind == CollectionKind.favorite) _buildGroupChips(),
+          Expanded(
+            child: FutureBuilder<List<MediaItem>>(
+              future: _load(),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final items = snap.data ?? [];
+                if (widget.kind == CollectionKind.history) {
+                  return _buildHistoryList(items);
+                }
+                if (items.isEmpty) {
+                  return EmptyState(
+                    icon: _icon,
+                    message: '还没有收藏',
+                    hint: _type == AppConstants.typeAudio
+                        ? '在听书页长按条目，或播放页点收藏'
+                        : '在视频页长按条目即可加入',
+                  );
+                }
+                return _grid ? _buildGrid(items) : _buildFavoriteList(items);
+              },
             ),
-            itemBuilder: (_, i) => _card(items[i]),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 
-  Future<List<MediaItem>> _load() {
+  Future<List<MediaItem>> _load() async {
     final repo = ref.read(libraryRepositoryProvider);
     if (widget.kind == CollectionKind.favorite) {
-      return repo.favorites(_type);
+      final items = _group == '全部'
+          ? await repo.favorites(_type)
+          : await repo.favoritesByGroup(_group, _type);
+      return _sorted(items);
     }
+    _resumes = (await PluginResumeStore.loadAll())
+        .where((r) => r.type == _type)
+        .toList();
     return repo.history(_type);
+  }
+
+  List<MediaItem> _sorted(List<MediaItem> items) {
+    final list = List<MediaItem>.of(items);
+    if (_sort == 1) {
+      list.sort((a, b) => a.title.compareTo(b.title));
+    } else if (_sort == 2) {
+      list.sort((a, b) =>
+          (b.lastReadAt ?? b.addedAt).compareTo(a.lastReadAt ?? a.addedAt));
+    }
+    return list;
   }
 
   String get _title =>
@@ -119,23 +174,368 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
       ? Icons.favorite_border
       : Icons.history;
 
+  // ---------- 收藏：顶栏菜单（排序 / 布局 / 导出 / 导入） ----------
+
+  Widget _favoriteMenu() {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert),
+      tooltip: '更多',
+      onSelected: (v) async {
+        switch (v) {
+          case 'sort_time':
+            setState(() => _sort = 0);
+            break;
+          case 'sort_name':
+            setState(() => _sort = 1);
+            break;
+          case 'sort_recent':
+            setState(() => _sort = 2);
+            break;
+          case 'layout_grid':
+            setState(() => _grid = true);
+            break;
+          case 'layout_list':
+            setState(() => _grid = false);
+            break;
+          case 'export':
+            _exportFavorites();
+            break;
+          case 'import':
+            _importFavorites();
+            break;
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'sort_time', child: Text('排序：按加入时间')),
+        const PopupMenuItem(value: 'sort_name', child: Text('排序：按名称')),
+        const PopupMenuItem(value: 'sort_recent', child: Text('排序：按最近阅读')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'layout_grid', child: Text('布局：网格')),
+        const PopupMenuItem(value: 'layout_list', child: Text('布局：列表')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'export', child: Text('导出收藏')),
+        const PopupMenuItem(value: 'import', child: Text('导入收藏')),
+      ],
+    );
+  }
+
+  /// 收藏导出：写一个 JSON 文件，提示里给路径
+  Future<void> _exportFavorites() async {
+    final entries =
+        await ref.read(libraryRepositoryProvider).favoriteEntries();
+    if (entries.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('没有收藏可导出')));
+      }
+      return;
+    }
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/收藏导出.json');
+    await file.writeAsString(jsonEncode(entries));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已导出到 ${file.path}')));
+    }
+  }
+
+  /// 收藏导入：选一个之前导出的 JSON，本地没有的条目跳过
+  Future<void> _importFavorites() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['json'],
+    );
+    final path = picked?.files.single.path;
+    if (path == null) return;
+    try {
+      final raw = jsonDecode(await File(path).readAsString());
+      if (raw is! List) throw const FormatException('文件格式不对');
+      final repo = ref.read(libraryRepositoryProvider);
+      int ok = 0, skip = 0;
+      for (final e in raw) {
+        if (e is! Map) {
+          skip++;
+          continue;
+        }
+        final itemId = '${e['itemId'] ?? ''}';
+        final type = '${e['type'] ?? ''}';
+        final group = '${e['group'] ?? '默认'}';
+        if (itemId.isEmpty) {
+          skip++;
+          continue;
+        }
+        final item = await repo.getById(itemId);
+        if (item == null || await repo.isFavorite(itemId)) {
+          skip++;
+          continue;
+        }
+        await repo.addFavorite(itemId, type.isEmpty ? item.type : type,
+            group: group);
+        ok++;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                '已导入 $ok 条${skip > 0 ? '，跳过 $skip 条（本地没有这本书或已收藏）' : ''}')));
+        _loadGroups();
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('导入失败：$e')));
+      }
+    }
+  }
+
+  // ---------- 收藏：分组横条（长按改名） ----------
+
+  Widget _buildGroupChips() {
+    final names = ['全部', ..._groups];
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        scrollDirection: Axis.horizontal,
+        itemCount: names.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final name = names[i];
+          final selected = _group == name;
+          return GestureDetector(
+            onLongPress: name == '全部' || name == '默认'
+                ? null
+                : () => _renameGroup(name),
+            child: ChoiceChip(
+              label: Text(name),
+              selected: selected,
+              onSelected: (_) => setState(() => _group = name),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 分类重命名（“默认”不能改）
+  Future<void> _renameGroup(String oldName) async {
+    final ctrl = TextEditingController(text: oldName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('重命名分类'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '新分类名'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    if (newName == null || newName.isEmpty || newName == oldName) return;
+    await ref
+        .read(libraryRepositoryProvider)
+        .renameFavoriteGroup(oldName, newName);
+    if (_group == oldName) _group = newName;
+    await _loadGroups();
+    if (mounted) setState(() {});
+  }
+
+  // ---------- 收藏：网格 / 列表 ----------
+
+  Widget _buildGrid(List<MediaItem> items) {
+    return GridView.builder(
+      padding: pagePadding(context, top: 14, bottom: 24),
+      itemCount: items.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 18,
+        childAspectRatio: 0.62,
+      ),
+      itemBuilder: (_, i) => _card(items[i]),
+    );
+  }
+
+  Widget _buildFavoriteList(List<MediaItem> items) {
+    return ListView.separated(
+      padding: pagePadding(context, top: 8, bottom: 24),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (_, i) {
+        final item = items[i];
+        return ListTile(
+          leading: SizedBox(
+            width: 44,
+            height: 60,
+            child: CoverImage(
+                path: item.coverPath,
+                title: item.title,
+                size: 44,
+                isVideo: item.isVideo),
+          ),
+          title: Text(item.title,
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text('${item.chapterCount} 章',
+              style: Theme.of(context).textTheme.bodySmall),
+          onTap: () => _openItem(item),
+          onLongPress: () => _menu(item),
+        );
+      },
+    );
+  }
+
+  // ---------- 历史：列表行 ----------
+
+  Widget _buildHistoryList(List<MediaItem> items) {
+    if (items.isEmpty && _resumes.isEmpty) {
+      return const EmptyState(
+        icon: Icons.history,
+        message: '还没有记录',
+        hint: '听过 / 看过的都会记在这里，点一行接着播',
+      );
+    }
+    return ListView.separated(
+      padding: pagePadding(context, top: 8, bottom: 24),
+      itemCount: _resumes.length + items.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (_, i) {
+        if (i < _resumes.length) return _resumeRow(_resumes[i]);
+        return _historyRow(items[i - _resumes.length]);
+      },
+    );
+  }
+
+  /// 插件源一行：上次播放：线路名 · 章节名 进度时间 · 源标签
+  Widget _resumeRow(PluginResume r) {
+    final parts = <String>[];
+    if (r.lineName.isNotEmpty) parts.add(r.lineName);
+    parts.add(
+        '${r.chapterName} ${PathUtils.formatDuration(r.positionMs)}');
+    if (r.sourceName.isNotEmpty) parts.add(r.sourceName);
+    return ListTile(
+      leading: _resumeThumb(r),
+      title: Text(r.bookTitle,
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text('上次播放：${parts.join(' · ')}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall),
+      onTap: () => openResume(context, ref, r),
+      onLongPress: () async {
+        await PluginResumeStore.remove(r.key);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  Widget _resumeThumb(PluginResume r) {
+    final url = r.coverUrl;
+    return Container(
+      width: 44,
+      height: 60,
+      decoration: BoxDecoration(
+        color: context.palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: url.startsWith('http')
+          ? Image.network(url,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _thumbIcon(r.isAudio))
+          : _thumbIcon(r.isAudio),
+    );
+  }
+
+  Widget _thumbIcon(bool isAudio) => Icon(
+        isAudio ? Icons.headphones_outlined : Icons.movie_outlined,
+        size: 20,
+        color: Theme.of(context).colorScheme.primary.withOpacity(0.55),
+      );
+
+  /// 本地一行：上次播放：进度时间（没有时长就显示状态）
+  Widget _historyRow(MediaItem item) {
+    final p = item.progress > 1 ? item.progress / 100 : item.progress;
+    String sub;
+    if (item.durationMs != null && item.durationMs! > 0 && p > 0) {
+      sub =
+          '上次播放：${PathUtils.formatDuration((p * item.durationMs!).round())}';
+    } else {
+      sub = '上次播放：${item.statusLabel} · ${item.chapterCount} 章';
+    }
+    return ListTile(
+      leading: SizedBox(
+        width: 44,
+        height: 60,
+        child: CoverImage(
+            path: item.coverPath,
+            title: item.title,
+            size: 44,
+            isVideo: item.isVideo),
+      ),
+      title: Text(item.title,
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(sub,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall),
+      onTap: () => _openItem(item),
+      onLongPress: () => _menu(item),
+    );
+  }
+
+  /// 清空历史：先弹确认框
+  Future<void> _confirmClear() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('是否清空历史记录？'),
+        content: const Text('本地历史和最近播放的源记录都会清空，断点也会一起删掉。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('清空')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    await ref.read(libraryRepositoryProvider).clearHistory(_type);
+    await PluginResumeStore.clearAll();
+    if (mounted) setState(() {});
+  }
+
+  // ---------- 共用 ----------
+
+  Future<void> _openItem(MediaItem item) async {
+    final chapters =
+        await ref.read(libraryRepositoryProvider).chapters(item.id);
+    if (chapters.isEmpty) return;
+    if (!mounted) return;
+    if (item.isAudio) {
+      Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => AudioPlayerPage(item: item)));
+    } else {
+      final paths = chapters.map((c) => c.path!).toList();
+      Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => VideoPlayerPage(
+              path: paths.first, playlist: paths, title: item.title)));
+    }
+  }
+
   Widget _card(MediaItem item) {
     final p = item.progress > 1 ? item.progress / 100 : item.progress;
     return GestureDetector(
-      onTap: () async {
-        final chapters =
-            await ref.read(libraryRepositoryProvider).chapters(item.id);
-        if (chapters.isEmpty) return;
-        if (item.isAudio) {
-          Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => AudioPlayerPage(item: item)));
-        } else {
-          final paths = chapters.map((c) => c.path!).toList();
-          Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => VideoPlayerPage(
-                  path: paths.first, playlist: paths, title: item.title)));
-        }
-      },
+      onTap: () => _openItem(item),
       onLongPress: () => _menu(item),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

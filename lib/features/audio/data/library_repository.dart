@@ -228,6 +228,68 @@ class LibraryRepository {
     return rows.map((r) => _toModel(r.readTable(_db.mediaItems))).toList();
   }
 
+  /// 收藏分组名（“默认”在最前）
+  Future<List<String>> favoriteGroups() async {
+    final rows = await (_db.selectOnly(_db.favorites)
+          ..addColumns([_db.favorites.groupName])
+          ..groupBy([_db.favorites.groupName]))
+        .get();
+    final names = rows
+        .map((r) => r.read(_db.favorites.groupName) ?? '默认')
+        .toSet()
+        .toList();
+    names.remove('默认');
+    names.insert(0, '默认');
+    return names;
+  }
+
+  /// 某个分组下的收藏
+  Future<List<domain.MediaItem>> favoritesByGroup(
+      String group, String type) async {
+    final query = _db.select(_db.mediaItems).join([
+      innerJoin(
+          _db.favorites, _db.favorites.itemId.equalsExp(_db.mediaItems.id)),
+    ])
+      ..where(_db.favorites.type.equals(type))
+      ..where(_db.favorites.groupName.equals(group))
+      ..orderBy([OrderingTerm.desc(_db.favorites.createdAt)]);
+    final rows = await query.get();
+    return rows.map((r) => _toModel(r.readTable(_db.mediaItems))).toList();
+  }
+
+  /// 收藏分组重命名（“默认”不能改名）
+  Future<void> renameFavoriteGroup(String oldName, String newName) async {
+    if (oldName == newName || oldName == '默认' || newName.trim().isEmpty) {
+      return;
+    }
+    await (_db.update(_db.favorites)
+          ..where((t) => t.groupName.equals(oldName)))
+        .write(FavoritesCompanion(groupName: Value(newName.trim())));
+  }
+
+  /// 导出收藏用的原始条目（带分组）
+  Future<List<Map<String, String>>> favoriteEntries() async {
+    final rows = await _db.select(_db.favorites).get();
+    return rows
+        .map((r) => {
+              'itemId': r.itemId,
+              'type': r.type,
+              'group': r.groupName,
+            })
+        .toList();
+  }
+
+  /// 清空历史（不传类型就是全部清空）
+  Future<void> clearHistory([String? type]) async {
+    if (type == null) {
+      await _db.delete(_db.history).go();
+    } else {
+      await (_db.delete(_db.history)
+            ..where((t) => t.type.equals(type)))
+          .go();
+    }
+  }
+
   Future<void> addHistory(String itemId, String type) async {
     await _db.into(_db.history).insert(HistoryCompanion.insert(
           id: _uuid.v4(),

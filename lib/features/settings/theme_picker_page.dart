@@ -6,7 +6,7 @@ import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../shared/widgets/common.dart';
 
-/// 主题选择：6 套配色 × 3 种明暗模式，带实时预览
+/// 主题选择：5 套配色 × 3 种明暗模式，带实时预览
 class ThemePickerPage extends ConsumerWidget {
   const ThemePickerPage({super.key});
 
@@ -14,7 +14,10 @@ class ThemePickerPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final mode = ref.watch(themeModeProvider);
     final colorIndex = ref.watch(themeColorProvider);
+    final followSystemDark = ref.watch(followSystemDarkProvider);
+    final playerTint = ref.watch(playerTintProvider);
     final prefs = ref.read(sharedPrefsProvider);
+    final isNight = colorIndex == AppTheme.nightSchemeIndex;
 
     return Scaffold(
       appBar: AppBar(title: const Text('主题')),
@@ -107,6 +110,31 @@ class ThemePickerPage extends ConsumerWidget {
                 ),
               );
             }),
+          ),
+          const SizedBox(height: 28),
+          Text('跟随与取色', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          SwitchListTile(
+            title: const Text('跟随系统深色'),
+            subtitle: Text(isNight
+                ? '墨夜主题一直保持黑色，不跟随'
+                : '开：系统切深色 App 就跟着变深'),
+            value: followSystemDark && !isNight,
+            onChanged: isNight
+                ? null
+                : (v) {
+                    ref.read(followSystemDarkProvider.notifier).state = v;
+                    prefs.setBool(AppConstants.keyFollowSystemDark, v);
+                  },
+          ),
+          SwitchListTile(
+            title: const Text('播放页取色偏向'),
+            subtitle: const Text('开：播放页跟着主题色走；关：播放页用中性色'),
+            value: playerTint,
+            onChanged: (v) {
+              ref.read(playerTintProvider.notifier).state = v;
+              prefs.setBool(AppConstants.keyPlayerTint, v);
+            },
           ),
           const SizedBox(height: 28),
           Text('预览', style: Theme.of(context).textTheme.titleMedium),

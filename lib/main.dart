@@ -9,10 +9,8 @@ import 'core/database/app_database.dart';
 import 'core/di/providers.dart';
 import 'core/log/app_logger.dart';
 import 'core/theme/app_theme.dart';
+import 'core/utils/listen_stats.dart';
 import 'features/audio/data/audio_handler.dart';
-import 'features/audio/data/repository_providers.dart';
-import 'features/audio/domain/media_item.dart' as domain;
-import 'features/audio/presentation/audio_player_page.dart';
 import 'features/backup/backup_page.dart';
 import 'features/backup/log_page.dart';
 import 'features/library/collection_pages.dart';
@@ -21,14 +19,19 @@ import 'features/onboarding/onboarding_page.dart';
 import 'features/presentation/discover_page.dart';
 import 'features/presentation/home_page.dart';
 import 'features/search/search_page.dart';
+import 'features/settings/not_available_page.dart';
+import 'features/settings/playback_settings_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/settings/theme_picker_page.dart';
+import 'features/settings/webdav_play_page.dart';
+import 'features/settings/widget_lock_page.dart';
 import 'features/sync/sync_page.dart';
-import 'features/video/presentation/video_player_page.dart';
+import 'features/ua/presentation/ua_settings_page.dart';
+import 'plugins/data/home_feed.dart';
+import 'plugins/data/plugin_resume.dart';
 import 'plugins/presentation/source_center_page.dart';
 import 'shared/widgets/common.dart';
 import 'plugins/presentation/source_search_page.dart';
-import 'features/ua/presentation/ua_settings_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -92,9 +95,20 @@ class MyApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final themeColor = ref.watch(themeColorProvider);
+    final followSystemDark = ref.watch(followSystemDarkProvider);
     final systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
         Brightness.dark;
-    final isDark = themeMode == 2 || (themeMode == 0 && systemDark);
+    // 墨夜是独立一套，一直保持黑色，不跟随系统也不看明暗模式
+    final isNight = themeColor == AppTheme.nightSchemeIndex;
+    final effectiveMode = isNight
+        ? ThemeMode.dark
+        : (followSystemDark
+            ? ThemeMode.system
+            : resolveThemeMode(themeMode));
+    final isDark = isNight ||
+        (followSystemDark
+            ? systemDark
+            : (themeMode == 2 || (themeMode == 0 && systemDark)));
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
@@ -111,7 +125,7 @@ class MyApp extends ConsumerWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(themeColor),
         darkTheme: AppTheme.dark(themeColor),
-        themeMode: resolveThemeMode(themeMode),
+        themeMode: effectiveMode,
         home: onboardDone ? const MainShell() : const OnboardingPage(),
         onGenerateRoute: _onGenerateRoute,
       ),
@@ -131,6 +145,37 @@ class MyApp extends ConsumerWidget {
       case '/backup':
         return MaterialPageRoute(
             builder: (_) => const BackupPage(), settings: settings);
+      case '/settings':
+        return MaterialPageRoute(
+            builder: (_) => const SettingsPage(), settings: settings);
+      case '/playback-settings':
+        return MaterialPageRoute(
+            builder: (_) => const PlaybackSettingsPage(), settings: settings);
+      case '/widget-lock':
+        return MaterialPageRoute(
+            builder: (_) => const WidgetLockPage(), settings: settings);
+      case '/webdav-play':
+        return MaterialPageRoute(
+            builder: (_) => const WebDavPlayPage(), settings: settings);
+      case '/library':
+        return MaterialPageRoute(
+            builder: (_) => const LibraryPage(), settings: settings);
+      case '/cloud-ali':
+        return MaterialPageRoute(
+            builder: (_) => const NotAvailablePage(title: '阿里云盘'),
+            settings: settings);
+      case '/cloud-baidu':
+        return MaterialPageRoute(
+            builder: (_) => const NotAvailablePage(title: '百度网盘'),
+            settings: settings);
+      case '/cloud-115':
+        return MaterialPageRoute(
+            builder: (_) => const NotAvailablePage(title: '115网盘'),
+            settings: settings);
+      case '/cloud-smb':
+        return MaterialPageRoute(
+            builder: (_) => const NotAvailablePage(title: 'SMB'),
+            settings: settings);
       case '/logs':
         return MaterialPageRoute(
             builder: (_) => const LogPage(), settings: settings);
@@ -193,7 +238,7 @@ class MyApp extends ConsumerWidget {
   }
 }
 
-/// 主壳：底部导航（首页 / 书架 / 源 / 我的）
+/// 主壳：底部导航固定五项：书源 / 当前源真名 / 中间大播放键 / 收藏 / 历史
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
 
@@ -202,110 +247,62 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class _MainShellState extends ConsumerState<MainShell> {
-  int _index = 0;
-
   @override
   Widget build(BuildContext context) {
+    final source = ref.watch(activeHomeSourceProvider);
+    final index = ref.watch(shellTabProvider);
     final pages = <Widget>[
       const HomePage(),
-      const LibraryPage(),
       const DiscoverPage(),
-      const SettingsPage(),
+      const CollectionPage(kind: CollectionKind.favorite),
+      const CollectionPage(kind: CollectionKind.history),
     ];
-    if (_index >= pages.length) _index = 0;
+    final safeIndex = index >= pages.length ? 0 : index;
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: IndexedStack(index: safeIndex, children: pages),
       bottomNavigationBar: StreamBuilder<PlaybackState>(
         stream: audioHandler.playbackState,
         initialData: audioHandler.playbackState.valueOrNull,
         builder: (context, snap) {
           final state = snap.data;
           return _AppBottomBar(
-            index: _index,
+            index: safeIndex,
             playing: state?.playing ?? false,
-            hasMedia: state?.playing ?? false,
-            onPlayTap: () => _openPlayer(),
-            onTap: (i) => setState(() => _index = i),
+            sourceName: source?.name ?? '发现',
+            onPlayTap: () => openMostRecentResume(context, ref),
+            onPlayLongPress: () => ListenStats.showDialog(context),
+            onTap: (i) => ref.read(shellTabProvider.notifier).state = i,
           );
         },
       ),
     );
   }
-
-  /// 中间大播放键：有在播的直接回播放页，没有就打开最近听/看的那条
-  Future<void> _openPlayer() async {
-    final playing = audioHandler.playbackState.valueOrNull?.playing ?? false;
-    if (playing) {
-      await audioHandler.pause();
-      return;
-    }
-    final audio = await ref
-        .read(continueListProvider(AppConstants.typeAudio).future)
-        .catchError((_) => <domain.MediaItem>[]);
-    final video = await ref
-        .read(continueListProvider(AppConstants.typeVideo).future)
-        .catchError((_) => <domain.MediaItem>[]);
-    final items = <domain.MediaItem>[...audio, ...video]..sort((a, b) {
-        final x = a.lastReadAt ?? a.addedAt;
-        final y = b.lastReadAt ?? b.addedAt;
-        return y.compareTo(x);
-      });
-    if (items.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('还没有在播的内容，先去搜一部吧'),
-        behavior: SnackBarBehavior.floating,
-      ));
-      setState(() => _index = 0);
-      return;
-    }
-    await _openRecent(items.first);
-  }
-
-  /// 打开最近在听/在看的那一条
-  Future<void> _openRecent(domain.MediaItem item) async {
-    final chapters =
-        await ref.read(libraryRepositoryProvider).chapters(item.id);
-    if (!mounted || chapters.isEmpty) return;
-    if (item.isAudio) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => AudioPlayerPage(item: item)),
-      );
-    } else {
-      final paths = chapters.map((c) => c.path!).toList();
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => VideoPlayerPage(
-            path: paths.first, playlist: paths, title: item.title),
-      ));
-    }
-    if (!mounted) return;
-    ref.invalidate(continueListProvider(
-        item.isAudio ? AppConstants.typeAudio : AppConstants.typeVideo));
-  }
 }
 
-/// 悬浮式底部导航：首页 / 书架 / 大播放键 / 发现 / 我的
+/// 悬浮式底部导航：书源 / 当前源名 / 大播放键 / 收藏 / 历史
 class _AppBottomBar extends StatelessWidget {
   final int index;
   final bool playing;
-  final bool hasMedia;
+  final String sourceName;
   final ValueChanged<int> onTap;
   final VoidCallback onPlayTap;
+  final VoidCallback onPlayLongPress;
 
   const _AppBottomBar({
     required this.index,
     required this.playing,
-    required this.hasMedia,
+    required this.sourceName,
     required this.onTap,
     required this.onPlayTap,
+    required this.onPlayLongPress,
   });
 
-  static const _items = <Map<String, dynamic>>[
-    {'label': '首页', 'icon': Icons.home_outlined, 'active': Icons.home},
-    {'label': '书架', 'icon': Icons.menu_book_outlined, 'active': Icons.menu_book},
-    {'label': '发现', 'icon': Icons.explore_outlined, 'active': Icons.explore},
-    {'label': '我的', 'icon': Icons.person_outline, 'active': Icons.person},
-  ];
+  List<Map<String, dynamic>> get _items => [
+        {'label': '书源', 'icon': Icons.home_outlined, 'active': Icons.home},
+        {'label': sourceName, 'icon': Icons.explore_outlined, 'active': Icons.explore},
+        {'label': '收藏', 'icon': Icons.favorite_outline, 'active': Icons.favorite},
+        {'label': '历史', 'icon': Icons.history_outlined, 'active': Icons.history},
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -378,6 +375,8 @@ class _AppBottomBar extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               it['label'] as String,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
@@ -390,7 +389,8 @@ class _AppBottomBar extends StatelessWidget {
     );
   }
 
-  /// 中间凸起的大圆钮：在播显示暂停，暂停/空闲显示播放
+  /// 中间凸起的大圆钮：在播显示暂停，暂停/空闲显示播放。
+  /// 点一下打开播放器接着播；长按弹出收听统计。
   Widget _playButton(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
     return SizedBox(
@@ -404,12 +404,13 @@ class _AppBottomBar extends StatelessWidget {
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onPlayTap,
+          onLongPress: onPlayLongPress,
           child: Stack(
             alignment: Alignment.center,
             children: [
               Icon(
                 playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                size: hasMedia && !playing ? 28 : 30,
+                size: 30,
                 color: Colors.white,
               ),
             ],

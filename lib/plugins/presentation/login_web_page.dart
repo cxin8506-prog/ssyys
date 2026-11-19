@@ -17,12 +17,16 @@ class LoginWebPage extends StatefulWidget {
   final String successUrl;
   final String cookieUrl;
 
+  /// true 用电脑版 UA 打开（有的站只认电脑版登录页）
+  final bool desktop;
+
   const LoginWebPage({
     super.key,
     required this.title,
     required this.url,
     this.successUrl = '',
     this.cookieUrl = '',
+    this.desktop = false,
   });
 
   @override
@@ -30,6 +34,10 @@ class LoginWebPage extends StatefulWidget {
 }
 
 class _LoginWebPageState extends State<LoginWebPage> {
+  static const _desktopUA =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36';
+
   WebViewController? _controller;
   int _progress = 0;
   String _currentUrl = '';
@@ -156,6 +164,7 @@ class _LoginWebPageState extends State<LoginWebPage> {
           Expanded(
             child: WebView(
               initialUrl: widget.url,
+              userAgent: widget.desktop ? _desktopUA : null,
               javascriptMode: JavascriptMode.unrestricted,
               onWebViewCreated: (c) => _controller = c,
               onProgress: (p) {

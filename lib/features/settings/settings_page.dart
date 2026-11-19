@@ -87,6 +87,82 @@ class SettingsPage extends ConsumerWidget {
                   prefs.setBool(AppConstants.keyVideoEnabled, v);
                 },
               ),
+              SwitchListTile(
+                secondary: _iconBadge(context, Icons.download_outlined),
+                title: const Text('自动缓存'),
+                subtitle: const Text('播完当前一集自动缓存后面的集，默认关'),
+                value: ref.watch(autoCacheProvider),
+                onChanged: (v) {
+                  ref.read(autoCacheProvider.notifier).state = v;
+                  prefs.setBool(AppConstants.keyAutoCache, v);
+                },
+              ),
+              if (ref.watch(autoCacheProvider)) ...[
+                ListTile(
+                  leading: _iconBadge(context, Icons.format_list_numbered),
+                  title: const Text('缓存集数'),
+                  subtitle: const Text('播完一集后自动缓存后面几集'),
+                  trailing: Text(
+                      '${ref.watch(autoCacheCountProvider)} 集',
+                      style: TextStyle(
+                          fontSize: 14,
+                          color: Theme.of(context).colorScheme.primary)),
+                  onTap: () => _pickCacheCount(context, ref, prefs),
+                ),
+                SwitchListTile(
+                  secondary: _iconBadge(context, Icons.wifi_outlined),
+                  title: const Text('仅 WiFi 下缓存'),
+                  subtitle: const Text('开了只在 WiFi 下缓存，不用流量'),
+                  value: ref.watch(autoCacheWifiOnlyProvider),
+                  onChanged: (v) {
+                    ref.read(autoCacheWifiOnlyProvider.notifier).state = v;
+                    prefs.setBool(AppConstants.keyAutoCacheWifiOnly, v);
+                  },
+                ),
+              ],
+              ListTile(
+                leading: _iconBadge(context, Icons.play_circle_outline),
+                title: const Text('播放设置'),
+                subtitle: const Text('默认倍速、自动连播、定时关闭、断点续播'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () =>
+                    Navigator.of(context).pushNamed('/playback-settings'),
+              ),
+              ListTile(
+                leading: _iconBadge(context, Icons.widgets_outlined),
+                title: const Text('桌面小工具和锁屏'),
+                subtitle: const Text('小工具主题、锁屏封面、默认封面、启动图标'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => Navigator.of(context).pushNamed('/widget-lock'),
+              ),
+              ListTile(
+                leading: _iconBadge(context, Icons.text_fields_outlined),
+                title: const Text('字体大小'),
+                subtitle: Text(
+                    '当前：${{'small': '小', 'standard': '标准', 'large': '大'}[ref.watch(fontSizeProvider)] ?? '标准'}'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => _pickFontSize(context, ref, prefs),
+              ),
+              SwitchListTile(
+                secondary: _iconBadge(context, Icons.manage_search_outlined),
+                title: const Text('聚合搜索'),
+                subtitle: const Text('合并所有源的搜索结果一起显示'),
+                value: ref.watch(aggregateSearchProvider),
+                onChanged: (v) {
+                  ref.read(aggregateSearchProvider.notifier).state = v;
+                  prefs.setBool(AppConstants.keyAggregateSearch, v);
+                },
+              ),
+              SwitchListTile(
+                secondary: _iconBadge(context, Icons.filter_alt_outlined),
+                title: const Text('精确搜索'),
+                subtitle: const Text('只留和关键词相关的结果'),
+                value: ref.watch(exactSearchProvider),
+                onChanged: (v) {
+                  ref.read(exactSearchProvider.notifier).state = v;
+                  prefs.setBool(AppConstants.keyExactSearch, v);
+                },
+              ),
             ],
           ),
           _Section(
@@ -127,6 +203,53 @@ class SettingsPage extends ConsumerWidget {
                       '当前占用 ${PathUtils.formatSize((snap.data ?? 0) * 1024 * 1024)}'),
                   onTap: () => _clearCache(context, ref),
                 ),
+              ),
+            ],
+          ),
+          _Section(
+            title: '其它设置',
+            children: [
+              ListTile(
+                leading: _iconBadge(context, Icons.folder_outlined),
+                title: const Text('本地书库设置'),
+                subtitle: const Text('导入手机本地的音频文件做书库'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => Navigator.of(context).pushNamed('/library'),
+              ),
+              ListTile(
+                leading: _iconBadge(context, Icons.cloud_outlined),
+                title: const Text('WebDAV 播放设置'),
+                subtitle: const Text('连自己的 WebDAV 书库直接播'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => Navigator.of(context).pushNamed('/webdav-play'),
+              ),
+              ListTile(
+                leading: _iconBadge(context, Icons.cloud_queue_outlined),
+                title: const Text('阿里云盘设置'),
+                subtitle: const Text('还没接入'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => Navigator.of(context).pushNamed('/cloud-ali'),
+              ),
+              ListTile(
+                leading: _iconBadge(context, Icons.cloud_queue_outlined),
+                title: const Text('百度网盘设置'),
+                subtitle: const Text('还没接入'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => Navigator.of(context).pushNamed('/cloud-baidu'),
+              ),
+              ListTile(
+                leading: _iconBadge(context, Icons.cloud_queue_outlined),
+                title: const Text('115网盘设置'),
+                subtitle: const Text('还没接入'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => Navigator.of(context).pushNamed('/cloud-115'),
+              ),
+              ListTile(
+                leading: _iconBadge(context, Icons.lan_outlined),
+                title: const Text('SMB 设置'),
+                subtitle: const Text('连接局域网共享，还没接入'),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () => Navigator.of(context).pushNamed('/cloud-smb'),
               ),
             ],
           ),
@@ -173,27 +296,92 @@ class SettingsPage extends ConsumerWidget {
 
   void _showCacheDialog(
       BuildContext context, WidgetRef ref, SharedPreferences prefs) {
-    final controller =
-        TextEditingController(text: '${ref.read(cacheLimitProvider)}');
+    final current = ref.read(cacheLimitProvider);
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('缓存上限（MB）'),
-        content: TextField(
-            controller: controller, keyboardType: TextInputType.number),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context), child: const Text('取消')),
-          TextButton(
+      builder: (ctx) => SimpleDialog(
+        title: const Text('缓存上限'),
+        children: [256, 512, 1024].map((v) {
+          return SimpleDialogOption(
             onPressed: () {
-              final v = int.tryParse(controller.text) ?? 512;
               ref.read(cacheLimitProvider.notifier).state = v;
               prefs.setInt(AppConstants.keyCacheLimitMb, v);
-              Navigator.pop(context);
+              Navigator.pop(ctx);
             },
-            child: const Text('确定'),
-          ),
-        ],
+            child: Row(
+              children: [
+                Text(v == 1024 ? '1 GB' : '$v MB',
+                    style: const TextStyle(fontSize: 15)),
+                if (v == current) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check,
+                      size: 16, color: Theme.of(context).colorScheme.primary),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _pickCacheCount(
+      BuildContext context, WidgetRef ref, SharedPreferences prefs) {
+    final current = ref.read(autoCacheCountProvider);
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('缓存集数'),
+        children: [1, 3, 5].map((v) {
+          return SimpleDialogOption(
+            onPressed: () {
+              ref.read(autoCacheCountProvider.notifier).state = v;
+              prefs.setInt(AppConstants.keyAutoCacheCount, v);
+              Navigator.pop(ctx);
+            },
+            child: Row(
+              children: [
+                Text('$v 集', style: const TextStyle(fontSize: 15)),
+                if (v == current) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check,
+                      size: 16, color: Theme.of(context).colorScheme.primary),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _pickFontSize(
+      BuildContext context, WidgetRef ref, SharedPreferences prefs) {
+    final current = ref.read(fontSizeProvider);
+    const options = {'small': '小', 'standard': '标准', 'large': '大'};
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('字体大小'),
+        children: options.entries.map((e) {
+          return SimpleDialogOption(
+            onPressed: () {
+              ref.read(fontSizeProvider.notifier).state = e.key;
+              prefs.setString(AppConstants.keyFontSize, e.key);
+              Navigator.pop(ctx);
+            },
+            child: Row(
+              children: [
+                Text(e.value, style: const TextStyle(fontSize: 15)),
+                if (e.key == current) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check,
+                      size: 16, color: Theme.of(context).colorScheme.primary),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
       ),
     );
   }

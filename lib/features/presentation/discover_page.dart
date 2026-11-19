@@ -2,7 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/constants/app_constants.dart';
+import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../plugins/data/home_feed.dart';
 import '../../plugins/data/plugin_providers.dart';
@@ -10,7 +13,12 @@ import '../../plugins/engine/plugin_engine.dart';
 import '../../plugins/model/plugin_source.dart';
 import '../../plugins/presentation/source_book_page.dart';
 import '../../plugins/presentation/source_picker_sheet.dart';
+import '../../plugins/presentation/source_search_page.dart';
 import '../../shared/widgets/common.dart';
+
+/// 内容显示方式：列表 / 表格 / 自动（按源记住，默认自动）
+String displayModeOf(SharedPreferences prefs, String sourceId) =>
+    prefs.getString(AppConstants.keyDisplayModePrefix + sourceId) ?? 'auto';
 
 /// 分类项
 class DiscoverCategory {
@@ -109,11 +117,66 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     _source = source;
 
     return Scaffold(
+      drawer: buildAppDrawer(context),
       appBar: AppBar(
-        title: const Text('发现'),
+        leading: Builder(
+          builder: (ctx) => IconButton(
+            icon: const Icon(Icons.menu),
+            tooltip: '菜单',
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
+          ),
+        ),
+        title: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: source == null
+              ? null
+              : () async {
+                  final picked = await showSourcePicker(context, ref,
+                      selectedId: source.id);
+                  if (picked != null) {
+                    setHomeSource(ref, picked);
+                    ref.invalidate(discoverCategoriesProvider(picked));
+                  }
+                },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    source?.name ?? '发现',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (source != null) ...[
+                  const SizedBox(width: 2),
+                  const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+                ],
+              ],
+            ),
+          ),
+        ),
         actions: [
-          if (source != null) _sourceChip(source),
-          const SizedBox(width: 12),
+          if (source != null) ...[
+            IconButton(
+              icon: Icon(_modeIcon(_mode)),
+              tooltip: '显示方式：${_modeLabel(_mode)}',
+              onPressed: () => _cycleMode(source.id),
+            ),
+            IconButton(
+              icon: const Icon(Icons.search_rounded),
+              tooltip: '搜索',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => SourceSearchPage(
+                  type: source.type,
+                  initialSourceId: source.id,
+                ),
+              )),
+            ),
+          ],
+          const SizedBox(width: 6),
         ],
       ),
       body: source == null
@@ -126,44 +189,46 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     );
   }
 
-  Widget _sourceChip(PluginSource s) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () async {
-        final picked = await showSourcePicker(context, ref, selectedId: s.id);
-        if (picked != null) {
-          setHomeSource(ref, picked);
-          ref.invalidate(discoverCategoriesProvider(picked));
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: context.palette.primarySoft,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                s.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 2),
-            Icon(Icons.expand_more,
-                size: 16, color: Theme.of(context).colorScheme.primary),
-          ],
-        ),
-      ),
-    );
+  String get _mode => displayModeOf(
+      ref.read(sharedPrefsProvider), _source?.id ?? '');
+
+  static const _modeOrder = ['auto', 'list', 'table'];
+
+  String _modeLabel(String mode) {
+    switch (mode) {
+      case 'list':
+        return '列表';
+      case 'table':
+        return '表格';
+      default:
+        return '自动';
+    }
+  }
+
+  IconData _modeIcon(String mode) {
+    switch (mode) {
+      case 'list':
+        return Icons.view_list;
+      case 'table':
+        return Icons.grid_view;
+      default:
+        return Icons.view_module;
+    }
+  }
+
+  void _cycleMode(String sourceId) {
+    final prefs = ref.read(sharedPrefsProvider);
+    final cur = displayModeOf(prefs, sourceId);
+    final next =
+        _modeOrder[(_modeOrder.indexOf(cur) + 1) % _modeOrder.length];
+    prefs.setString(
+        AppConstants.keyDisplayModePrefix + sourceId, next);
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('显示方式：${_modeLabel(next)}'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 1),
+    ));
   }
 
   Widget _noSource() {
@@ -250,40 +315,16 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     );
   }
 
+  /// 没分类的源直接显示推荐，不留白
   Widget _noCategories(PluginSource source) {
     return ListView(
       padding: pagePadding(context, top: 8, bottom: 24),
       children: [
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: context.cardColor,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: context.palette.outline),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.layers_outlined,
-                      size: 18, color: context.subtleColor),
-                  const SizedBox(width: 8),
-                  const Text('这个源没有分类',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w600)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '「${source.name}」没有提供分类接口，下面直接给你看它的推荐内容。',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: Text('「${source.name}」没有分类，直接看推荐',
+              style: Theme.of(context).textTheme.bodySmall),
         ),
-        const SizedBox(height: 14),
         _recommendFallback(source),
       ],
     );
@@ -439,6 +480,8 @@ class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final mode = displayModeOf(
+        ref.read(sharedPrefsProvider), widget.sourceId);
     return Scaffold(
       appBar: AppBar(title: Text(widget.category.name)),
       body: _items.isEmpty && _loading
@@ -471,47 +514,156 @@ class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
                     ),
                   ),
                 )
-              : GridView.builder(
-                  controller: _scroll,
-                  padding: pagePadding(context, top: 10, bottom: 24),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 0.62,
-                  ),
-                  itemCount: _items.length + 1,
-                  itemBuilder: (ctx, i) {
-                    if (i >= _items.length) {
-                      return Center(
-                        child: _loading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2))
-                            : Text(_hasMore ? '' : '没有更多了',
-                                style: Theme.of(ctx).textTheme.bodySmall),
-                      );
-                    }
-                    final b = _items[i];
-                    return _FeedTile(
-                      book: b,
-                      onTap: () {
-                        Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => SourceBookPage(
-                            sourceId: widget.sourceId,
-                            bookUrl: b.url,
-                            title: b.title,
-                            coverUrl: b.cover,
-                            author: b.author,
-                            intro: b.intro,
-                          ),
-                        ));
+              : mode == 'list'
+                  ? _listView()
+                  : GridView.builder(
+                      controller: _scroll,
+                      padding: pagePadding(context, top: 10, bottom: 24),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 10,
+                        childAspectRatio: 0.62,
+                      ),
+                      itemCount: _items.length + 1,
+                      itemBuilder: (ctx, i) {
+                        if (i >= _items.length) {
+                          return Center(
+                            child: _loading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : Text(_hasMore ? '' : '没有更多了',
+                                    style: Theme.of(ctx).textTheme.bodySmall),
+                          );
+                        }
+                        final b = _items[i];
+                        return _FeedTile(
+                          book: b,
+                          onTap: () => _openBook(b),
+                        );
                       },
-                    );
-                  },
+                    ),
+    );
+  }
+
+  void _openBook(FeedBook b) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SourceBookPage(
+        sourceId: widget.sourceId,
+        bookUrl: b.url,
+        title: b.title,
+        coverUrl: b.cover,
+        author: b.author,
+        intro: b.intro,
+      ),
+    ));
+  }
+
+  /// 列表显示：一行一个，带封面和简介
+  Widget _listView() {
+    return ListView.separated(
+      controller: _scroll,
+      padding: pagePadding(context, top: 10, bottom: 24),
+      itemCount: _items.length + 1,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (ctx, i) {
+        if (i >= _items.length) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: _loading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(_hasMore ? '' : '没有更多了',
+                      style: Theme.of(ctx).textTheme.bodySmall),
+            ),
+          );
+        }
+        final b = _items[i];
+        return InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _openBook(b),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: context.cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: context.palette.outline),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: b.cover.isEmpty
+                      ? Container(
+                          width: 54,
+                          height: 72,
+                          color: context.palette.surfaceAlt,
+                          alignment: Alignment.center,
+                          child: Text(
+                              b.title.isEmpty ? '?' : b.title.characters.first,
+                              style: TextStyle(
+                                  color: context.subtleColor, fontSize: 18)),
+                        )
+                      : Image.network(
+                          b.cover,
+                          width: 54,
+                          height: 72,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            width: 54,
+                            height: 72,
+                            color: context.palette.surfaceAlt,
+                          ),
+                        ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(b.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w600)),
+                      if (b.author.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(b.author,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(fontSize: 12)),
+                      ],
+                      if (b.intro.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(b.intro,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(fontSize: 11, height: 1.4)),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right,
+                    size: 18, color: context.subtleColor),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

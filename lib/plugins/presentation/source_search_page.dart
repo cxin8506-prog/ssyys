@@ -5,9 +5,11 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/di/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/common.dart';
+import '../data/home_feed.dart';
 import '../data/plugin_providers.dart';
 import '../engine/plugin_engine.dart';
 import '../model/plugin_source.dart';
+import 'login_web_page.dart';
 import 'source_book_page.dart';
 
 /// 一个源的搜索结果
@@ -16,7 +18,23 @@ class _Group {
   final List<Map<String, dynamic>> items;
   final String? error;
 
-  _Group({required this.source, required this.items, this.error});
+  /// 搜索被验证拦截时，点这个地址去过验证
+  final String? verificationUrl;
+
+  /// 验证页用的 UA（决定开电脑版还是手机版 WebView）
+  final String verificationUa;
+
+  /// 验证完等多久再重搜（毫秒）
+  final int verificationDelayMs;
+
+  _Group({
+    required this.source,
+    required this.items,
+    this.error,
+    this.verificationUrl,
+    this.verificationUa = '',
+    this.verificationDelayMs = 0,
+  });
 }
 
 /// 源搜索：可以选「全部」并发搜所有启用的源，也可以只搜某一个。
@@ -44,18 +62,23 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
   final _scroll = ScrollController();
 
   String? _sourceId;
+  String _type = AppConstants.typeAudio;
   bool _loading = false;
   bool _loadingMore = false;
   bool _searched = false;
   int _page = 1;
+  int _pending = 0;
+  int _searchGen = 0;
   String? _error;
   String _keyword = '';
   List<_Group> _groups = [];
   List<String> _history = [];
+  List<String> _hotWords = [];
 
   @override
   void initState() {
     super.initState();
+    _type = widget.type;
     _sourceId = widget.initialSourceId ?? _allKey;
     _scroll.addListener(() {
       if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 200) {
@@ -64,6 +87,9 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     });
     final prefs = ref.read(sharedPrefsProvider);
     _history = prefs.getStringList(_historyKey) ?? [];
+    // 搜索框里显示上次搜过的词
+    if (_history.isNotEmpty) _ctrl.text = _history.first;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadHot());
   }
 
   @override
@@ -78,14 +104,87 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
   List<PluginSource> _sources() {
     final all = ref.watch(sourceListProvider).value ?? const <PluginSource>[];
     return all
-        .where((s) => s.type == widget.type && s.enabled)
+        .where((s) => s.type == _type && s.enabled)
         .toList(growable: false);
   }
 
   List<PluginSource> _targets(List<PluginSource> sources) {
-    if (_isAll) return sources;
+    if (_isAll) {
+      // 聚合搜索关了：只搜当前源，不合并所有源
+      if (!ref.read(aggregateSearchProvider)) {
+        final home = ref.read(activeHomeSourceProvider);
+        final hit = home == null
+            ? <PluginSource>[]
+            : sources.where((s) => s.id == home.id).toList();
+        return hit.isEmpty ? sources.take(1).toList() : hit;
+      }
+      return sources;
+    }
     final hit = sources.where((s) => s.id == _sourceId).toList();
     return hit.isEmpty ? sources : hit;
+  }
+
+  /// 热门搜索：从当前源拿，没有就不显示（不自己编）
+  Future<void> _loadHot() async {
+    final sources = _sources();
+    if (sources.isEmpty) return;
+    PluginSource? target;
+    if (_isAll) {
+      target = ref.read(activeHomeSourceProvider);
+      if (target != null && target.type != _type) target = null;
+      target ??= sources.first;
+    } else {
+      final hit = sources.where((s) => s.id == _sourceId).toList();
+      target = hit.isEmpty ? sources.first : hit.first;
+    }
+    try {
+      final engine = engineForSource(ref, target);
+      await engine.attach(target);
+      dynamic raw;
+      try {
+        raw = await engine.invoke('hot', params: {});
+      } catch (_) {
+        raw = await engine.invoke('hotSearch', params: {});
+      }
+      final words = <String>[];
+      final list = raw is List
+          ? raw
+          : (raw is Map ? (raw['list'] ?? raw['data'] ?? raw['hot']) : null);
+      if (list is List) {
+        for (final e in list) {
+          final w = e is Map
+              ? '${e['name'] ?? e['title'] ?? e['keyword'] ?? ''}'
+              : '$e';
+          if (w.trim().isNotEmpty) words.add(w.trim());
+        }
+      }
+      if (mounted) setState(() => _hotWords = words.take(10).toList());
+    } catch (_) {
+      // 源没有热门接口就不显示
+    }
+  }
+
+  /// 切换听书 / 视频：用同一个关键词立刻重搜
+  void _toggleType() {
+    setState(() {
+      _type = _type == AppConstants.typeAudio
+          ? AppConstants.typeVideo
+          : AppConstants.typeAudio;
+      _sourceId = _allKey;
+      _hotWords = [];
+    });
+    _loadHot();
+    if (_keyword.isNotEmpty) _search(_keyword);
+  }
+
+  void _clearSearch() {
+    _ctrl.clear();
+    setState(() {
+      _keyword = '';
+      _searched = false;
+      _groups = [];
+      _error = null;
+    });
   }
 
   @override
@@ -97,14 +196,39 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
           controller: _ctrl,
           autofocus: _history.isEmpty,
           textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          cursorColor: Colors.white,
+          decoration: const InputDecoration(
             hintText: '搜索书名 / 作者 / 视频名',
+            hintStyle: TextStyle(color: Colors.white70, fontSize: 15),
             border: InputBorder.none,
             filled: false,
           ),
           onSubmitted: (v) => _search(v),
         ),
         actions: [
+          TextButton(
+            onPressed: _toggleType,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 36),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_type == AppConstants.typeAudio ? '听书' : '视频',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
+                const Icon(Icons.swap_horiz, size: 16),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.clear),
+            tooltip: '清空',
+            onPressed: _clearSearch,
+          ),
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () => _search(_ctrl.text),
@@ -132,7 +256,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
           children: [
             Icon(Icons.extension_outlined, size: 48, color: context.subtleColor),
             const SizedBox(height: 14),
-            Text('还没有可用的${widget.type == 'audio' ? '听书' : '视频'}源',
+            Text('还没有可用的${_type == 'audio' ? '听书' : '视频'}源',
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             Text('先导入一个插件源，再来搜索',
@@ -207,7 +331,11 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
               label: '全部',
               icon: Icons.apps,
               selected: _isAll,
-              onTap: () => setState(() => _sourceId = _allKey),
+              onTap: () {
+                setState(() => _sourceId = _allKey);
+                _loadHot();
+                if (_keyword.isNotEmpty) _search(_keyword);
+              },
             );
           }
           final s = sources[i - 1];
@@ -217,7 +345,10 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
             selected: !_isAll && _sourceId == s.id,
             onTap: () {
               setState(() => _sourceId = s.id);
-              setCurrentSource(ref, widget.type, s.id);
+              setCurrentSource(ref, _type, s.id);
+              _loadHot();
+              // 切到另一个源，用同一个关键词立刻重新搜一遍
+              if (_keyword.isNotEmpty) _search(_keyword);
             },
           );
         },
@@ -226,13 +357,25 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
   }
 
   Widget _buildBody(List<PluginSource> sources) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
     if (!_searched) {
       return _historyView();
     }
-    if (_groups.every((g) => g.items.isEmpty)) {
+    // 正在搜、一个结果都还没回来
+    if (_loading && _groups.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 14),
+            Text('正在搜索…'),
+          ],
+        ),
+      );
+    }
+    // 都搜完了、都没有结果也没有报错
+    if (_pending <= 0 &&
+        _groups.every((g) => g.items.isEmpty && g.error == null)) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(28),
@@ -253,11 +396,35 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     }
 
     final rows = <Widget>[];
+    // 还在搜别的源：顶部显示“正在搜索”，每个源搜完就先显示
+    if (_pending > 0) {
+      rows.add(Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+            Text('正在搜索…（已出 ${_groups.length} 个源的结果）',
+                style: TextStyle(fontSize: 12, color: context.subtleColor)),
+          ],
+        ),
+      ));
+    }
     for (final g in _groups) {
-      if (g.items.isEmpty && g.error == null) continue;
       rows.add(_groupHeader(g));
       if (g.error != null) {
         rows.add(_groupError(g));
+      } else if (g.items.isEmpty) {
+        // 这个源搜不到：写清楚，不要整个分组直接消失
+        rows.add(Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+          child: Text('这个源没有结果',
+              style: TextStyle(fontSize: 12.5, color: context.subtleColor)),
+        ));
       }
       for (final r in g.items) {
         rows.add(Padding(
@@ -314,28 +481,76 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
         color: context.palette.surfaceAlt,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Text('这个源搜索失败：${g.error}',
-          style: TextStyle(fontSize: 11.5, color: context.subtleColor)),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Text('这个源搜索失败，点一下重试',
+                style: TextStyle(fontSize: 11.5)),
+          ),
+          if (g.verificationUrl != null) ...[
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: () => _verifyAndRetry(g),
+              child: const Text('去验证'),
+            ),
+          ],
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: () => _retryGroup(g),
+            child: const Text('重试'),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _historyView() {
-    if (_history.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.search, size: 44, color: context.subtleColor),
-            const SizedBox(height: 12),
-            Text('输入关键词搜索',
-                style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 6),
-            Text(_isAll ? '会在所有启用中的源里同时搜' : '只搜当前选中的源',
-                style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ),
-      );
+  /// 只重搜这一个源
+  Future<void> _retryGroup(_Group g) async {
+    if (_keyword.isEmpty) return;
+    final gen = _searchGen;
+    setState(() => _pending++);
+    final fresh = await _searchOne(g.source, _keyword, 1);
+    if (!mounted || gen != _searchGen) return;
+    setState(() {
+      _groups = [
+        for (final o in _groups)
+          o.source.id == g.source.id ? fresh : o,
+      ];
+      _pending--;
+    });
+  }
+
+  /// 打开验证页（WebView），用户过掉验证后等一会儿再重搜这个源
+  Future<void> _verifyAndRetry(_Group g) async {
+    final url = g.verificationUrl;
+    if (url == null || url.isEmpty) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LoginWebPage(
+        title: '${g.source.name} · 验证',
+        url: url,
+        desktop: g.verificationUa.contains('Windows'),
+      ),
+    ));
+    if (!mounted) return;
+    if (g.verificationDelayMs > 0) {
+      await Future.delayed(
+          Duration(milliseconds: g.verificationDelayMs));
     }
+    if (!mounted) return;
+    setState(() => _loading = true);
+    final group = await _searchOne(g.source, _keyword, 1);
+    if (!mounted) return;
+    setState(() {
+      _groups = [
+        for (final old in _groups)
+          old.source.id == g.source.id ? group : old,
+      ];
+      _loading = false;
+    });
+  }
+
+  /// 搜索历史：一行一个，点直接搜；下面是热门搜索（源给的才显示）
+  Widget _historyView() {
     return ListView(
       padding: pagePadding(context, top: 16, bottom: 24),
       children: [
@@ -350,29 +565,83 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
             ),
           ],
         ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final h in _history)
-              InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: () {
-                  _ctrl.text = h;
-                  _search(h);
-                },
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: context.palette.surfaceAlt,
-                    borderRadius: BorderRadius.circular(16),
+        if (_history.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('输入关键词搜索',
+                style: Theme.of(context).textTheme.bodySmall),
+          )
+        else
+          for (final h in _history)
+            InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () {
+                _ctrl.text = h;
+                _search(h);
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 11),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                        color: context.palette.outline, width: 0.6),
                   ),
-                  child: Text(h, style: const TextStyle(fontSize: 12.5)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.history,
+                        size: 16, color: context.subtleColor),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(h,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13.5)),
+                    ),
+                    Icon(Icons.north_west,
+                        size: 14, color: context.subtleColor),
+                  ],
                 ),
               ),
-          ],
-        ),
+            ),
+        if (_hotWords.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          const Text('热门搜索',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          for (final w in _hotWords)
+            InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () {
+                _ctrl.text = w;
+                _search(w);
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 4, vertical: 11),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                        color: context.palette.outline, width: 0.6),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.trending_up,
+                        size: 16, color: context.subtleColor),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(w,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13.5)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -498,23 +767,28 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     FocusScope.of(context).unfocus();
     _keyword = kw;
     _page = 1;
+    final gen = ++_searchGen;
+    final targets = _targets(sources);
     setState(() {
-      _loading = true;
       _error = null;
       _searched = true;
       _groups = [];
+      _pending = targets.length;
+      _loading = true;
     });
     _saveHistory(kw);
 
-    final targets = _targets(sources);
-    final groups = await Future.wait(
-      targets.map((s) => _searchOne(s, kw, 1)),
-    );
-    if (!mounted) return;
-    setState(() {
-      _groups = groups;
-      _loading = false;
-    });
+    // 每个源搜完就先显示，不等全部搜完
+    for (final s in targets) {
+      _searchOne(s, kw, 1).then((g) {
+        if (!mounted || gen != _searchGen) return;
+        setState(() {
+          _groups = [..._groups, g];
+          _pending--;
+          if (_pending <= 0) _loading = false;
+        });
+      });
+    }
   }
 
   Future<void> _loadMore() async {
@@ -530,15 +804,20 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     if (!mounted) return;
     setState(() {
       _page = next;
+      // 增量返回后分组顺序不等于源顺序，按源 id 合并
+      final byId = {for (final m in more) m.source.id: m};
       _groups = [
-        for (var i = 0; i < _groups.length; i++)
+        for (final g in _groups)
           _Group(
-            source: _groups[i].source,
+            source: g.source,
             items: [
-              ..._groups[i].items,
-              if (i < more.length) ...more[i].items,
+              ...g.items,
+              ...(byId[g.source.id]?.items ?? const []),
             ],
-            error: _groups[i].error,
+            error: g.error,
+            verificationUrl: g.verificationUrl,
+            verificationUa: g.verificationUa,
+            verificationDelayMs: g.verificationDelayMs,
           ),
       ];
       _loadingMore = false;
@@ -559,13 +838,52 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
       await engine.attach(source);
       final raw = await engine
           .invoke('search', params: {'keyword': kw, 'page': page});
-      return _Group(source: source, items: _normalize(raw));
+      var items = _normalize(raw);
+      // 精确搜索（默认开）：过滤掉和关键词不相关的结果
+      if (ref.read(exactSearchProvider)) {
+        final kwLower = kw.toLowerCase();
+        items = items.where((e) {
+          final name =
+              '${e['name'] ?? e['title'] ?? ''}'.toLowerCase();
+          final author = '${e['author'] ?? ''}'.toLowerCase();
+          return name.contains(kwLower) || author.contains(kwLower);
+        }).toList();
+      }
+      return _Group(source: source, items: items);
     } catch (e) {
       final msg = '$e';
       final friendly = msg.contains('METHOD_NOT_FOUND') || msg.contains('未实现')
           ? '没有搜索方法'
           : msg;
-      return _Group(source: source, items: const [], error: friendly);
+      // 搜索被验证拦截（403/429）：给个「去验证」入口，过完验证再搜一次
+      String? verifyUrl;
+      String verifyUa = '';
+      var verifyDelay = 0;
+      final blocked = msg.contains('403') ||
+          msg.contains('429') ||
+          msg.contains('验证') ||
+          msg.contains('challenge');
+      if (source.isTingShu && blocked) {
+        try {
+          final engine = ref.read(tingShuEngineProvider);
+          await engine.attach(source);
+          final info = await engine.verificationInfo(kw);
+          if (info != null && info['validated'] != true) {
+            verifyUrl = '${info['url'] ?? ''}';
+            if (verifyUrl.isEmpty) verifyUrl = null;
+            verifyUa = '${info['ua'] ?? ''}';
+            verifyDelay = (info['delayMs'] as num?)?.toInt() ?? 0;
+          }
+        } catch (_) {}
+      }
+      return _Group(
+        source: source,
+        items: const [],
+        error: verifyUrl != null ? '这个源要先过验证才能搜' : friendly,
+        verificationUrl: verifyUrl,
+        verificationUa: verifyUa,
+        verificationDelayMs: verifyDelay,
+      );
     }
   }
 
@@ -589,7 +907,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     final list = [..._history];
     list.remove(kw);
     list.insert(0, kw);
-    final trimmed = list.take(12).toList();
+    final trimmed = list.take(20).toList();
     prefs.setStringList(_historyKey, trimmed);
     setState(() => _history = trimmed);
   }

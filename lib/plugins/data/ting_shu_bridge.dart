@@ -62,4 +62,65 @@ class TingShuBridge {
       return raw;
     }
   }
+
+  /// 源的登录入口（ILogin）：没有返回 null，有返回 {url, desktop}
+  static Future<Map<String, dynamic>?> loginInfo({
+    required String jarPath,
+    required String entryClass,
+    required int index,
+  }) async {
+    try {
+      final r = await _channel.invokeMethod<String>('loginInfo', {
+        'path': jarPath,
+        'entryClass': entryClass,
+        'index': index,
+      });
+      if (r == null || r.isEmpty) return null;
+      final d = jsonDecode(r);
+      return d is Map ? Map<String, dynamic>.from(d) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 源的搜索验证（ISearchVerification）：没有返回 null，
+  /// 有返回 {url, ua, delayMs, validated}
+  static Future<Map<String, dynamic>?> verificationInfo({
+    required String jarPath,
+    required String entryClass,
+    required int index,
+    required String keyword,
+  }) async {
+    try {
+      final r = await _channel.invokeMethod<String>('verificationInfo', {
+        'path': jarPath,
+        'entryClass': entryClass,
+        'index': index,
+        'params': {'keyword': keyword},
+      });
+      if (r == null || r.isEmpty) return null;
+      final d = jsonDecode(r);
+      return d is Map ? Map<String, dynamic>.from(d) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 搜索验证过没有（源自己读 Cookie 判断）
+  static Future<bool> isSearchValidated({
+    required String jarPath,
+    required String entryClass,
+    required int index,
+  }) async {
+    try {
+      final r = await _channel.invokeMethod<String>('isSearchValidated', {
+        'path': jarPath,
+        'entryClass': entryClass,
+        'index': index,
+      });
+      return r == 'true';
+    } catch (_) {
+      return false;
+    }
+  }
 }

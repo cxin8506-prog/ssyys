@@ -300,6 +300,21 @@ class _SyncPageState extends ConsumerState<SyncPage> {
     _toast('已保存到本机');
   }
 
+  /// 把报错翻译成人话，不直接甩英文原文
+  String _friendlyError(Object e) {
+    final msg = '$e';
+    if (msg.contains('404')) return '地址错了（服务器返回 404），检查服务器地址';
+    if (msg.contains('401') || msg.contains('403')) {
+      return '账号或密码不对（密码填应用密码，不是登录密码）';
+    }
+    if (msg.contains('SocketException') ||
+        msg.contains('timed out') ||
+        msg.contains('Connection')) {
+      return '连不上服务器，检查网络和地址';
+    }
+    return '请检查地址、账号、密码和网络';
+  }
+
   Future<void> _test() async {
     _saveConfig();
     setState(() {
@@ -311,7 +326,7 @@ class _SyncPageState extends ConsumerState<SyncPage> {
       setState(() => _status = '连接成功，账号可用');
       _toast('连接成功');
     } catch (e) {
-      setState(() => _status = '连接失败：$e');
+      setState(() => _status = '连接失败：${_friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -332,7 +347,7 @@ class _SyncPageState extends ConsumerState<SyncPage> {
           _status = '上传成功：${file.uri.pathSegments.last}');
       await _refresh();
     } catch (e) {
-      setState(() => _status = '上传失败：$e');
+      setState(() => _status = '上传失败：${_friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -348,7 +363,7 @@ class _SyncPageState extends ConsumerState<SyncPage> {
         _status = '共 ${list.length} 个云端备份';
       });
     } catch (e) {
-      setState(() => _status = '读取列表失败：$e');
+      setState(() => _status = '读取列表失败：${_friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

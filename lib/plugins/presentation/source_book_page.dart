@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/di/providers.dart';
 import '../../../core/theme/app_theme.dart';
+import '../data/auto_cache.dart';
 import '../data/login_entry.dart';
 import '../data/plugin_providers.dart';
+import '../data/plugin_resume.dart';
 import '../model/plugin_source.dart';
 import '../model/plugin_source.dart' show PluginSource;
 import '../../features/video/presentation/video_player_page.dart';
@@ -47,6 +50,10 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
   String? _voiceError;
   bool _needLogin = false;
   int _playingIndex = -1;
+  // 最近一次取到的播放请求头（Referer/UA 等），传给播放器用
+  Map<String, String> _lastMediaHeaders = const {};
+  // 已经缓存到本地的集（章节地址集合，选集列表里标下载图标）
+  Set<String> _cachedUrls = {};
 
   @override
   void initState() {
@@ -108,6 +115,11 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
         chapters = _detail['chapters'];
       }
       _chapters = _normalizeChapters(chapters);
+      // 哪些集已经缓存到本地了（选集列表标出来）
+      try {
+        _cachedUrls =
+            await AutoCache.cachedChapterUrls(s.id, widget.bookUrl);
+      } catch (_) {}
 
       // 音色 / 线路：源自己会给列表，自动拉一次并记下来，不用用户手动点
       if (_voices.isEmpty && s.isAudio) {
@@ -279,6 +291,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
   }
 
   Widget _header() {
+    final fontScale = fontScaleFor(ref.watch(fontSizeProvider));
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -313,10 +326,8 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
                 Text(_intro,
                     maxLines: 4,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(height: 1.5)),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        height: 1.5, fontSize: 12 * fontScale)),
             ],
           ),
         ),
@@ -493,6 +504,8 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
   Widget _chapterTile(int i) {
     final ch = _chapters[i];
     final playing = _playingIndex == i;
+    final cached = _cachedUrls.contains('${ch['url']}');
+    final fontScale = fontScaleFor(ref.watch(fontSizeProvider));
     return InkWell(
       borderRadius: BorderRadius.circular(10),
       onTap: () => _play(i),
@@ -518,11 +531,15 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 14 * fontScale,
                       color: playing
                           ? Theme.of(context).colorScheme.primary
                           : null)),
             ),
+            if (cached)
+              Icon(Icons.download_done,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.primary),
             Icon(playing ? Icons.graphic_eq : Icons.play_arrow,
                 size: 18,
                 color: playing
@@ -545,30 +562,118 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     }
     setState(() => _playingIndex = index);
     try {
+      // 这本书这集有没有断点：有就从断点接着播
+      final resume =
+          await PluginResumeStore.load(resumeKey(s.id, widget.bookUrl));
+      final resumeMs = (resume != null && resume.chapterIndex == index)
+          ? resume.positionMs
+          : 0;
+      String lineName = '';
+      for (final l in _lines) {
+        if ('${l['id']}' == _lineId) {
+          lineName = '${l['name'] ?? ''}';
+          break;
+        }
+      }
+      // 这一集已经缓存到本地：没网也能播，直接播本地文件
+      final cached =
+          await AutoCache.cachedPathFor(s.id, widget.bookUrl, url);
+      if (cached != null) {
+        if (!mounted) return;
+        if (_isAudio) {
+          await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => NetworkAudioPage(
+              url: cached,
+              title: '${ch['name']}',
+              subtitle: widget.title,
+              sourceId: _source?.id ?? '',
+              sourceName: s.name,
+              bookName: widget.title,
+              bookUrl: widget.bookUrl,
+              startAt: Duration(milliseconds: resumeMs),
+              coverUrl: _cover,
+              chapterUrl: url,
+              lineId: _lineId ?? '',
+              lineName: lineName,
+              voiceId: _voiceId ?? '',
+              playlist: _chapters.map((e) => '${e['name']}').toList(),
+              startIndex: index,
+              onNext: (i) => _play(i),
+            ),
+          ));
+        } else {
+          await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => VideoPlayerPage(
+              path: cached,
+              network: false,
+              title: '${widget.title} · ${ch['name']}',
+              startAtMs: resumeMs,
+              sourceId: s.id,
+              sourceName: s.name,
+              bookUrl: widget.bookUrl,
+              bookTitle: widget.title,
+              chapterNames:
+                  _chapters.map((e) => '${e['name']}').toList(),
+              lineName: lineName,
+              voiceId: _voiceId ?? '',
+            ),
+          ));
+        }
+        return;
+      }
       final mediaUrl = await _resolveMediaUrl(index, _lineId);
       if (mediaUrl.isEmpty) {
         throw Exception('源没有返回可播放地址');
       }
       if (!mounted) return;
+      // 播完当前一集，后台自动缓存后面的集（开关关着就不下）
+      AutoCache.prefetch(
+        ref: ref,
+        source: s,
+        bookUrl: widget.bookUrl,
+        chapters: _chapters,
+        currentIndex: index,
+        lineId: _lineId,
+        voiceId: _voiceId,
+      );
       if (_isAudio) {
-        Navigator.of(context).push(MaterialPageRoute(
+        await Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => NetworkAudioPage(
             url: mediaUrl,
+            headers: _lastMediaHeaders,
             title: '${ch['name']}',
             subtitle: widget.title,
             sourceId: _source?.id ?? '',
+            sourceName: s.name,
             bookName: widget.title,
+            bookUrl: widget.bookUrl,
+            startAt: Duration(milliseconds: resumeMs),
+            coverUrl: _cover,
+            chapterUrl: url,
+            lineId: _lineId ?? '',
+            lineName: lineName,
+            voiceId: _voiceId ?? '',
             playlist: _chapters.map((e) => '${e['name']}').toList(),
             startIndex: index,
             onNext: (i) => _play(i),
           ),
         ));
       } else {
-        Navigator.of(context).push(MaterialPageRoute(
+        await Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => VideoPlayerPage(
             path: mediaUrl,
             network: true,
+            headers: _lastMediaHeaders,
             title: '${widget.title} · ${ch['name']}',
+            startAtMs: resumeMs,
+            sourceId: s.id,
+            sourceName: s.name,
+            bookUrl: widget.bookUrl,
+            bookTitle: widget.title,
+            chapterNames:
+                _chapters.map((e) => '${e['name']}').toList(),
+            lineName: lineName,
+            voiceId: _voiceId ?? '',
             lines: [
               for (final l in _lines)
                 {'id': '${l['id']}', 'name': '${l['name'] ?? l['id']}'}
@@ -581,7 +686,13 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     } catch (e) {
       _toast('拿播放地址失败：$e');
     } finally {
-      if (mounted) setState(() => _playingIndex = -1);
+      if (mounted) {
+        setState(() => _playingIndex = -1);
+        // 播放页退出后刷新一下缓存标记
+        AutoCache.cachedChapterUrls(s.id, widget.bookUrl)
+            .then((v) => mounted ? setState(() => _cachedUrls = v) : null)
+            .catchError((_) {});
+      }
     }
   }
 
@@ -607,6 +718,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
       'lineId': lineId,
     });
     final u = _extractUrl(r);
+    _lastMediaHeaders = _extractHeaders(r);
     if (u.isNotEmpty && lineId != null && lineId != _lineId) {
       // 记住这次用的线路，下次打开默认还用它
       _lineId = lineId;
@@ -619,6 +731,19 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
       } catch (_) {}
     }
     return u;
+  }
+
+  /// 从 content 返回里取播放请求头（没有就是空）
+  Map<String, String> _extractHeaders(dynamic r) {
+    if (r is Map) {
+      final h = r['headers'];
+      if (h is Map) {
+        return {
+          for (final e in h.entries) '${e.key}': '${e.value}',
+        };
+      }
+    }
+    return const {};
   }
 
   String _extractUrl(dynamic r) {

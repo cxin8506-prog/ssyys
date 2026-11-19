@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/path_utils.dart';
 import '../../../shared/widgets/common.dart';
 import '../data/audio_handler.dart';
 import '../data/repository_providers.dart';
@@ -11,7 +14,17 @@ import '../domain/media_item.dart' as domain;
 /// 听书播放页
 class AudioPlayerPage extends ConsumerStatefulWidget {
   final domain.MediaItem item;
-  const AudioPlayerPage({super.key, required this.item});
+
+  /// 书签跳转 / 续播指定：从指定章节、指定位置开始（不传就用保存的断点）
+  final String? initialChapterId;
+  final int? initialPositionMs;
+
+  const AudioPlayerPage({
+    super.key,
+    required this.item,
+    this.initialChapterId,
+    this.initialPositionMs,
+  });
 
   @override
   ConsumerState<AudioPlayerPage> createState() => _AudioPlayerPageState();
@@ -22,6 +35,10 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
   int _currentIndex = 0;
   bool _ready = false;
 
+  // 定时关闭倒计时（handler 里没有剩余时间，页面自己记）
+  Timer? _sleepTick;
+  Duration? _sleepLeft;
+
   @override
   void initState() {
     super.initState();
@@ -30,6 +47,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
 
   @override
   void dispose() {
+    _sleepTick?.cancel();
     // 离开播放页时保存断点进度
     try {
       final pos = audioHandler.playbackState.valueOrNull?.updatePosition ??
@@ -60,14 +78,21 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
         .map((c) => c.path!)
         .toList();
     int startIndex = 0;
-    if (paths.isNotEmpty && progress != null && progress.chapterId != null) {
+    int startPositionMs = 0;
+    if (widget.initialChapterId != null) {
+      final idx = chapters.indexWhere((c) => c.id == widget.initialChapterId);
+      if (idx >= 0 && idx < paths.length) startIndex = idx;
+      startPositionMs = widget.initialPositionMs ?? 0;
+    } else if (paths.isNotEmpty && progress != null && progress.chapterId != null) {
       final idx = chapters.indexWhere((c) => c.id == progress.chapterId);
       if (idx >= 0 && idx < paths.length) startIndex = idx;
+      startPositionMs = progress.positionMs;
     }
     if (paths.isNotEmpty) {
       await handler.setUris(paths, initialIndex: startIndex);
-      if (progress != null && progress.positionMs > 0 && startIndex == 0) {
-        await handler.seek(Duration(milliseconds: progress.positionMs));
+      // 播到第 N 章中途退出再进，也要回到原来的位置（以前只在第 0 章才恢复）
+      if (startPositionMs > 0) {
+        await handler.seek(Duration(milliseconds: startPositionMs));
       }
       await handler.play();
     }
@@ -82,6 +107,11 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 播放页取色偏向：开着播放按钮跟主题色走，关了用中性色
+    final tint = ref.watch(playerTintProvider);
+    final playColor = tint
+        ? Theme.of(context).colorScheme.primary
+        : const Color(0xFF6B7280);
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.item.title),
@@ -90,6 +120,11 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
             icon: const Icon(Icons.bookmark_border),
             onPressed: _addBookmark,
             tooltip: '添加书签',
+          ),
+          IconButton(
+            icon: const Icon(Icons.bookmarks_outlined),
+            onPressed: _showBookmarks,
+            tooltip: '书签列表',
           ),
           IconButton(
             icon: const Icon(Icons.timer_outlined),
@@ -116,8 +151,29 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
                 const SizedBox(height: 4),
                 Text('${_chapters.length} 章',
                     style: Theme.of(context).textTheme.bodySmall),
+                // 定时倒计时：还剩多久就停，点一下取消
+                if (_sleepLeft != null) ...[
+                  const SizedBox(height: 8),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: _cancelSleep,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: context.palette.primarySoft,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        '定时：还剩 ${PathUtils.formatDuration(_sleepLeft!.inMilliseconds)}（点一下取消）',
+                        style: TextStyle(fontSize: 13, color: playColor),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
-                _buildControls(),
+                _buildProgress(),
+                _buildControls(playColor),
                 const SizedBox(height: 8),
                 _buildSpeedRow(),
                 if (_chapters.any((c) => c.isCorrupted)) _buildUaHint(),
@@ -129,7 +185,47 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
     );
   }
 
-  Widget _buildControls() {
+  /// 进度条 + 当前时间 / 总时长
+  Widget _buildProgress() {
+    return StreamBuilder<Duration>(
+      stream: audioHandler.positionStream,
+      builder: (context, posSnap) {
+        return StreamBuilder<Duration?>(
+          stream: audioHandler.durationStream,
+          builder: (context, durSnap) {
+            final total = durSnap.data ?? Duration.zero;
+            final pos = posSnap.data ?? Duration.zero;
+            final totalMs = total.inMilliseconds;
+            final posMs = pos.inMilliseconds.clamp(0, totalMs == 0 ? 1 : totalMs);
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  Slider(
+                    value: posMs.toDouble(),
+                    max: totalMs == 0 ? 1 : totalMs.toDouble(),
+                    onChanged: (v) =>
+                        audioHandler.seek(Duration(milliseconds: v.toInt())),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(PathUtils.formatDuration(posMs),
+                          style: Theme.of(context).textTheme.bodySmall),
+                      Text(PathUtils.formatDuration(totalMs),
+                          style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildControls(Color playColor) {
     return StreamBuilder<PlaybackState>(
       stream: audioHandler.playbackState,
       builder: (context, snap) {
@@ -147,7 +243,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
                 onPressed: () => audioHandler.skipToPrevious()),
             CircleAvatar(
               radius: 32,
-              backgroundColor: Theme.of(context).colorScheme.primary,
+              backgroundColor: playColor,
               child: IconButton(
                 icon: Icon(playing ? Icons.pause : Icons.play_arrow,
                     color: Colors.black87),
@@ -179,7 +275,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
         return Wrap(
           spacing: 8,
           alignment: WrapAlignment.center,
-          children: [0.75, 1.0, 1.25, 1.5, 2.0, 3.0].map((s) {
+          children: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0].map((s) {
             return ChoiceChip(
               label: Text('${s}x'),
               selected: (speed - s).abs() < 0.01,
@@ -263,6 +359,97 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
         .showSnackBar(const SnackBar(content: Text('书签已添加')));
   }
 
+  void _startSleepCountdown(int minutes) {
+    _sleepTick?.cancel();
+    setState(() => _sleepLeft = Duration(minutes: minutes));
+    _sleepTick = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      final left = (_sleepLeft ?? Duration.zero) - const Duration(seconds: 1);
+      if (left <= Duration.zero) {
+        t.cancel();
+        setState(() => _sleepLeft = null);
+      } else {
+        setState(() => _sleepLeft = left);
+      }
+    });
+  }
+
+  void _cancelSleep() {
+    _sleepTick?.cancel();
+    audioHandler.cancelSleepTimer();
+    setState(() => _sleepLeft = null);
+  }
+
+  /// 书签列表：点一行跳到那章那个位置，长按删
+  Future<void> _showBookmarks() async {
+    final repo = ref.read(libraryRepositoryProvider);
+    final list = await repo.bookmarks(widget.item.id);
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.6,
+            child: Column(
+              children: [
+                const ListTile(title: Text('书签')),
+                const Divider(height: 1),
+                Expanded(
+                  child: list.isEmpty
+                      ? const Center(child: Text('还没有书签，听到想留的地方点右上角“添加书签”'))
+                      : ListView.builder(
+                          itemCount: list.length,
+                          itemBuilder: (_, i) {
+                            final b = list[i];
+                            domain.ChapterItem? chapter;
+                            for (final c in _chapters) {
+                              if (c.id == b.chapterId) {
+                                chapter = c;
+                                break;
+                              }
+                            }
+                            return ListTile(
+                              leading: const Icon(Icons.bookmark, size: 20),
+                              title: Text(
+                                  chapter?.title ?? '未知章节',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                              subtitle: Text(PathUtils.formatDuration(
+                                  b.positionMs)),
+                              onTap: () async {
+                                Navigator.pop(context);
+                                if (chapter != null) {
+                                  final idx = _chapters.indexOf(chapter);
+                                  if (idx >= 0) {
+                                    await audioHandler.jumpToChapter(idx);
+                                  }
+                                }
+                                await audioHandler.seek(
+                                    Duration(milliseconds: b.positionMs));
+                              },
+                              onLongPress: () async {
+                                await repo.deleteBookmark(b.id);
+                                final fresh =
+                                    await repo.bookmarks(widget.item.id);
+                                setSheet(() {
+                                  list.clear();
+                                  list.addAll(fresh);
+                                });
+                              },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showSleepTimer() {
     showModalBottomSheet(
       context: context,
@@ -282,6 +469,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
                   label: Text('$min 分钟'),
                   onPressed: () {
                     audioHandler.setSleepTimer(min);
+                    _startSleepCountdown(min);
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('已设置 $min 分钟后关闭（结束前渐弱）')),
@@ -294,7 +482,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
               leading: const Icon(Icons.cancel_outlined),
               title: const Text('取消定时'),
               onTap: () {
-                audioHandler.cancelSleepTimer();
+                _cancelSleep();
                 Navigator.pop(context);
               },
             ),

@@ -110,6 +110,20 @@ class MainActivity : FlutterActivity() {
                                 arr.toString()
                             }
                             "callSource" -> TingShuRuntime.call(path, entryClass, index, sourceMethod, params)
+                            // 登录入口（ILogin）：没有返回 null
+                            "loginInfo" -> {
+                                val info = TingShuRuntime.loginInfo(path, entryClass, index)
+                                if (info == null) "" else JSONObject(info as Map<*, *>).toString()
+                            }
+                            // 搜索验证（ISearchVerification）：没有返回 null
+                            "verificationInfo" -> {
+                                val kw = params["keyword"] as? String ?: ""
+                                val info = TingShuRuntime.verificationInfo(path, entryClass, index, kw)
+                                if (info == null) "" else JSONObject(info as Map<*, *>).toString()
+                            }
+                            "isSearchValidated" -> {
+                                if (TingShuRuntime.isSearchValidated(path, entryClass, index)) "true" else "false"
+                            }
                             else -> throw IllegalArgumentException("未知方法 ${call.method}")
                         }
                         runOnUiThread { result.success(out) }

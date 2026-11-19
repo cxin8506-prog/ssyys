@@ -89,10 +89,11 @@ extension AppThemeContext on BuildContext {
 class AppTheme {
   AppTheme._();
 
-  /// 内置配色（设置页可切换）
+  /// 内置配色（设置页可切换）：暖阳橙（默认）/ 海蓝 / 青竹绿 / 樱花粉 / 墨夜
+  /// 墨夜是独立一套，浅色值也全是黑，一直保持黑色
   static const List<AppScheme> schemes = [
     AppScheme(
-      name: '暖阳',
+      name: '暖阳橙',
       primary: Color(0xFFF08C3A),
       accent: Color(0xFFFFB877),
       darkBg: Color(0xFF14100C),
@@ -114,7 +115,18 @@ class AppTheme {
       lightSurfaceAlt: Color(0xFFE6EEFB),
     ),
     AppScheme(
-      name: '樱粉',
+      name: '青竹绿',
+      primary: Color(0xFF3E9B6E),
+      accent: Color(0xFF8FD0A8),
+      darkBg: Color(0xFF0E130F),
+      darkSurface: Color(0xFF171F19),
+      darkSurfaceAlt: Color(0xFF222C24),
+      lightBg: Color(0xFFF3F8F4),
+      lightSurface: Color(0xFFFFFFFF),
+      lightSurfaceAlt: Color(0xFFE4F0E8),
+    ),
+    AppScheme(
+      name: '樱花粉',
       primary: Color(0xFFFF7FA8),
       accent: Color(0xFFFFC46B),
       darkBg: Color(0xFF150F14),
@@ -125,39 +137,20 @@ class AppTheme {
       lightSurfaceAlt: Color(0xFFFBE6EE),
     ),
     AppScheme(
-      name: '琥珀',
-      primary: Color(0xFFFFB05C),
-      accent: Color(0xFF6FD3B8),
-      darkBg: Color(0xFF15110C),
-      darkSurface: Color(0xFF231C14),
-      darkSurfaceAlt: Color(0xFF33281B),
-      lightBg: Color(0xFFFDF7EF),
-      lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFF7EAD8),
-    ),
-    AppScheme(
-      name: '紫韵',
-      primary: Color(0xFFB79CFF),
-      accent: Color(0xFF6BE3C9),
-      darkBg: Color(0xFF110F1A),
-      darkSurface: Color(0xFF1C1929),
-      darkSurfaceAlt: Color(0xFF282338),
-      lightBg: Color(0xFFF6F4FD),
-      lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFEBE6FB),
-    ),
-    AppScheme(
-      name: '朱砂',
-      primary: Color(0xFFFF7B6B),
-      accent: Color(0xFFFFC46B),
-      darkBg: Color(0xFF160F0E),
-      darkSurface: Color(0xFF241917),
-      darkSurfaceAlt: Color(0xFF33221F),
-      lightBg: Color(0xFFFDF5F3),
-      lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFFBE7E2),
+      name: '墨夜',
+      primary: Color(0xFFB8BEC9),
+      accent: Color(0xFF7E8694),
+      darkBg: Color(0xFF000000),
+      darkSurface: Color(0xFF0B0B0B),
+      darkSurfaceAlt: Color(0xFF161616),
+      lightBg: Color(0xFF000000),
+      lightSurface: Color(0xFF0B0B0B),
+      lightSurfaceAlt: Color(0xFF161616),
     ),
   ];
+
+  /// 墨夜主题的下标（独立一套，一直保持黑色）
+  static const int nightSchemeIndex = 4;
 
   static AppScheme schemeAt(int index) {
     if (index < 0 || index >= schemes.length) return schemes.first;
@@ -202,6 +195,8 @@ class AppTheme {
   }
 
   static ThemeData light([int schemeIndex = 0]) {
+    // 墨夜是独立一套，一直保持黑色：浅色主题也直接用深色
+    if (schemeIndex == nightSchemeIndex) return dark(schemeIndex);
     final s = schemeAt(schemeIndex);
     final palette = AppPalette(
       surfaceAlt: s.lightSurfaceAlt,
@@ -262,12 +257,14 @@ class AppTheme {
     return base.copyWith(
       extensions: <ThemeExtension<dynamic>>[palette],
       appBarTheme: AppBarTheme(
-        backgroundColor: bg,
-        foregroundColor: text,
+        backgroundColor: primary,
+        foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
-        titleTextStyle: TextStyle(
-            color: text, fontSize: 20, fontWeight: FontWeight.w700),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
+        titleTextStyle: const TextStyle(
+            color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: surface,

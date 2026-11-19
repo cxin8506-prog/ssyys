@@ -109,9 +109,9 @@ object AudioUrlCustomExtractor : AudioUrlExtractor {
 }
 
 /**
- * 原本要走 WebView 渲染再执行脚本取 HTML。
- * 这里退化成直接抓页面源码交给 parse，绝大多数源都是解析 HTML 找 audio 标签，
- * 结果一致且更快。
+ * 走真 WebView 渲染再执行脚本取结果：
+ * 主线程起一个隐藏 WebView 加载页面，跑完 script，把脚本返回值交给 parse。
+ * WebView 不可用时退回直接抓页面源码（老行为），不直接报错。
  */
 object AudioUrlWebViewExtractor : AudioUrlExtractor {
     private var isDesktop = false
@@ -131,12 +131,19 @@ object AudioUrlWebViewExtractor : AudioUrlExtractor {
 
     override fun extract(url: String, autoPlay: Boolean, isCache: Boolean) {
         val p = parse ?: throw IllegalStateException("AudioUrlWebViewExtractor 未 setUp")
-        val html = TingShuRuntime.fetch(url, isDesktop)
-        TingShuRuntime.deliver(p(html))
+        val raw = try {
+            TingShuRuntime.webViewEval(url, isDesktop, script)
+        } catch (_: Throwable) {
+            null
+        } ?: TingShuRuntime.fetch(url, isDesktop)
+        TingShuRuntime.deliver(p(raw))
     }
 }
 
-/** 嗅探页面里的音频地址 */
+/**
+ * 嗅探页面里的音频地址：真 WebView 加载页面，拦截资源请求，
+ * 抓到 .m3u8/.mp4/.mp3/.m4a 的地址就回传。
+ */
 object AudioUrlWebViewSniffExtractor : AudioUrlExtractor {
     private var isDesktop = false
     private var validate: ((String) -> Boolean)? = null
@@ -148,8 +155,11 @@ object AudioUrlWebViewSniffExtractor : AudioUrlExtractor {
     }
 
     override fun extract(url: String, autoPlay: Boolean, isCache: Boolean) {
-        val html = TingShuRuntime.fetch(url, isDesktop)
-        val found = TingShuRuntime.sniffAudio(html)
+        val found = try {
+            TingShuRuntime.webViewSniff(url, isDesktop)
+        } catch (_: Throwable) {
+            null
+        } ?: TingShuRuntime.sniffAudio(TingShuRuntime.fetch(url, isDesktop))
         val ok = found != null && (validate?.invoke(found) ?: true)
         TingShuRuntime.deliver(if (ok) found else null)
     }

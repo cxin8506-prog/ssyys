@@ -49,6 +49,9 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
   bool _testOk = true;
   bool _showSchemaHelp = false;
 
+  /// 「我的听书」格式源的登录入口（查一次就够了，登录地址不会变）
+  Future<Map<String, dynamic>?>? _tingShuLoginFuture;
+
   @override
   void initState() {
     super.initState();
@@ -283,6 +286,10 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
             padding: pagePadding(context, bottom: _dirty ? 96 : 40),
             children: [
               _infoCard(s),
+              if (s.isTingShu) ...[
+                const SizedBox(height: 16),
+                _tingShuLoginCard(s),
+              ],
               const SizedBox(height: 16),
               _configCard(s),
               const SizedBox(height: 16),
@@ -789,6 +796,116 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     cfg.values[f.key] = '';
     cfg.syncLegacy(f.key, '');
     await ref.read(sourceConfigRepositoryProvider).save(cfg);
+    if (!mounted) return;
+    setState(() {});
+    _toast('已退出登录');
+  }
+
+  /// 「我的听书」格式源的登录：登录入口在源里（ILogin），
+  /// 登录完 Cookie 直接留在 WebView 里，源请求时自己会带上，不用存配置。
+  Widget _tingShuLoginCard(PluginSource s) {
+    _tingShuLoginFuture ??= _tingShuLoginInfo(s);
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _tingShuLoginFuture,
+      builder: (context, snap) {
+        final info = snap.data;
+        if (info == null) return const SizedBox.shrink();
+        final url = '${info['url'] ?? ''}';
+        if (url.isEmpty) return const SizedBox.shrink();
+        final desktop = info['desktop'] == true;
+        return _card(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.login, size: 16),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('登录',
+                      style:
+                          TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+                FutureBuilder<String>(
+                  future: WebSession().cookies(url),
+                  builder: (context, csnap) {
+                    final logged = WebSession.looksLoggedIn(csnap.data);
+                    return Text(
+                      logged ? '已登录' : '未登录',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: logged
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _openTingShuLogin(s, url, desktop),
+                    icon: const Icon(Icons.login, size: 16),
+                    label: const Text('去登录'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton(
+                  onPressed: () => _logoutTingShu(),
+                  child: const Text('退出登录'),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>?> _tingShuLoginInfo(PluginSource s) async {
+    try {
+      final engine = ref.read(tingShuEngineProvider);
+      await engine.attach(s);
+      return engine.loginInfo();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _openTingShuLogin(
+      PluginSource s, String url, bool desktop) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LoginWebPage(
+        title: s.name,
+        url: url,
+        desktop: desktop,
+      ),
+    ));
+    if (!mounted) return;
+    setState(() {});
+    _toast('登录页已关闭，Cookie 已同步给这个源');
+  }
+
+  Future<void> _logoutTingShu() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出登录'),
+        content: const Text('会清掉这个源保存的 Cookie，下次看需要登录的内容要重新登录。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('退出')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await WebSession().clear();
     if (!mounted) return;
     setState(() {});
     _toast('已退出登录');
