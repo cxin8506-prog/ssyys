@@ -66,6 +66,12 @@ dependency_overrides:
   # Android 构建不走 ffi 路径，统一提到 2.x 可共存。
   ffi: 2.0.1
   string_scanner: 1.1.1
+  # 锁定 webview 插件到与 Flutter 3.0.0 兼容的版本：
+  # 构建机曾解析到 webview_flutter_android 4.6.5（要新版 Flutter 嵌入层，
+  # 编不过），强制用锁文件里的 2.10.4 / 1.9.5 / 2.9.5。
+  webview_flutter_android: 2.10.4
+  webview_flutter_platform_interface: 1.9.5
+  webview_flutter_wkwebview: 2.9.5
   # audio_service 0.18 附带的 platform_interface 0.1.3 在 Flutter 3.0 下
   # 漏 import dart:ui 的 Color，此处用本地修正副本覆盖（仅加了一行 import）
   audio_service_platform_interface:
