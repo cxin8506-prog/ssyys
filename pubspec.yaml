@@ -1,7 +1,7 @@
 name: local_media_app
 description: 本地优先的多媒体阅读/播放器（听书 + 视频）
 publish_to: 'none'
-version: 2.1.1+4
+version: 2.2.0+5
 
 environment:
   sdk: ">=2.17.0 <3.0.0"

@@ -4,7 +4,9 @@ import '../../core/constants/app_constants.dart';
 import '../../core/di/providers.dart';
 import '../engine/jar_plugin_engine.dart';
 import '../engine/js_plugin_engine.dart';
+import '../engine/plugin_engine.dart';
 import '../model/plugin_source.dart';
+import 'config_schema_loader.dart';
 import 'source_config_repository.dart';
 import 'source_repository.dart';
 
@@ -62,4 +64,9 @@ final jarPluginEngineProvider = Provider<JarPluginEngine>((ref) {
     ref.read(sourceRepositoryProvider),
     ref.read(sourceConfigRepositoryProvider),
   );
+});
+
+/// 源配置声明读取（源自己声明要哪些配置项）
+final configSchemaLoaderProvider = Provider<ConfigSchemaLoader>((ref) {
+  return ConfigSchemaLoader(ref.read(sourceRepositoryProvider));
 });

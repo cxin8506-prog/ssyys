@@ -113,6 +113,7 @@ class SourceConfigModel {
   /// 当前选中的线路 id
   String? selectedLineId;
 
+  /// 源自己声明的配置值（key -> value），与 [extra] 是同一份数据
   Map<String, dynamic> extra;
 
   SourceConfigModel({
@@ -132,6 +133,8 @@ class SourceConfigModel {
     for (final v in voices) {
       if ('${v['id']}' == selectedVoiceId) return '${v['name'] ?? v['id']}';
     }
+    final fallback = valueOf('voiceId');
+    if (fallback != null && '$fallback'.isNotEmpty) return '$fallback';
     return null;
   }
 
@@ -139,6 +142,75 @@ class SourceConfigModel {
     for (final l in lines) {
       if ('${l['id']}' == selectedLineId) return '${l['name'] ?? l['id']}';
     }
+    final fallback = valueOf('lineId');
+    if (fallback != null && '$fallback'.isNotEmpty) return '$fallback';
     return null;
+  }
+
+  /// 源自己声明的配置值（key -> value），与 [extra] 是同一份数据
+  Map<String, dynamic> get values => extra;
+
+  /// 读一个配置项，兼容旧的固定字段
+  dynamic valueOf(String key) {
+    if (extra.containsKey(key)) return extra[key];
+    switch (key) {
+      case 'voiceId':
+      case 'voice':
+      case 'selectedVoiceId':
+        return selectedVoiceId;
+      case 'lineId':
+      case 'line':
+      case 'selectedLineId':
+        return selectedLineId;
+      case 'loginState':
+      case 'cookie':
+      case 'token':
+        return loginState;
+    }
+    return null;
+  }
+
+  /// 写一个配置项，同时同步旧的固定字段（播放页/引擎仍按老字段读）
+  void setValue(String key, dynamic v) {
+    extra[key] = v;
+    syncLegacy(key, v);
+  }
+
+  void syncLegacy(String key, dynamic v) {
+    final s = v == null ? null : '$v';
+    switch (key) {
+      case 'voiceId':
+      case 'voice':
+      case 'selectedVoiceId':
+        selectedVoiceId = s;
+        break;
+      case 'lineId':
+      case 'line':
+      case 'selectedLineId':
+        selectedLineId = s;
+        break;
+      case 'loginState':
+      case 'cookie':
+      case 'token':
+        loginState = s;
+        break;
+    }
+  }
+
+  /// 把 values 里的同名字段回填到旧字段（从库里读出来后调一次）
+  void hydrateLegacy() {
+    for (final k in const [
+      'voiceId',
+      'voice',
+      'selectedVoiceId',
+      'lineId',
+      'line',
+      'selectedLineId',
+      'loginState',
+      'cookie',
+      'token',
+    ]) {
+      if (extra.containsKey(k)) syncLegacy(k, extra[k]);
+    }
   }
 }

@@ -44,11 +44,12 @@ class JsPluginEngine implements PluginEngine {
     final script = await _repo.readEntryScript(source);
     final ua = await _uaResolver.resolve('${source.name} ${source.id}');
     final cfg = await _configRepo.load(source.id, source.type);
+    final cfgMap = _configRepo.buildRuntimeConfig(cfg);
 
     final rt = getJavascriptRuntime();
-    final session = _JsSession(rt, ua, cfg);
+    final session = _JsSession(rt, ua, cfgMap);
     session.bindBridge();
-    session.eval(_bootstrapScript(ua, cfg));
+    session.eval(_bootstrapScript(ua, cfgMap));
     session.eval(script, label: '${source.name}/entry');
 
     // 有些插件把配置挂在 config 变量上，统一暴露一次
@@ -63,11 +64,34 @@ class JsPluginEngine implements PluginEngine {
   }
 
   @override
+  Future<bool?> hasMethod(String method) async {
+    final source = _bound;
+    if (source == null) return null;
+    final session = _sessions[source.id];
+    if (session == null) return null;
+    final names = PluginMethods.aliases[method] ?? [method];
+    try {
+      final r = session.rt.evaluate(
+          '${jsonEncode(names)}.some(function(n){ return typeof globalThis[n] === "function"; })');
+      if (r.isError) return null;
+      return r.stringResult.trim().toLowerCase() == 'true';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<dynamic> invoke(String method, {Map<String, dynamic>? params}) async {
     final source = _bound;
     if (source == null) throw Exception('未绑定源');
     final session = _sessions[source.id];
     if (session == null) throw Exception('源未加载：${source.name}');
+
+    // 每次调用前重新注入配置，用户在源详情里改了值不用重新加载脚本
+    try {
+      final latest = await _configRepo.load(source.id, source.type);
+      session.applyConfig(_configRepo.buildRuntimeConfig(latest));
+    } catch (_) {}
 
     final names = PluginMethods.aliases[method] ?? [method];
     final argsJson = jsonEncode(_argsFor(method, params ?? {}));
@@ -79,7 +103,16 @@ class JsPluginEngine implements PluginEngine {
         for (var i = 0; i < names.length; i++) {
           if (typeof globalThis[names[i]] === 'function') { fn = globalThis[names[i]]; used = names[i]; break; }
         }
-        if (!fn) return JSON.stringify({ __error: 'METHOD_NOT_FOUND', method: ${jsonEncode(method)}, tried: names });
+        // 有些源把配置声明写成全局对象而不是函数，直接返回它
+        if (!fn) {
+          for (var i = 0; i < names.length; i++) {
+            var o = globalThis[names[i]];
+            if (o && typeof o === 'object') {
+              return JSON.stringify({ __ok: true, method: names[i], data: o });
+            }
+          }
+          return JSON.stringify({ __error: 'METHOD_NOT_FOUND', method: ${jsonEncode(method)}, tried: names });
+        }
         var args = JSON.parse(${jsonEncode(argsJson)});
         try {
           var r = await fn.apply(null, args);
@@ -156,6 +189,8 @@ class JsPluginEngine implements PluginEngine {
       case 'lines':
       case 'voices':
         return [params['url'] ?? ''];
+      case 'config':
+        return [];
       default:
         return [params];
     }
@@ -187,13 +222,8 @@ class JsPluginEngine implements PluginEngine {
     return v;
   }
 
-  String _bootstrapScript(String? ua, SourceConfigModel cfg) {
-    final cfgJson = jsonEncode({
-      'loginState': cfg.loginState,
-      'voiceId': cfg.selectedVoiceId,
-      'lineId': cfg.selectedLineId,
-      'extra': cfg.extra,
-    });
+  String _bootstrapScript(String? ua, Map<String, dynamic> cfg) {
+    final cfgJson = jsonEncode(cfg);
     return '''
       globalThis.__pending = {};
       globalThis.__seq = 0;
@@ -219,6 +249,7 @@ class JsPluginEngine implements PluginEngine {
       var host = {
         ua: ${jsonEncode(ua)},
         config: $cfgJson,
+        getConfig: function(key) { return key === undefined ? host.config : host.config[key]; },
         httpGet: function(url, headers) { return __hostCall('http', { url: url, method: 'GET', headers: headers || null }); },
         httpJson: function(url, headers) { return __hostCall('httpJson', { url: url, headers: headers || null }); },
         httpPost: function(url, body, headers) { return __hostCall('http', { url: url, method: 'POST', body: body, headers: headers || null }); },
@@ -235,6 +266,7 @@ class JsPluginEngine implements PluginEngine {
         log: host.log,
         getString: function(text, rule) { return __hostCall('rule', { text: text, rule: rule }); }
       };
+      globalThis.CONFIG = host.config;
     ''';
   }
 }
@@ -243,9 +275,23 @@ class JsPluginEngine implements PluginEngine {
 class _JsSession {
   final JavascriptRuntime rt;
   final String? ua;
-  final SourceConfigModel cfg;
+  Map<String, dynamic> cfg; // 源声明的配置值（key -> value）
 
   _JsSession(this.rt, this.ua, this.cfg);
+
+  /// 重新注入配置：用户在源详情里改完立刻生效
+  void applyConfig(Map<String, dynamic> next) {
+    cfg = next;
+    try {
+      rt.evaluate('''
+        (function() {
+          var c = ${jsonEncode(next)};
+          if (typeof host !== 'undefined') { host.config = c; }
+          globalThis.CONFIG = c;
+        })();
+      ''');
+    } catch (_) {}
+  }
 
   void bindBridge() {
     rt.onMessage('__host_call', (dynamic args) {

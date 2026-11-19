@@ -5,14 +5,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/path_utils.dart';
+import '../../shared/widgets/common.dart';
+import '../data/config_schema_loader.dart';
 import '../data/plugin_providers.dart';
+import '../data/source_config_schema.dart';
 import '../engine/jar_plugin_engine.dart';
 import '../engine/js_plugin_engine.dart';
 import '../engine/plugin_engine.dart';
 import '../model/plugin_source.dart';
-import '../../shared/widgets/common.dart';
 
-/// 源详情：基本信息 + 登录态 + 音色 + 线路 + 试跑测试
+/// 源详情：基本信息 + 源自己声明的配置项 + 试跑。
+///
+/// 这里**不再写死**「登录态 / 音色 / 视频线路」这类字段。
+/// 配置项由源声明（manifest.json 的 config 字段，或脚本里的 getConfig()），
+/// App 只按声明把对应的输入控件画出来，值统一存在 `source_configs.extra`。
 class SourceDetailPage extends ConsumerStatefulWidget {
   final String sourceId;
   const SourceDetailPage({super.key, required this.sourceId});
@@ -24,15 +30,22 @@ class SourceDetailPage extends ConsumerStatefulWidget {
 class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
   PluginSource? _source;
   SourceConfigModel? _cfg;
-  List<String> _jarClasses = [];
+
+  ConfigSchema _schema = ConfigSchema.empty;
   bool _loading = true;
+  bool _schemaLoading = true;
   bool _busy = false;
   String _busyText = '';
+  bool _dirty = false;
 
-  final _loginCtrl = TextEditingController();
+  final Map<String, TextEditingController> _ctrls = {};
+  final Map<String, List<ConfigOption>> _options = {};
+  final Set<String> _optionTried = {};
+
   final _testCtrl = TextEditingController(text: '斗破苍穹');
   String? _testResult;
   bool _testOk = true;
+  bool _showSchemaHelp = false;
 
   @override
   void initState() {
@@ -42,10 +55,16 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
 
   @override
   void dispose() {
-    _loginCtrl.dispose();
+    for (final c in _ctrls.values) {
+      c.dispose();
+    }
     _testCtrl.dispose();
     super.dispose();
   }
+
+  PluginEngine _engineFor(PluginSource s) => s.isJar
+      ? ref.read(jarPluginEngineProvider)
+      : ref.read(jsPluginEngineProvider);
 
   Future<void> _load() async {
     final repo = ref.read(sourceRepositoryProvider);
@@ -54,34 +73,183 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       if (mounted) setState(() => _loading = false);
       return;
     }
-    final cfg = await ref
-        .read(sourceConfigRepositoryProvider)
-        .load(s.id, s.type);
-    _loginCtrl.text = cfg.loginState ?? '';
+    final cfg = await ref.read(sourceConfigRepositoryProvider).load(s.id, s.type);
     if (!mounted) return;
     setState(() {
       _source = s;
       _cfg = cfg;
       _loading = false;
     });
-    if (s.isJar) {
-      final jar = ref.read(jarPluginEngineProvider);
-      try {
-        await jar.attach(s);
-        final list = await jar.listClasses();
-        if (mounted) setState(() => _jarClasses = list);
-      } catch (_) {}
+    await _loadSchema(s);
+  }
+
+  /// 向源要配置声明
+  Future<void> _loadSchema(PluginSource s) async {
+    setState(() => _schemaLoading = true);
+    final engine = _engineFor(s);
+    ConfigSchema schema;
+    try {
+      schema = await ref.read(configSchemaLoaderProvider).load(s, engine);
+    } catch (e) {
+      schema = ConfigSchema.empty;
+      _toast('读取配置声明失败：$e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _schema = schema;
+      _schemaLoading = false;
+    });
+    _bindControllers();
+    // 动态选项（音色/线路之类）静默预取一次
+    for (final f in schema.fields) {
+      if (f.needsFetch) {
+        await _fetchOptions(s, f, silent: true);
+      }
     }
   }
 
-  PluginEngine _engineFor(PluginSource s) =>
-      s.isJar ? ref.read(jarPluginEngineProvider) : ref.read(jsPluginEngineProvider);
+  /// 为文本类字段建控制器，值来自已保存的配置或声明的默认值
+  void _bindControllers() {
+    for (final c in _ctrls.values) {
+      c.dispose();
+    }
+    _ctrls.clear();
+    for (final f in _schema.fields) {
+      if (f.type != 'text' &&
+          f.type != 'textarea' &&
+          f.type != 'password' &&
+          f.type != 'number') {
+        continue;
+      }
+      final init = _currentValue(f);
+      final ctrl = TextEditingController(text: '${init ?? ''}');
+      ctrl.addListener(() {
+        final cfg = _cfg;
+        if (cfg == null) return;
+        cfg.values[f.key] = f.type == 'number'
+            ? (num.tryParse(ctrl.text) ?? ctrl.text)
+            : ctrl.text;
+        if (!_dirty) setState(() => _dirty = true);
+      });
+      _ctrls[f.key] = ctrl;
+    }
+  }
+
+  dynamic _currentValue(ConfigField f) {
+    final v = _cfg?.values[f.key];
+    if (v == null) return f.initial;
+    return v;
+  }
+
+  Future<void> _save({bool silent = false}) async {
+    final cfg = _cfg;
+    if (cfg == null) return;
+    for (final f in _schema.fields) {
+      if (!f.required) continue;
+      final v = cfg.values[f.key];
+      if (v == null || '$v'.trim().isEmpty) {
+        _toast('「${f.name}」是必填项');
+        return;
+      }
+      if (f.type == 'number' && (num.tryParse('$v') == null)) {
+        _toast('「${f.name}」需要填数字');
+        return;
+      }
+    }
+    cfg.hydrateLegacy();
+    await ref.read(sourceConfigRepositoryProvider).save(cfg);
+    if (!mounted) return;
+    setState(() => _dirty = false);
+    if (!silent) _toast('已保存');
+  }
+
+  /// 改一个非文本项（switch / select / radio）：立即落库
+  Future<void> _setValue(ConfigField f, dynamic v) async {
+    final cfg = _cfg;
+    if (cfg == null) return;
+    cfg.values[f.key] = v;
+    cfg.syncLegacy(f.key, v);
+    await ref.read(sourceConfigRepositoryProvider).save(cfg);
+    if (!mounted) return;
+    setState(() => _dirty = false);
+  }
+
+  Future<void> _fetchOptions(PluginSource s, ConfigField f,
+      {bool silent = false}) async {
+    if (_optionTried.contains(f.key) && silent) return;
+    _optionTried.add(f.key);
+    try {
+      final list = await ref.read(configSchemaLoaderProvider).fetchOptions(
+            s,
+            _engineFor(s),
+            f.optionSource,
+          );
+      if (!mounted) return;
+      setState(() => _options[f.key] = list);
+      final cfg = _cfg;
+      if (cfg != null && list.isNotEmpty) {
+        final cur = '${cfg.values[f.key] ?? ''}';
+        if (cur.isEmpty) {
+          cfg.values[f.key] = list.first.value;
+          cfg.syncLegacy(f.key, list.first.value);
+          await ref.read(sourceConfigRepositoryProvider).save(cfg);
+          if (mounted) setState(() {});
+        }
+      }
+      if (!silent) {
+        _toast(list.isEmpty ? '源没有返回选项' : '已获取 ${list.length} 项');
+      }
+    } catch (e) {
+      if (!silent) _toast('获取失败：$e');
+    }
+  }
+
+  /// action 类型的配置项：点一下让源自己去执行（比如「扫码登录」）
+  Future<void> _runAction(PluginSource s, ConfigField f) async {
+    setState(() {
+      _busy = true;
+      _busyText = '正在执行「${f.name}」...';
+    });
+    try {
+      final engine = _engineFor(s);
+      await engine.attach(s);
+      final r = await engine.invoke(
+        f.action.isEmpty ? 'action' : f.action,
+        params: {
+          'key': f.key,
+          'name': f.name,
+          'config': _cfg?.values ?? {},
+        },
+      );
+      final text = r is String ? r : jsonEncode(r);
+      if (mounted) {
+        showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(f.name),
+            content: SingleChildScrollView(
+              child: Text(text.length > 1200 ? '${text.substring(0, 1200)}…' : text),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx), child: const Text('知道了')),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      _toast('执行失败：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  // ---------------------------------------------------------------- 构建
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-          body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final s = _source;
     if (s == null) {
@@ -104,49 +272,35 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       body: Stack(
         children: [
           ListView(
-            padding: pagePadding(context, bottom: 40),
+            padding: pagePadding(context, bottom: _dirty ? 96 : 40),
             children: [
               _infoCard(s),
               const SizedBox(height: 16),
-              _loginCard(s),
+              _configCard(s),
               const SizedBox(height: 16),
-              _listCard(
-                s,
-                title: '音色',
-                subtitle: '番茄一类源支持多音色，选一个默认的',
-                items: _cfg?.voices ?? [],
-                selected: _cfg?.selectedVoiceId,
-                method: 'voices',
-                onSelect: (id) {
-                  _cfg!.selectedVoiceId = id;
-                  _saveCfg();
-                },
-                onAdd: () => _addItem(isVoice: true),
-                onFetch: () => _fetchItems(s, isVoice: true),
-              ),
-              const SizedBox(height: 16),
-              _listCard(
-                s,
-                title: '视频线路',
-                subtitle: '多线路源可手动切换，播放失败时换线路重试',
-                items: _cfg?.lines ?? [],
-                selected: _cfg?.selectedLineId,
-                method: 'lines',
-                onSelect: (id) {
-                  _cfg!.selectedLineId = id;
-                  _saveCfg();
-                },
-                onAdd: () => _addItem(isVoice: false),
-                onFetch: () => _fetchItems(s, isVoice: false),
-              ),
+              _testCard(s),
               if (s.isJar) ...[
                 const SizedBox(height: 16),
                 _jarCard(s),
               ],
               const SizedBox(height: 16),
-              _testCard(s),
+              _schemaHelpCard(),
             ],
           ),
+          if (_dirty)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16 + MediaQuery.of(context).padding.bottom,
+              child: SizedBox(
+                height: 48,
+                child: ElevatedButton.icon(
+                  onPressed: () => _save(),
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('保存配置'),
+                ),
+              ),
+            ),
           if (_busy)
             Container(
               color: Colors.black54,
@@ -167,9 +321,8 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     );
   }
 
-  // ---------------------------------------------------------------- 卡片
-
-  Widget _card({required List<Widget> children, EdgeInsets? padding}) => Container(
+  Widget _card({required List<Widget> children, EdgeInsets? padding}) =>
+      Container(
         padding: padding ?? const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: context.cardColor,
@@ -274,172 +427,311 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
         ],
       );
 
-  Widget _loginCard(PluginSource s) {
-    return _card(
-      children: [
-        Row(
-          children: [
-            Icon(Icons.lock_outline, size: 18, color: context.subtleColor),
-            const SizedBox(width: 8),
-            const Text('登录态',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            TextButton(
-              onPressed: () => _saveLogin(s),
-              child: const Text('保存'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '部分源需要登录才能拿到内容。把 Cookie 或 token 粘贴到下面，'
-          '格式由源自己解释（一般是 key=value; key2=value2）。',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _loginCtrl,
-          maxLines: 4,
-          minLines: 3,
-          decoration: const InputDecoration(hintText: '例如：token=xxxx; uid=123456'),
-        ),
-      ],
-    );
+  // ------------------------------------------------------ 源声明的配置项
+
+  String get _originLabel {
+    switch (_schema.origin) {
+      case 'manifest':
+        return '源声明 · manifest';
+      case 'script':
+        return '源声明 · 脚本';
+      case 'inferred':
+        return '按能力推断';
+      default:
+        return '源未声明';
+    }
   }
 
-  Widget _listCard(
-    PluginSource s, {
-    required String title,
-    required String subtitle,
-    required List<Map<String, dynamic>> items,
-    required String? selected,
-    required String method,
-    required void Function(String id) onSelect,
-    required VoidCallback onAdd,
-    required VoidCallback onFetch,
-  }) {
-    final primary = Theme.of(context).colorScheme.primary;
+  Widget _configCard(PluginSource s) {
+    if (_schemaLoading) {
+      return _card(
+        children: [
+          Row(
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 10),
+              Text('正在读取该源声明的配置项…',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ],
+      );
+    }
+
+    if (_schema.isEmpty) {
+      return _card(
+        children: [
+          Row(
+            children: [
+              Icon(Icons.tune, size: 18, color: context.subtleColor),
+              const SizedBox(width: 8),
+              const Text('源配置',
+                  style:
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              TextButton(
+                onPressed: () => _loadSchema(s),
+                child: const Text('重新读取'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '这个源没有声明任何配置项，装上就能直接用，不需要填东西。',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      );
+    }
+
     return _card(
       children: [
         Row(
           children: [
             Icon(Icons.tune, size: 18, color: context.subtleColor),
             const SizedBox(width: 8),
-            Text(title,
-                style:
-                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const Text('源配置',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: context.palette.surfaceAlt,
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(_originLabel,
+                  style: TextStyle(fontSize: 10, color: context.subtleColor)),
+            ),
             const Spacer(),
             TextButton(
-              onPressed: _busy ? null : onFetch,
-              child: const Text('从源获取'),
+              onPressed: () => _loadSchema(s),
+              child: const Text('刷新'),
             ),
           ],
         ),
-        Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 10),
-        if (items.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            decoration: BoxDecoration(
-              color: context.palette.surfaceAlt,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text('暂无，可点「从源获取」或手动添加',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall),
-          )
-        else
-          ...items.map((item) {
-            final id = '${item['id']}';
-            final name = '${item['name'] ?? id}';
-            final sel = selected == id;
-            return InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: () => onSelect(id),
-              onLongPress: () => _removeItem(items, item),
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: sel ? context.palette.primarySoft : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: sel ? primary : context.palette.outline),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                        sel
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                        size: 18,
-                        color: sel ? primary : context.palette.outline),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: Text(name,
-                            style: const TextStyle(fontSize: 13))),
-                  ],
-                ),
-              ),
-            );
-          }),
-        const SizedBox(height: 4),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('手动添加'),
-          ),
-        ),
+        if (_schema.note.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(_schema.note, style: Theme.of(context).textTheme.bodySmall),
+        ],
+        const SizedBox(height: 6),
+        for (final f in _schema.fields) _fieldBlock(s, f),
       ],
     );
   }
 
-  Widget _jarCard(PluginSource s) {
-    final current = s.entry;
+  Widget _fieldBlock(PluginSource s, ConfigField f) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  f.required ? '${f.name} *' : f.name,
+                  style:
+                      const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (f.optionSource.isNotEmpty)
+                GestureDetector(
+                  onTap: () => _fetchOptions(s, f),
+                  child: Text('从源获取',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.primary)),
+                ),
+            ],
+          ),
+          if (f.desc.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(f.desc, style: Theme.of(context).textTheme.bodySmall),
+          ],
+          const SizedBox(height: 8),
+          _fieldInput(s, f),
+        ],
+      ),
+    );
+  }
+
+  Widget _fieldInput(PluginSource s, ConfigField f) {
+    switch (f.type) {
+      case 'switch':
+        final on = _currentValue(f) == true;
+        return Row(
+          children: [
+            Switch(
+              value: on,
+              onChanged: (v) => _setValue(f, v),
+            ),
+            const SizedBox(width: 6),
+            Text(on ? '已开启' : '已关闭',
+                style: Theme.of(context).textTheme.bodySmall),
+          ],
+        );
+
+      case 'radio':
+        final cur = '${_currentValue(f) ?? ''}';
+        final opts = _mergedOptions(f);
+        if (opts.isEmpty) return _emptyOptions(f);
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final o in opts)
+              ChoiceChip(
+                label: Text(o.label, style: const TextStyle(fontSize: 12)),
+                selected: cur == o.value,
+                onSelected: (_) => _setValue(f, o.value),
+              ),
+          ],
+        );
+
+      case 'select':
+        final opts = _mergedOptions(f);
+        if (opts.isEmpty) return _emptyOptions(f);
+        final cur = '${_currentValue(f) ?? ''}';
+        final valid = opts.any((o) => o.value == cur) ? cur : null;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: context.palette.surfaceAlt,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: context.palette.outline),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              value: valid,
+              hint: Text('请选择',
+                  style: TextStyle(fontSize: 13, color: context.subtleColor)),
+              icon: const Icon(Icons.expand_more, size: 18),
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
+              items: [
+                for (final o in opts)
+                  DropdownMenuItem(
+                    value: o.value,
+                    child: Text(o.label,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: (v) {
+                if (v != null) _setValue(f, v);
+              },
+            ),
+          ),
+        );
+
+      case 'action':
+        return OutlinedButton.icon(
+          onPressed: _busy ? null : () => _runAction(s, f),
+          icon: const Icon(Icons.play_arrow, size: 16),
+          label: Text(f.name),
+        );
+
+      case 'password':
+      case 'textarea':
+      case 'number':
+      case 'text':
+      default:
+        return TextField(
+          controller: _ctrls[f.key],
+          maxLines: f.type == 'textarea' ? 4 : 1,
+          minLines: f.type == 'textarea' ? 3 : 1,
+          obscureText: f.type == 'password',
+          keyboardType:
+              f.type == 'number' ? TextInputType.number : TextInputType.text,
+          style: const TextStyle(fontSize: 13),
+          decoration: InputDecoration(
+            hintText: f.hint.isEmpty ? null : f.hint,
+            isDense: true,
+          ),
+        );
+    }
+  }
+
+  Widget _emptyOptions(ConfigField f) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: context.palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        f.optionSource.isEmpty
+            ? '暂无可选项'
+            : '暂无，点右上「从源获取」或确认源已登录',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+
+  /// 静态选项 + 动态取到的选项合并；当前值不在列表里时补一条，避免下拉报错
+  List<ConfigOption> _mergedOptions(ConfigField f) {
+    final out = <ConfigOption>[...f.options];
+    for (final o in _options[f.key] ?? const <ConfigOption>[]) {
+      if (!out.any((e) => e.value == o.value)) out.add(o);
+    }
+    final cur = '${_currentValue(f) ?? ''}';
+    if (cur.isNotEmpty && !out.any((e) => e.value == cur)) {
+      out.insert(0, ConfigOption(cur, cur));
+    }
+    return out;
+  }
+
+  Widget _schemaHelpCard() {
     return _card(
       children: [
-        Row(
-          children: [
-            Icon(Icons.memory, size: 18, color: context.subtleColor),
-            const SizedBox(width: 8),
-            const Text('JAR 主类',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            TextButton(onPressed: _editMainClass, child: const Text('修改')),
-          ],
+        InkWell(
+          onTap: () => setState(() => _showSchemaHelp = !_showSchemaHelp),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 16, color: context.subtleColor),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('配置项是从源来的',
+                    style:
+                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+              Icon(
+                  _showSchemaHelp ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                  color: context.subtleColor),
+            ],
+          ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          current.isEmpty
-              ? '未识别到主类。若调用失败，请手动填写入口类名。'
-              : current,
-          style: TextStyle(
-              fontSize: 12,
-              color: current.isEmpty
-                  ? Theme.of(context).colorScheme.error
-                  : context.subtleColor),
-        ),
-        if (_jarClasses.isNotEmpty) ...[
+        if (_showSchemaHelp) ...[
           const SizedBox(height: 10),
-          Text('包内类（${_jarClasses.length}）',
-              style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 6),
-          SizedBox(
-            height: 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _jarClasses.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 6),
-              itemBuilder: (_, i) => ActionChip(
-                label: Text(
-                  _jarClasses[i].split('.').last,
-                  style: const TextStyle(fontSize: 11),
-                ),
-                onPressed: () => _setMainClass(_jarClasses[i]),
+          Text(
+            '源在 manifest.json 里写 config，或脚本里提供 getConfig()，'
+            'App 就按声明画出上面这些输入框，不再固定只有登录态/音色/线路。',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: context.palette.surfaceAlt,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _schemaSample,
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                fontFamily: 'monospace',
+                color: context.subtleColor,
               ),
             ),
           ),
@@ -447,6 +739,22 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       ],
     );
   }
+
+  static const String _schemaSample = '''"config": [
+  {"key": "cookie", "name": "登录态", "type": "textarea",
+   "hint": "token=xxx; uid=123"},
+  {"key": "voiceId", "name": "音色", "type": "select",
+   "source": "voices"},
+  {"key": "lineId", "name": "线路", "type": "select",
+   "source": "lines"},
+  {"key": "quality", "name": "音质", "type": "radio",
+   "options": [{"value":"std","label":"标准"},
+               {"value":"hq","label":"高清"}]},
+  {"key": "adFree", "name": "去广告", "type": "switch",
+   "default": true}
+]''';
+
+  // ---------------------------------------------------------------- 试跑
 
   Widget _testCard(PluginSource s) {
     return _card(
@@ -461,7 +769,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
           ],
         ),
         const SizedBox(height: 4),
-        Text('用关键词调用一次搜索，确认源能正常出结果。',
+        Text('用上面的配置调用一次搜索，确认源能正常出结果。',
             style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 10),
         Row(
@@ -469,8 +777,8 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
             Expanded(
               child: TextField(
                 controller: _testCtrl,
-                decoration: const InputDecoration(
-                    hintText: '关键词', isDense: true),
+                decoration:
+                    const InputDecoration(hintText: '关键词', isDense: true),
               ),
             ),
             const SizedBox(width: 10),
@@ -505,138 +813,33 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     );
   }
 
-  // ---------------------------------------------------------------- 操作
-
-  Future<void> _saveCfg() async {
-    final cfg = _cfg;
-    if (cfg == null) return;
-    await ref.read(sourceConfigRepositoryProvider).save(cfg);
-    setState(() {});
-    _toast('已保存');
-  }
-
-  Future<void> _saveLogin(PluginSource s) async {
-    final cfg = _cfg;
-    if (cfg == null) return;
-    cfg.loginState = _loginCtrl.text.trim();
-    await ref.read(sourceConfigRepositoryProvider).save(cfg);
-    _toast('登录态已保存');
-  }
-
-  Future<void> _fetchItems(PluginSource s, {required bool isVoice}) async {
-    setState(() {
-      _busy = true;
-      _busyText = '正在从源获取${isVoice ? '音色' : '线路'}...';
-    });
-    try {
-      final engine = _engineFor(s);
-      await engine.attach(s);
-      final raw = await engine.invoke(isVoice ? 'voices' : 'lines',
-          params: {'url': ''});
-      final list = _normalizeList(raw);
-      if (list.isEmpty) {
-        _toast('源没有返回${isVoice ? '音色' : '线路'}列表');
-      } else {
-        final cfg = _cfg!;
-        if (isVoice) {
-          cfg.voices = list;
-          cfg.selectedVoiceId ??= '${list.first['id']}';
-        } else {
-          cfg.lines = list;
-          cfg.selectedLineId ??= '${list.first['id']}';
-        }
-        await ref.read(sourceConfigRepositoryProvider).save(cfg);
-        setState(() {});
-        _toast('已获取 ${list.length} 条');
-      }
-    } catch (e) {
-      _toast('获取失败：$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  List<Map<String, dynamic>> _normalizeList(dynamic raw) {
-    if (raw == null) return [];
-    final out = <Map<String, dynamic>>[];
-    if (raw is List) {
-      for (var i = 0; i < raw.length; i++) {
-        final e = raw[i];
-        if (e is Map) {
-          out.add({
-            'id': '${e['id'] ?? e['key'] ?? i}',
-            'name': '${e['name'] ?? e['title'] ?? e['id'] ?? '选项${i + 1}'}',
-          });
-        } else if (e != null) {
-          out.add({'id': '$i', 'name': '$e'});
-        }
-      }
-    } else if (raw is Map) {
-      raw.forEach((k, v) {
-        out.add({'id': '$k', 'name': '$v'});
-      });
-    }
-    return out;
-  }
-
-  Future<void> _addItem({required bool isVoice}) async {
-    final nameCtrl = TextEditingController();
-    final idCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(isVoice ? '添加音色' : '添加线路'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+  Widget _jarCard(PluginSource s) {
+    return _card(
+      children: [
+        Row(
           children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(labelText: '显示名称'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: idCtrl,
-              decoration: const InputDecoration(
-                  labelText: '源内 id（可留空，默认用名称）'),
-            ),
+            Icon(Icons.memory, size: 18, color: context.subtleColor),
+            const SizedBox(width: 8),
+            const Text('JAR 主类',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            TextButton(onPressed: _editMainClass, child: const Text('修改')),
           ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('添加')),
-        ],
-      ),
+        const SizedBox(height: 6),
+        Text(
+          s.entry.isEmpty ? '未识别到主类。若调用失败，请手动填写入口类名。' : s.entry,
+          style: TextStyle(
+              fontSize: 12,
+              color: s.entry.isEmpty
+                  ? Theme.of(context).colorScheme.error
+                  : context.subtleColor),
+        ),
+      ],
     );
-    if (ok != true) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) return;
-    final id = idCtrl.text.trim().isEmpty ? name : idCtrl.text.trim();
-    final cfg = _cfg!;
-    final item = <String, dynamic>{'id': id, 'name': name};
-    if (isVoice) {
-      cfg.voices = [...cfg.voices, item];
-      cfg.selectedVoiceId ??= id;
-    } else {
-      cfg.lines = [...cfg.lines, item];
-      cfg.selectedLineId ??= id;
-    }
-    await ref.read(sourceConfigRepositoryProvider).save(cfg);
-    setState(() {});
   }
 
-  Future<void> _removeItem(
-      List<Map<String, dynamic>> items, Map<String, dynamic> item) async {
-    final cfg = _cfg!;
-    items.remove(item);
-    if (cfg.selectedVoiceId == '${item['id']}') cfg.selectedVoiceId = null;
-    if (cfg.selectedLineId == '${item['id']}') cfg.selectedLineId = null;
-    await ref.read(sourceConfigRepositoryProvider).save(cfg);
-    setState(() {});
-  }
+  // ---------------------------------------------------------------- 操作
 
   Future<void> _runTest(PluginSource s) async {
     setState(() {
@@ -645,6 +848,8 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       _testResult = null;
     });
     try {
+      // 先把当前填的值落库，试跑就用新配置
+      if (_dirty) await _save(silent: true);
       final engine = _engineFor(s);
       await engine.attach(s);
       final raw = await engine.invoke('search',
@@ -654,14 +859,13 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       buffer.writeln('成功返回 ${list.length} 条结果');
       for (final e in list.take(3)) {
         if (e is Map) {
-          buffer.writeln(
-              '· ${e['name'] ?? e['title'] ?? e['bookName'] ?? '(无标题)'}');
+          buffer.writeln('· ${e['name'] ?? e['title'] ?? e['bookName'] ?? '(无标题)'}');
         } else {
           buffer.writeln('· $e');
         }
       }
       if (list.isEmpty) {
-        buffer.writeln('（返回空，可能是关键词无结果或插件需登录）');
+        buffer.writeln('（返回空，可能是关键词无结果或配置不对）');
         buffer.writeln(_preview(raw));
       }
       setState(() {
@@ -777,7 +981,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('删除源'),
-        content: const Text('会同时删除该源的配置（登录态/音色/线路），确定？'),
+        content: const Text('会同时删除该源已填的配置，确定？'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -790,9 +994,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     );
     if (ok != true) return;
     await ref.read(sourceRepositoryProvider).remove(widget.sourceId);
-    await ref
-        .read(sourceConfigRepositoryProvider)
-        .clear(widget.sourceId);
+    await ref.read(sourceConfigRepositoryProvider).clear(widget.sourceId);
     ref.invalidate(sourceListProvider);
     if (mounted) Navigator.of(context).pop();
   }

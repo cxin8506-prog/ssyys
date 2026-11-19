@@ -27,6 +27,9 @@ class JarPluginEngine implements PluginEngine {
   String? _mainClass;
   List<String> _classes = [];
 
+  /// 已经成功接住配置的钩子方法名（避免每次都试三个）
+  String? _configHook;
+
   @override
   String get format => 'jar';
 
@@ -45,6 +48,58 @@ class JarPluginEngine implements PluginEngine {
         await _guessMainClass();
     appLogger.info('JAR 源已加载',
         detail: '${source.name} class=$_mainClass jar=$_jarPath');
+
+    // 把源自己声明的配置推给插件（插件若有 setConfig/initConfig 就会收到）
+    await _pushConfig(source);
+  }
+
+  /// 把配置 JSON 推给 JAR 插件。约定方法名：setConfig / initConfig / applyConfig
+  Future<void> _pushConfig(PluginSource s) async {
+    final cls = _mainClass;
+    final path = _jarPath;
+    if (cls == null || cls.isEmpty || path == null) return;
+    try {
+      final cfg = await _configRepo.load(s.id, s.type);
+      final map = _configRepo.buildRuntimeConfig(cfg);
+      final payload = jsonEncode([jsonEncode(map)]);
+      final hooks = _configHook != null
+          ? [_configHook!]
+          : const ['setConfig', 'initConfig', 'applyConfig'];
+      for (final name in hooks) {
+        try {
+          await _channel.invokeMethod<String>('invoke', {
+            'path': path,
+            'className': cls,
+            'method': name,
+            'argsJson': payload,
+          });
+          _configHook = name;
+          return;
+        } catch (_) {
+          // 这个钩子不存在，试下一个
+        }
+      }
+    } catch (e) {
+      appLogger.warning('JAR 配置注入失败', detail: '$e');
+    }
+  }
+
+  /// 反射看主类有没有某个方法（用于判断源声明了哪些能力）
+  @override
+  Future<bool?> hasMethod(String method) async {
+    final cls = _mainClass;
+    final path = _jarPath;
+    if (cls == null || cls.isEmpty || path == null) return null;
+    try {
+      final r = await _channel.invokeMethod<bool>('hasMethod', {
+        'path': path,
+        'className': cls,
+        'names': PluginMethods.aliases[method] ?? [method],
+      });
+      return r;
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -57,6 +112,9 @@ class JarPluginEngine implements PluginEngine {
     }
     final names = PluginMethods.aliases[method] ?? [method];
     final argsJson = jsonEncode(_argsFor(method, params ?? {}));
+
+    // 用户在源详情里改过配置的话，这里同步一次
+    await _pushConfig(s);
 
     Object? lastError;
     for (final name in names) {
@@ -135,6 +193,8 @@ class JarPluginEngine implements PluginEngine {
       case 'lines':
       case 'voices':
         return [params['url'] ?? ''];
+      case 'config':
+        return [];
       default:
         return [params];
     }

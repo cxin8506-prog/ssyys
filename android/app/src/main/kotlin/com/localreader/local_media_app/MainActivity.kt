@@ -63,6 +63,12 @@ class MainActivity : FlutterActivity() {
                             val argsJson = call.argument<String>("argsJson") ?: "[]"
                             result.success(invokeJar(path, className, method, argsJson))
                         }
+                        "hasMethod" -> {
+                            val path = call.argument<String>("path") ?: ""
+                            val className = call.argument<String>("className") ?: ""
+                            val names = call.argument<List<String>>("names") ?: emptyList()
+                            result.success(hasJarMethods(path, className, names))
+                        }
                         "unload" -> {
                             dexLoader = null
                             loadedJar = null
@@ -143,6 +149,15 @@ class MainActivity : FlutterActivity() {
         return names
     }
 
+    /** 主类是否声明了这些方法中的任意一个（用于源能力判断） */
+    private fun hasJarMethods(path: String, className: String, names: List<String>): Boolean {
+        if (names.isEmpty()) return false
+        if (dexLoader == null || loadedJar != path) loadJar(path)
+        val loader = dexLoader ?: return false
+        val cls = Class.forName(className, true, loader)
+        return cls.methods.any { it.name in names }
+    }
+
     /** 反射调用；优先静态方法，其次无参构造实例方法。参数按目标类型转换。 */
     private fun invokeJar(
         path: String,
@@ -155,8 +170,15 @@ class MainActivity : FlutterActivity() {
         val cls = Class.forName(className, true, loader)
         val args = JSONArray(argsJson)
 
-        val candidates = cls.methods.filter {
+        var candidates = cls.methods.filter {
             it.name == method && it.parameterCount == args.length()
+        }
+        // 兼容无参方法：像 config() / getVoices() 这类我们拿不准签名，
+        // 参数对不上时退一步按无参调。
+        if (candidates.isEmpty() && args.length() > 0) {
+            candidates = cls.methods.filter {
+                it.name == method && it.parameterCount == 0
+            }
         }
         if (candidates.isEmpty()) {
             throw NoSuchMethodException("$className.$method 不存在或参数个数不匹配")

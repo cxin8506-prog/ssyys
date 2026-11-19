@@ -3,7 +3,7 @@ class AppConstants {
   AppConstants._();
 
   static const String appName = '随意听书';
-  static const String version = '2.1.1';
+  static const String version = '2.2.0';
 
   /// 应用包名，用于拼接私有数据目录
   static const String packageName = 'com.localreader.local_media_app';

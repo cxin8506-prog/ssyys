@@ -344,6 +344,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     final cfg = await repo.load(s.id, s.type);
     cfg.lines = _lines;
     cfg.selectedLineId = id;
+    cfg.values['lineId'] = id;
     await repo.save(cfg);
   }
 
@@ -415,6 +416,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     final cfg = await repo.load(s.id, s.type);
     cfg.voices = _voices;
     cfg.selectedVoiceId = id;
+    cfg.values['voiceId'] = id;
     await repo.save(cfg);
   }
 

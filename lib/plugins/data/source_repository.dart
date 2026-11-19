@@ -64,6 +64,35 @@ class SourceRepository {
   Future<String> sourceDirPath(String id) async =>
       p.join((await pluginsRoot()).path, id);
 
+  /// 读取源目录里的 manifest.json（JAR 源可能没有，返回空表）
+  Future<Map<String, dynamic>> readManifest(PluginSource s) async {
+    try {
+      final dir = Directory(await sourceDirPath(s.id));
+      if (!await dir.exists()) return {};
+      final direct = File(p.join(dir.path, 'manifest.json'));
+      final file = await direct.exists()
+          ? direct
+          : await _findManifest(dir) ?? direct;
+      if (!await file.exists()) return {};
+      final m = jsonDecode(await file.readAsString());
+      if (m is Map) return Map<String, dynamic>.from(m);
+    } catch (e) {
+      appLogger.warning('manifest.json 读取失败', detail: '$e');
+    }
+    return {};
+  }
+
+  /// 读取入口脚本内容（源声明/诊断用）
+  Future<String> readEntryScriptText(PluginSource s) async {
+    final dir = await sourceDirPath(s.id);
+    for (final name in [s.entry, 'main.js', 'index.js', 'source.js']) {
+      if (name.isEmpty) continue;
+      final f = File(p.join(dir, name));
+      if (await f.exists()) return f.readAsString();
+    }
+    return '';
+  }
+
   // ---------------------------------------------------------------- 安装 ZIP
 
   /// 安装 JS/ZIP 插件包。

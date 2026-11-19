@@ -15,6 +15,9 @@ abstract class PluginEngine {
   /// 调用源方法：recommend / search / detail / chapters / content / lines / voices
   Future<dynamic> invoke(String method, {Map<String, dynamic>? params});
 
+  /// 源是否实现了某个方法：true/false，null 表示无法判断
+  Future<bool?> hasMethod(String method) async => null;
+
   Future<void> dispose();
 }
 
@@ -40,6 +43,17 @@ class PluginMethods {
     'content': ['content', 'bookContent', 'getContent', 'chapterContent'],
     'lines': ['lines', 'lineList', 'getLines', 'videoLines'],
     'voices': ['voices', 'voiceList', 'getVoices', 'tones'],
+    'config': [
+      'config',
+      'getConfig',
+      'configForm',
+      'getConfigForm',
+      'settings',
+      'getSettings',
+      'configSchema',
+      'getConfigSchema',
+    ],
+    'action': ['action', 'onAction', 'doAction', 'runAction'],
   };
 
   static const Map<String, String> labels = {
@@ -50,5 +64,6 @@ class PluginMethods {
     'content': '正文/播放地址',
     'lines': '线路列表',
     'voices': '音色列表',
+    'config': '配置声明',
   };
 }
