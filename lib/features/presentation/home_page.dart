@@ -10,16 +10,12 @@ import '../../plugins/model/plugin_source.dart';
 import '../../plugins/presentation/source_book_page.dart';
 import '../../plugins/presentation/source_picker_sheet.dart';
 import '../../plugins/presentation/source_search_page.dart';
-import '../../shared/widgets/common.dart';
-import '../audio/data/repository_providers.dart';
-import '../audio/domain/media_item.dart';
-import '../audio/presentation/audio_player_page.dart';
-import '../video/presentation/video_player_page.dart';
 
 /// 首页：左上角切源 + 源提供的推荐内容
 ///
 /// 布局参考主流听书 App：
-///   顶部大标题（当前源，点开是网格选源面板） → 搜索框 → 继续收听 → 推荐板块网格
+///   顶部大标题（当前源，点开是网格选源面板） → 右上角搜索 → 推荐板块网格
+///   「继续收听」不再占首页版面，收进底部导航上方的圆形浮钮
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -34,11 +30,6 @@ class HomePage extends ConsumerWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             _appBar(context, ref, source),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
-              sliver: SliverToBoxAdapter(child: _searchEntry(context, source)),
-            ),
-            SliverToBoxAdapter(child: _continueSection(context, ref)),
             ..._feedSlivers(context, ref, source),
             const SliverToBoxAdapter(child: SizedBox(height: 96)),
             SliverToBoxAdapter(
@@ -86,207 +77,6 @@ class HomePage extends ConsumerWidget {
         ),
       );
 
-  Widget _searchEntry(BuildContext context, PluginSource? source) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () => _openSearch(context, source),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: context.palette.surfaceAlt,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search, size: 19, color: context.subtleColor),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                source == null
-                    ? '搜索书名 / 作者'
-                    : '在「${source.name}」里搜索',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13.5, color: context.subtleColor),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ------------------------------------------------------------ 继续收听
-
-  Widget _continueSection(BuildContext context, WidgetRef ref) {
-    final videoEnabled = ref.watch(videoEnabledProvider);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 22),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              _bar(context),
-              const SizedBox(width: 8),
-              Text('继续',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        _continueRow(context, ref, AppConstants.typeAudio),
-        if (videoEnabled) ...[
-          const SizedBox(height: 10),
-          _continueRow(context, ref, AppConstants.typeVideo),
-        ],
-      ],
-    );
-  }
-
-  Widget _continueRow(BuildContext context, WidgetRef ref, String type) {
-    final isAudio = type == AppConstants.typeAudio;
-    final source = ref.watch(activeHomeSourceProvider);
-    final async = ref.watch(continueListProvider(type));
-
-    return async.when(
-      loading: () => const SizedBox(height: 52),
-      error: (_, __) => const SizedBox(height: 52),
-      data: (items) {
-        if (items.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              height: 52,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: context.cardColor,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: context.palette.outline),
-              ),
-              child: Row(
-                children: [
-                  Icon(isAudio ? Icons.headphones : Icons.movie_outlined,
-                      size: 18, color: context.subtleColor),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      isAudio ? '还没有在听的书' : '还没有在看的视频',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(fontSize: 12.5),
-                    ),
-                  ),
-                  InkWell(
-                    onTap: () => _openSearch(context, source),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 4),
-                      child: Text('去找',
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              color: Theme.of(context).colorScheme.primary)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-        return SizedBox(
-          height: 152,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (context, i) => _continueCard(context, ref, items[i]),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _continueCard(BuildContext context, WidgetRef ref, MediaItem item) {
-    final p = item.progress > 1 ? item.progress / 100 : item.progress;
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () async {
-        final chapters =
-            await ref.read(libraryRepositoryProvider).chapters(item.id);
-        if (chapters.isEmpty) return;
-        if (item.isAudio) {
-          await Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => AudioPlayerPage(item: item)));
-        } else {
-          final paths = chapters.map((c) => c.path!).toList();
-          await Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => VideoPlayerPage(
-                  path: paths.first, playlist: paths, title: item.title)));
-        }
-        // 回来后刷新进度
-        ref.invalidate(continueListProvider(item.isAudio
-            ? AppConstants.typeAudio
-            : AppConstants.typeVideo));
-      },
-      child: Container(
-        width: 200,
-        padding: const EdgeInsets.all(9),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.palette.outline),
-        ),
-        child: Row(
-          children: [
-            CoverImage(
-                path: item.coverPath,
-                title: item.title,
-                size: 56,
-                isVideo: item.isVideo),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(item.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          height: 1.25,
-                          color: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.color)),
-                  const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: p,
-                      minHeight: 3,
-                      color: Theme.of(context).colorScheme.primary,
-                      backgroundColor: context.palette.surfaceAlt,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ------------------------------------------------------------ 推荐内容
 
   List<Widget> _feedSlivers(
@@ -306,7 +96,7 @@ class HomePage extends ConsumerWidget {
 
     // 只画一次标题：单板块用「为你推荐」，多板块用各自的标题
     return [
-      const SliverToBoxAdapter(child: SizedBox(height: 26)),
+      const SliverToBoxAdapter(child: SizedBox(height: 10)),
       ...async.when(
         data: (sections) {
           final usable = sections.where((s) => s.books.isNotEmpty).toList();
@@ -502,8 +292,6 @@ class HomePage extends ConsumerWidget {
 
   Future<void> _refresh(WidgetRef ref) async {
     ref.invalidate(sourceListProvider);
-    ref.invalidate(continueListProvider(AppConstants.typeAudio));
-    ref.invalidate(continueListProvider(AppConstants.typeVideo));
     final s = ref.read(activeHomeSourceProvider);
     if (s == null) return;
     ref.invalidate(homeFeedProvider(s.id));

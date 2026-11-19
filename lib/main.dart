@@ -10,7 +10,9 @@ import 'core/di/providers.dart';
 import 'core/log/app_logger.dart';
 import 'core/theme/app_theme.dart';
 import 'features/audio/data/audio_handler.dart';
-import 'features/audio/presentation/audio_library_page.dart';
+import 'features/audio/data/repository_providers.dart';
+import 'features/audio/domain/media_item.dart' as domain;
+import 'features/audio/presentation/audio_player_page.dart';
 import 'features/backup/backup_page.dart';
 import 'features/backup/log_page.dart';
 import 'features/library/collection_pages.dart';
@@ -22,11 +24,11 @@ import 'features/search/search_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/settings/theme_picker_page.dart';
 import 'features/sync/sync_page.dart';
+import 'features/video/presentation/video_player_page.dart';
 import 'plugins/presentation/source_center_page.dart';
 import 'shared/widgets/common.dart';
 import 'plugins/presentation/source_search_page.dart';
 import 'features/ua/presentation/ua_settings_page.dart';
-import 'features/video/presentation/video_library_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -213,9 +215,108 @@ class _MainShellState extends ConsumerState<MainShell> {
     if (_index >= pages.length) _index = 0;
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
+      floatingActionButton: _NowPlayingFab(onTap: _openRecent),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: _AppBottomBar(
         index: _index,
         onTap: (i) => setState(() => _index = i),
+      ),
+    );
+  }
+
+  /// 打开最近在听/在看的那一条
+  Future<void> _openRecent(domain.MediaItem item) async {
+    final chapters =
+        await ref.read(libraryRepositoryProvider).chapters(item.id);
+    if (!mounted || chapters.isEmpty) return;
+    if (item.isAudio) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => AudioPlayerPage(item: item)),
+      );
+    } else {
+      final paths = chapters.map((c) => c.path!).toList();
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => VideoPlayerPage(
+            path: paths.first, playlist: paths, title: item.title),
+      ));
+    }
+    if (!mounted) return;
+    ref.invalidate(continueListProvider(
+        item.isAudio ? AppConstants.typeAudio : AppConstants.typeVideo));
+  }
+}
+
+/// 底部导航上方的圆形「继续播放」浮钮
+///
+/// 最近有在听/在看的内容才出现；外圈是进度，点了直接回到播放页。
+class _NowPlayingFab extends ConsumerWidget {
+  final ValueChanged<domain.MediaItem> onTap;
+
+  const _NowPlayingFab({required this.onTap});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final videoEnabled = ref.watch(videoEnabledProvider);
+    final audio = ref
+            .watch(continueListProvider(AppConstants.typeAudio))
+            .valueOrNull ??
+        const <domain.MediaItem>[];
+    final video = videoEnabled
+        ? (ref
+                .watch(continueListProvider(AppConstants.typeVideo))
+                .valueOrNull ??
+            const <domain.MediaItem>[])
+        : const <domain.MediaItem>[];
+
+    final items = <domain.MediaItem>[...audio, ...video]..sort((a, b) {
+        final x = a.lastReadAt ?? a.addedAt;
+        final y = b.lastReadAt ?? b.addedAt;
+        return y.compareTo(x);
+      });
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final item = items.first;
+    final primary = Theme.of(context).colorScheme.primary;
+    final raw = item.progress > 1 ? item.progress / 100 : item.progress;
+
+    return SizedBox(
+      width: 56,
+      height: 56,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 56,
+            height: 56,
+            child: CircularProgressIndicator(
+              value: raw.clamp(0.0, 1.0),
+              strokeWidth: 2.5,
+              backgroundColor: context.palette.outline,
+              valueColor: AlwaysStoppedAnimation<Color>(primary),
+            ),
+          ),
+          Material(
+            color: primary,
+            shape: const CircleBorder(),
+            elevation: 6,
+            shadowColor: primary.withOpacity(0.45),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => onTap(item),
+              child: SizedBox(
+                width: 46,
+                height: 46,
+                child: Icon(
+                  item.isAudio
+                      ? Icons.headphones_rounded
+                      : Icons.play_arrow_rounded,
+                  size: 24,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
