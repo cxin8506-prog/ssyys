@@ -52,6 +52,10 @@ dev_dependencies:
 # 且语言版本都 <= 2.17，可被当前 SDK 编译。
 dependency_overrides:
   string_scanner: 1.1.1
+  # audio_service 0.18 附带的 platform_interface 0.1.3 在 Flutter 3.0 下
+  # 漏 import dart:ui 的 Color，此处用本地修正副本覆盖（仅加了一行 import）
+  audio_service_platform_interface:
+    path: third_party/audio_service_platform_interface
 
 flutter:
   uses-material-design: true
