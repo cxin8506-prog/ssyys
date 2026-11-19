@@ -70,7 +70,7 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
                 );
               }
               return GridView.builder(
-                padding: const EdgeInsets.all(12),
+                padding: EdgeInsets.fromLTRB(12, 12, 12, 12 + MediaQuery.of(context).padding.bottom),
                 itemCount: items.length,
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,

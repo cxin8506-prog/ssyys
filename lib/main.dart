@@ -22,6 +22,7 @@ import 'features/settings/settings_page.dart';
 import 'features/settings/theme_picker_page.dart';
 import 'features/sync/sync_page.dart';
 import 'plugins/presentation/source_center_page.dart';
+import 'shared/widgets/common.dart';
 import 'plugins/presentation/source_search_page.dart';
 import 'features/ua/presentation/ua_settings_page.dart';
 import 'features/video/presentation/video_library_page.dart';
@@ -302,7 +303,7 @@ class LibraryHubPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('管理')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: pagePadding(context, top: 16, bottom: 16),
         children: [
           _section(context, '收藏', [
             _tile(context, Icons.favorite_outline, '听书收藏', '/favorite-audio'),

@@ -8,6 +8,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/path_utils.dart';
+import '../../shared/widgets/common.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -24,7 +25,7 @@ class SettingsPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        padding: pagePadding(context, top: 8, bottom: 32),
         children: [
           _Section(
             title: '我的内容',

@@ -6,6 +6,7 @@ import '../../../core/di/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../data/ua_constants.dart';
 import '../data/ua_repository.dart';
+import '../../../shared/widgets/common.dart';
 
 /// UA 设置（参考主流源管理类 App 的做法）
 ///
@@ -249,7 +250,7 @@ class _UaSettingsPageState extends ConsumerState<UaSettingsPage>
     }).toList();
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+      padding: pagePadding(context, top: 4, bottom: 100),
       children: [
         _hint(isMobile),
         const SizedBox(height: 14),

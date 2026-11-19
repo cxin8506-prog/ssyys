@@ -89,7 +89,7 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
             );
           }
           return GridView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+            padding: pagePadding(context, top: 14, bottom: 24),
             itemCount: items.length,
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
@@ -272,7 +272,7 @@ class BookmarkListPage extends ConsumerWidget {
                 hint: '播放时点书签按钮，会在当前位置留一个标记');
           }
           return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+            padding: pagePadding(context, top: 14, bottom: 24),
             itemCount: rows.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, i) {

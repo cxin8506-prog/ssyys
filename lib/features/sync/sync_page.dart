@@ -10,6 +10,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/path_utils.dart';
 import '../backup/backup_service.dart';
 import 'webdav_client.dart';
+import '../../shared/widgets/common.dart';
 
 /// 坚果云同步：WebDAV 上存 zip 备份，换机后下载恢复
 class SyncPage extends ConsumerStatefulWidget {
@@ -68,7 +69,7 @@ class _SyncPageState extends ConsumerState<SyncPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('坚果云同步')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        padding: pagePadding(context, bottom: 32),
         children: [
           _introCard(),
           const SizedBox(height: 16),

@@ -101,8 +101,10 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
       body: !_ready
           ? Center(
               child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary))
-          : Column(
-              children: [
+          : SafeArea(
+              top: false,
+              child: Column(
+                children: [
                 const SizedBox(height: 20),
                 CoverImage(
                     path: widget.item.coverPath,
@@ -123,6 +125,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
                 Expanded(child: _buildChapterList()),
               ],
             ),
+          ),
     );
   }
 

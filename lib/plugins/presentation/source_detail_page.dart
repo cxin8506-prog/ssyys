@@ -10,6 +10,7 @@ import '../engine/jar_plugin_engine.dart';
 import '../engine/js_plugin_engine.dart';
 import '../engine/plugin_engine.dart';
 import '../model/plugin_source.dart';
+import '../../shared/widgets/common.dart';
 
 /// 源详情：基本信息 + 登录态 + 音色 + 线路 + 试跑测试
 class SourceDetailPage extends ConsumerStatefulWidget {
@@ -103,7 +104,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       body: Stack(
         children: [
           ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+            padding: pagePadding(context, bottom: 40),
             children: [
               _infoCard(s),
               const SizedBox(height: 16),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../shared/widgets/common.dart';
 
 /// 主题选择：6 套配色 × 3 种明暗模式，带实时预览
 class ThemePickerPage extends ConsumerWidget {
@@ -18,7 +19,7 @@ class ThemePickerPage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('主题')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        padding: pagePadding(context, top: 8, bottom: 32),
         children: [
           Text('配色', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),

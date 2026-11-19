@@ -40,7 +40,11 @@ class HomePage extends ConsumerWidget {
             ),
             SliverToBoxAdapter(child: _continueSection(context, ref)),
             ..._feedSlivers(context, ref, source),
-            const SliverToBoxAdapter(child: SizedBox(height: 108)),
+            const SliverToBoxAdapter(child: SizedBox(height: 96)),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                  height: MediaQuery.of(context).padding.bottom + 8),
+            ),
           ],
         ),
       ),

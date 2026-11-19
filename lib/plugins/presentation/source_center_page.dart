@@ -7,6 +7,7 @@ import '../../../core/utils/path_utils.dart';
 import '../data/plugin_providers.dart';
 import '../model/plugin_source.dart';
 import 'source_detail_page.dart';
+import '../../shared/widgets/common.dart';
 
 /// 源管理：导入 JS/ZIP、JAR 插件，启用停用，进入配置
 class SourceCenterPage extends ConsumerStatefulWidget {
@@ -63,7 +64,7 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
 
   Widget _buildBody(List<PluginSource> list) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      padding: pagePadding(context, bottom: 32),
       children: [
         _introCard(),
         const SizedBox(height: 18),

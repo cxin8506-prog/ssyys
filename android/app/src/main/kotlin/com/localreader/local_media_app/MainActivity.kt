@@ -1,8 +1,11 @@
 package com.localreader.local_media_app
 
 import android.app.PictureInPictureParams
+import android.graphics.Color
 import android.os.Build
+import android.os.Bundle
 import android.util.Rational
+import android.view.WindowManager
 import dalvik.system.DexClassLoader
 import dalvik.system.DexFile
 import io.flutter.embedding.android.FlutterActivity
@@ -17,6 +20,25 @@ class MainActivity : FlutterActivity() {
 
     private var dexLoader: DexClassLoader? = null
     private var loadedJar: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // 全面屏：内容铺到状态栏/导航栏/刘海下面，由 Flutter 侧 SafeArea 避让。
+        // 部分 ROM（MIUI/EMUI）会强制给透明系统栏加对比度遮罩，这里一起关掉。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val lp = window.attributes
+            lp.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            window.attributes = lp
+        }
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

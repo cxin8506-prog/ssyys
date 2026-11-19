@@ -56,6 +56,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     ? const EmptyState(
                         icon: Icons.search_off, message: '没有找到相关内容')
                     : ListView.builder(
+                        padding: pagePadding(context, top: 4, bottom: 16),
                         itemCount: _results.length,
                         itemBuilder: (context, i) {
                           final item = _results[i];

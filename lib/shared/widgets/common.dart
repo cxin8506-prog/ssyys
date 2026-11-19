@@ -4,6 +4,25 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 
+/// 滚动页面的统一内边距。
+///
+/// 全面屏（edge-to-edge）下 Scaffold 不会自动避让系统导航条/手势条，
+/// 滚动内容如果只写固定 bottom，最后一块会被压住。这里统一加上安全区。
+EdgeInsets pagePadding(
+  BuildContext context, {
+  double left = 16,
+  double top = 12,
+  double right = 16,
+  double bottom = 28,
+}) {
+  final safeBottom = MediaQuery.of(context).padding.bottom;
+  return EdgeInsets.fromLTRB(left, top, right, bottom + safeBottom);
+}
+
+/// 底部固定悬浮元素的避让高度（系统手势条 + 悬浮导航条）
+double bottomBarInset(BuildContext context, {double extra = 0}) =>
+    MediaQuery.of(context).padding.bottom + extra;
+
 /// 封面图：有路径显示图片，否则显示占位首字
 class CoverImage extends StatelessWidget {
   final String? path;

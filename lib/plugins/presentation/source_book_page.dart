@@ -7,6 +7,7 @@ import '../model/plugin_source.dart';
 import '../model/plugin_source.dart' show PluginSource;
 import '../../features/video/presentation/video_player_page.dart';
 import 'network_audio_page.dart';
+import '../../shared/widgets/common.dart';
 
 /// 源里的书详情：简介 + 音色 + 章节，点章节直接播放
 class SourceBookPage extends ConsumerStatefulWidget {
@@ -196,7 +197,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
                   ),
                 )
               : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  padding: pagePadding(context, bottom: 24),
                   children: [
                     _header(),
                     if (_voices.isNotEmpty && _isAudio) ...[

@@ -9,6 +9,7 @@ import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/path_utils.dart';
 import 'backup_service.dart';
+import '../../shared/widgets/common.dart';
 
 /// 本地 zip 备份与恢复：数据库、封面、日志、插件一起打包
 class BackupPage extends ConsumerStatefulWidget {
@@ -48,7 +49,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('备份与恢复')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        padding: pagePadding(context, bottom: 32),
         children: [
           _intro(),
           const SizedBox(height: 18),

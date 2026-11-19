@@ -99,7 +99,7 @@ class _AudioLibraryPageState extends ConsumerState<AudioLibraryPage> {
       height: 44,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: EdgeInsets.fromLTRB(12, 4, 12, 4 + MediaQuery.of(context).padding.bottom),
         children: [
           _filterChip('全部', AppConstants.filterAll),
           _filterChip('未读', AppConstants.filterUnread),
