@@ -29,15 +29,23 @@ Future<void> main() async {
   final db = AppDatabase();
   appLogger.attachDatabase(db);
 
-  // 初始化音频后台服务（通知栏 / 后台播放）
-  audioHandler = await AudioService.init(
-    builder: () => MyAudioHandler(),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.localreader.channel.audio',
-      androidNotificationChannelName: '随意听书播放',
-      androidNotificationOngoing: true,
-    ),
-  );
+  // 初始化音频后台服务（通知栏 / 后台播放）。
+  // 加超时与降级：部分设备（尤其旧安卓）绑定前台服务可能失败或卡住，
+  // 这里保证无论如何都能进入主界面，避免启动一直白屏。
+  try {
+    audioHandler = await AudioService.init(
+      builder: () => MyAudioHandler(),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.localreader.channel.audio',
+        androidNotificationChannelName: '随意听书播放',
+        androidNotificationOngoing: true,
+      ),
+    ).timeout(const Duration(seconds: 8));
+  } catch (e, st) {
+    appLogger.error('音频后台服务初始化失败，已降级为无通知栏模式',
+        error: e, stack: st);
+    audioHandler = MyAudioHandler();
+  }
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
