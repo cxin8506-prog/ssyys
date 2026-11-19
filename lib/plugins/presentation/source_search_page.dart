@@ -11,7 +11,11 @@ import 'source_book_page.dart';
 /// 源搜索：选一个源，输入关键词，返回结果列表
 class SourceSearchPage extends ConsumerStatefulWidget {
   final String type;
-  const SourceSearchPage({super.key, this.type = AppConstants.typeAudio});
+
+  /// 从首页进来时带上的源，保证和首页选的是同一个
+  final String? initialSourceId;
+
+  const SourceSearchPage({super.key, this.type = AppConstants.typeAudio, this.initialSourceId});
 
   @override
   ConsumerState<SourceSearchPage> createState() => _SourceSearchPageState();
@@ -27,7 +31,8 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
   @override
   void initState() {
     super.initState();
-    _sourceId = ref.read(currentSourceProvider(widget.type));
+    _sourceId = widget.initialSourceId ??
+        ref.read(currentSourceProvider(widget.type));
   }
 
   @override

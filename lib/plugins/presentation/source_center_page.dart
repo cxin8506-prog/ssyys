@@ -2,7 +2,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/path_utils.dart';
 import '../data/plugin_providers.dart';
@@ -63,9 +62,6 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
   }
 
   Widget _buildBody(List<PluginSource> list) {
-    final audio = list.where((e) => e.type == AppConstants.typeAudio).toList();
-    final video = list.where((e) => e.type == AppConstants.typeVideo).toList();
-
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
@@ -74,17 +70,9 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
         if (list.isEmpty)
           _emptyCard()
         else ...[
-          if (audio.isNotEmpty) ...[
-            _groupTitle('听书源', audio.length),
-            const SizedBox(height: 8),
-            ...audio.map((s) => _sourceTile(s)),
-            const SizedBox(height: 18),
-          ],
-          if (video.isNotEmpty) ...[
-            _groupTitle('视频源', video.length),
-            const SizedBox(height: 8),
-            ...video.map((s) => _sourceTile(s)),
-          ],
+          _groupTitle('已安装', list.length),
+          const SizedBox(height: 8),
+          ...list.map((s) => _sourceTile(s)),
         ],
         const SizedBox(height: 24),
         OutlinedButton.icon(
@@ -128,7 +116,7 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
             '支持两种插件：\n'
             '• JS/ZIP：包内 manifest.json + JS（随身听书风格）\n'
             '• JAR：含 classes.dex 的安卓插件（我的听书风格）\n'
-            '导入后在上方源列表里启用/配置，首页可切换当前源。',
+            '导入时不用选听书还是视频，会自动识别类型。',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.5),
           ),
         ],
@@ -219,6 +207,8 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
                                   fontSize: 15, fontWeight: FontWeight.w600)),
                         ),
                         const SizedBox(width: 6),
+                        _typeTag(s),
+                        const SizedBox(width: 4),
                         _miniTag(s.formatLabel),
                         if (s.version.isNotEmpty && s.version != '1.0.0') ...[
                           const SizedBox(width: 4),
@@ -264,42 +254,23 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
             style: TextStyle(fontSize: 10, color: context.subtleColor)),
       );
 
+  /// 类型标签：导入时自动识别，识别不准可在源详情里改
+  Widget _typeTag(PluginSource s) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: context.palette.primarySoft,
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          s.isAudio ? '听书' : '视频',
+          style: TextStyle(
+              fontSize: 10, color: Theme.of(context).colorScheme.primary),
+        ),
+      );
+
   // ---------------------------------------------------------------- 导入
 
   Future<void> _pickAndInstall() async {
-    final type = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 18, 20, 6),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('这个源是哪一类？',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.headphones_outlined),
-              title: const Text('听书源'),
-              subtitle: const Text('搜索/目录/音频播放'),
-              onTap: () => Navigator.pop(ctx, AppConstants.typeAudio),
-            ),
-            ListTile(
-              leading: const Icon(Icons.movie_outlined),
-              title: const Text('视频源'),
-              subtitle: const Text('搜索/线路/视频播放'),
-              onTap: () => Navigator.pop(ctx, AppConstants.typeVideo),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (type == null) return;
-
     FilePickerResult? picked;
     try {
       picked = await FilePicker.platform.pickFiles(
@@ -321,14 +292,12 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
     try {
       final repo = ref.read(sourceRepositoryProvider);
       final ext = PathUtils.ext(path);
-      final PluginSource s;
-      if (ext == 'jar') {
-        s = await repo.installJar(path, typeOverride: type);
-      } else {
-        s = await repo.installZip(path, typeOverride: type);
-      }
+      // 类型交给仓储自动识别，不再让用户选听书/视频
+      final PluginSource s = ext == 'jar'
+          ? await repo.installJar(path)
+          : await repo.installZip(path);
       ref.invalidate(sourceListProvider);
-      _toast('已安装「${s.name}」');
+      _toast('已安装「${s.name}」· ${s.isAudio ? '听书源' : '视频源'}');
     } catch (e) {
       _toast('安装失败：$e');
     } finally {

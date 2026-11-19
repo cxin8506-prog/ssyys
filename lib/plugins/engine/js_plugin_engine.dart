@@ -143,6 +143,8 @@ class JsPluginEngine implements PluginEngine {
 
   List<dynamic> _argsFor(String method, Map<String, dynamic> params) {
     switch (method) {
+      case 'recommend':
+        return [params['page'] ?? 1];
       case 'search':
         return [params['keyword'] ?? '', params['page'] ?? 1];
       case 'detail':

@@ -3,7 +3,7 @@ class AppConstants {
   AppConstants._();
 
   static const String appName = '随意听书';
-  static const String version = '2.0.0';
+  static const String version = '2.1.0';
 
   /// 应用包名，用于拼接私有数据目录
   static const String packageName = 'com.localreader.local_media_app';
@@ -40,6 +40,7 @@ class AppConstants {
   static const String keyNaturalSort = 'natural_sort';
   static const String keyCurrentSourceAudio = 'current_source_audio';
   static const String keyCurrentSourceVideo = 'current_source_video';
+  static const String keyHomeSourceId = 'home_source_id';
 
   // ---------- 坚果云（WebDAV）----------
   static const String keySyncUrl = 'sync_url';

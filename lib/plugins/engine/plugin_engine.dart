@@ -12,7 +12,7 @@ abstract class PluginEngine {
   /// 绑定一个源（加载脚本 / 准备类加载器）
   Future<void> attach(PluginSource source);
 
-  /// 调用源方法：search / detail / chapters / content / lines / voices
+  /// 调用源方法：recommend / search / detail / chapters / content / lines / voices
   Future<dynamic> invoke(String method, {Map<String, dynamic>? params});
 
   Future<void> dispose();
@@ -23,6 +23,17 @@ class PluginMethods {
   PluginMethods._();
 
   static const Map<String, List<String>> aliases = {
+    'recommend': [
+      'recommend',
+      'home',
+      'homeList',
+      'homeFeed',
+      'indexList',
+      'discover',
+      'recommendList',
+      'getRecommend',
+      'hot',
+    ],
     'search': ['search', 'bookSearch', 'searchBook', 'searchBooks'],
     'detail': ['detail', 'bookInfo', 'getBookInfo', 'bookDetail'],
     'chapters': ['chapters', 'chapterList', 'getChapterList', 'catalog'],
@@ -32,6 +43,7 @@ class PluginMethods {
   };
 
   static const Map<String, String> labels = {
+    'recommend': '首页推荐',
     'search': '搜索',
     'detail': '详情',
     'chapters': '目录',

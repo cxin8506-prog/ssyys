@@ -100,13 +100,24 @@ class SourceRepository {
         _slug('${baseName}_${DateTime.now().millisecondsSinceEpoch % 100000}');
     id = _slug(id);
 
-    final type = typeOverride ??
-        _pickString(manifest, ['type', '类型']) ??
-        _guessType(manifest, root) ??
-        'audio';
-
     var entry = _pickString(manifest, ['entry', 'script', 'main', 'entryFile']) ?? '';
     if (entry.isEmpty) entry = await _guessEntryScript(root);
+
+    // 类型：不用用户选，按「manifest 声明 → capabilities → 脚本内容 → 文件名」自动判断
+    final String resolvedType;
+    final declared = typeOverride ?? _pickString(manifest, ['type', '类型']);
+    if (declared != null && declared.isNotEmpty) {
+      resolvedType = declared;
+    } else {
+      final guessed = _guessType(manifest, root);
+      if (guessed != null && guessed.isNotEmpty) {
+        resolvedType = guessed;
+      } else {
+        final sample = await _readScriptSample(root, entry);
+        resolvedType =
+            _detectType('$baseName\n${jsonEncode(manifest)}\n$sample');
+      }
+    }
 
     // 4) 移动到正式目录（同 id 覆盖安装）
     final target = Directory(p.join((await pluginsRoot()).path, id));
@@ -119,7 +130,7 @@ class SourceRepository {
     final source = PluginSource(
       id: id,
       name: name,
-      type: type,
+      type: resolvedType,
       format: 'jsZip',
       version: _pickString(manifest, ['version', 'ver', '版本']) ?? '1.0.0',
       author: _pickString(manifest, ['author', '作者']) ?? '',
@@ -156,14 +167,24 @@ class SourceRepository {
     // 读 JAR 内的 MANIFEST / dex 情况
     String entry = mainClass ?? '';
     bool hasDex = false;
+    final probe = StringBuffer(baseName);
     try {
       final bytes = await jarFile.readAsBytes();
       final arc = ZipDecoder().decodeBytes(bytes);
       for (final f in arc.files) {
         final n = f.name.toLowerCase();
-        if (n.endsWith('classes.dex')) hasDex = true;
+        if (n.endsWith('classes.dex')) {
+          hasDex = true;
+          // dex 里的字符串常量能反映源的能力（m3u8 / mp3 / 影视 …）
+          if (probe.length < 400000) {
+            final content = f.content as List<int>;
+            probe.write(String.fromCharCodes(
+                content.length > 600000 ? content.sublist(0, 600000) : content));
+          }
+        }
         if (n == 'meta-inf/manifest.mf') {
           final txt = utf8.decode(f.content as List<int>, allowMalformed: true);
+          probe.write('\n$txt');
           for (final line in txt.split(RegExp(r'\r?\n'))) {
             if (line.toLowerCase().startsWith('main-class:')) {
               entry = line.substring('main-class:'.length).trim();
@@ -175,11 +196,16 @@ class SourceRepository {
       appLogger.warning('JAR 内容探测失败', detail: '$e');
     }
 
+    String? type = typeOverride;
+    if (type == null || type.isEmpty) {
+      type = _detectType(probe.toString());
+    }
+
     final size = await _dirSize(target);
     final source = PluginSource(
       id: id,
       name: baseName,
-      type: typeOverride ?? 'audio',
+      type: type,
       format: 'jar',
       version: '1.0.0',
       description: hasDex ? '' : '该 JAR 未包含 classes.dex，Android 无法直接加载，需用 d8 转换',
@@ -296,6 +322,76 @@ class SourceRepository {
       }
     }
     return null;
+  }
+
+  /// 读入口脚本的前 200KB，用于自动判断源类型
+  Future<String> _readScriptSample(Directory dir, String entry) async {
+    try {
+      final candidates = <File>[];
+      if (entry.isNotEmpty) candidates.add(File(p.join(dir.path, entry)));
+      if (candidates.isEmpty || !await candidates.first.exists()) {
+        final guess = await _guessEntryScript(dir);
+        if (guess.isNotEmpty) candidates.add(File(p.join(dir.path, guess)));
+      }
+      final buf = StringBuffer();
+      for (final f in candidates) {
+        if (!await f.exists()) continue;
+        final text = await f.readAsString();
+        buf.writeln(
+            text.length > 200000 ? text.substring(0, 200000) : text);
+      }
+      return buf.toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 从脚本内容 / 文件名 / dex 字符串里判断是听书还是视频。
+  ///
+  /// 判不准时返回 audio（听书类插件占多数），用户可以在源详情里手动改。
+  String _detectType(String text) {
+    final lower = text.toLowerCase();
+    const videoWords = [
+      'm3u8',
+      'vod_',
+      '/vod/',
+      'videourl',
+      'video_url',
+      'playurl',
+      'play_url',
+      '影视',
+      '电影',
+      '电视剧',
+      '剧集',
+      'video',
+      'player',
+    ];
+    const audioWords = [
+      'mp3',
+      'm4a',
+      '听书',
+      '有声',
+      '播音',
+      '音色',
+      '评书',
+      '相声',
+      '章节',
+      'chapterlist',
+      '音频',
+      'audio',
+    ];
+
+    int score(List<String> words) {
+      var n = 0;
+      for (final w in words) {
+        n += RegExp(RegExp.escape(w)).allMatches(lower).length;
+      }
+      return n;
+    }
+
+    final v = score(videoWords);
+    final a = score(audioWords);
+    return (v >= 3 && v >= a * 1.5) ? 'video' : 'audio';
   }
 
   Future<String> _guessEntryScript(Directory dir) async {
