@@ -63,7 +63,7 @@ class NetworkAudioPage extends ConsumerStatefulWidget {
   });
 
   @override
-  State<NetworkAudioPage> createState() => _NetworkAudioPageState();
+  ConsumerState<NetworkAudioPage> createState() => _NetworkAudioPageState();
 }
 
 class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {

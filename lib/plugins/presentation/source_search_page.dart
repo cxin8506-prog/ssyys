@@ -362,8 +362,8 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     }
     // 正在搜、一个结果都还没回来
     if (_loading && _groups.isEmpty) {
-      return const Center(
-        child: const Column(
+      return Center(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircularProgressIndicator(),
