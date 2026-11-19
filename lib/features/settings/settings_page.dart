@@ -156,35 +156,6 @@ class SettingsPage extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          Center(
-            child: Column(
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Theme.of(context).colorScheme.primary,
-                        Theme.of(context).colorScheme.secondary,
-                      ],
-                    ),
-                  ),
-                  child: const Icon(Icons.headphones, color: Colors.white),
-                ),
-                const SizedBox(height: 10),
-                Text('随意听书 v${AppConstants.version}',
-                    style: Theme.of(context).textTheme.bodyMedium),
-                const SizedBox(height: 2),
-                Text('全本地 · 无需登录 · 数据可迁移',
-                    style: Theme.of(context).textTheme.bodySmall),
-              ],
-            ),
-          ),
         ],
       ),
     );
