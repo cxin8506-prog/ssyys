@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/utils/path_utils.dart';
 import '../../shared/widgets/common.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -18,7 +15,6 @@ class SettingsPage extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final themeColor = ref.watch(themeColorProvider);
     final videoEnabled = ref.watch(videoEnabledProvider);
-    final cacheLimit = ref.watch(cacheLimitProvider);
     final prefs = ref.read(sharedPrefsProvider);
     final scheme = AppTheme.schemeAt(themeColor);
 
@@ -87,39 +83,6 @@ class SettingsPage extends ConsumerWidget {
                   prefs.setBool(AppConstants.keyVideoEnabled, v);
                 },
               ),
-              SwitchListTile(
-                secondary: _iconBadge(context, Icons.download_outlined),
-                title: const Text('自动缓存'),
-                subtitle: const Text('播完当前一集自动缓存后面的集，默认关'),
-                value: ref.watch(autoCacheProvider),
-                onChanged: (v) {
-                  ref.read(autoCacheProvider.notifier).state = v;
-                  prefs.setBool(AppConstants.keyAutoCache, v);
-                },
-              ),
-              if (ref.watch(autoCacheProvider)) ...[
-                ListTile(
-                  leading: _iconBadge(context, Icons.format_list_numbered),
-                  title: const Text('缓存集数'),
-                  subtitle: const Text('播完一集后自动缓存后面几集'),
-                  trailing: Text(
-                      '${ref.watch(autoCacheCountProvider)} 集',
-                      style: TextStyle(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.primary)),
-                  onTap: () => _pickCacheCount(context, ref, prefs),
-                ),
-                SwitchListTile(
-                  secondary: _iconBadge(context, Icons.wifi_outlined),
-                  title: const Text('仅 WiFi 下缓存'),
-                  subtitle: const Text('开了只在 WiFi 下缓存，不用流量'),
-                  value: ref.watch(autoCacheWifiOnlyProvider),
-                  onChanged: (v) {
-                    ref.read(autoCacheWifiOnlyProvider.notifier).state = v;
-                    prefs.setBool(AppConstants.keyAutoCacheWifiOnly, v);
-                  },
-                ),
-              ],
               ListTile(
                 leading: _iconBadge(context, Icons.play_circle_outline),
                 title: const Text('播放设置'),
@@ -181,28 +144,6 @@ class SettingsPage extends ConsumerWidget {
                 subtitle: const Text('按源自动切换 UA，加载受限时可修改重试'),
                 trailing: const Icon(Icons.chevron_right, size: 20),
                 onTap: () => Navigator.of(context).pushNamed('/ua-settings'),
-              ),
-            ],
-          ),
-          _Section(
-            title: '存储',
-            children: [
-              ListTile(
-                leading: _iconBadge(context, Icons.storage_outlined),
-                title: const Text('缓存上限'),
-                subtitle: Text('$cacheLimit MB，超过时提示清理'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => _showCacheDialog(context, ref, prefs),
-              ),
-              FutureBuilder<int>(
-                future: _cacheSize(),
-                builder: (context, snap) => ListTile(
-                  leading: _iconBadge(context, Icons.cleaning_services_outlined),
-                  title: const Text('清除缓存'),
-                  subtitle: Text(
-                      '当前占用 ${PathUtils.formatSize((snap.data ?? 0) * 1024 * 1024)}'),
-                  onTap: () => _clearCache(context, ref),
-                ),
               ),
             ],
           ),
@@ -294,66 +235,7 @@ class SettingsPage extends ConsumerWidget {
         child: Icon(icon, size: 19, color: Theme.of(context).colorScheme.primary),
       );
 
-  void _showCacheDialog(
-      BuildContext context, WidgetRef ref, SharedPreferences prefs) {
-    final current = ref.read(cacheLimitProvider);
-    showDialog(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('缓存上限'),
-        children: [256, 512, 1024].map((v) {
-          return SimpleDialogOption(
-            onPressed: () {
-              ref.read(cacheLimitProvider.notifier).state = v;
-              prefs.setInt(AppConstants.keyCacheLimitMb, v);
-              Navigator.pop(ctx);
-            },
-            child: Row(
-              children: [
-                Text(v == 1024 ? '1 GB' : '$v MB',
-                    style: const TextStyle(fontSize: 15)),
-                if (v == current) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.check,
-                      size: 16, color: Theme.of(context).colorScheme.primary),
-                ],
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
 
-  void _pickCacheCount(
-      BuildContext context, WidgetRef ref, SharedPreferences prefs) {
-    final current = ref.read(autoCacheCountProvider);
-    showDialog(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('缓存集数'),
-        children: [1, 3, 5].map((v) {
-          return SimpleDialogOption(
-            onPressed: () {
-              ref.read(autoCacheCountProvider.notifier).state = v;
-              prefs.setInt(AppConstants.keyAutoCacheCount, v);
-              Navigator.pop(ctx);
-            },
-            child: Row(
-              children: [
-                Text('$v 集', style: const TextStyle(fontSize: 15)),
-                if (v == current) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.check,
-                      size: 16, color: Theme.of(context).colorScheme.primary),
-                ],
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
 
   void _pickFontSize(
       BuildContext context, WidgetRef ref, SharedPreferences prefs) {
@@ -386,24 +268,7 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  Future<int> _cacheSize() async {
-    final dir = await PathUtils.cacheDir;
-    int total = 0;
-    await for (final e in dir.list(recursive: true)) {
-      if (e is File) total += await e.length();
-    }
-    return total ~/ (1024 * 1024);
-  }
 
-  void _clearCache(BuildContext context, WidgetRef ref) async {
-    final dir = await PathUtils.cacheDir;
-    if (dir.existsSync()) dir.deleteSync(recursive: true);
-    await PathUtils.cacheDir;
-    {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('缓存已清除')));
-    }
-  }
 }
 
 /// 分组：标题 + 圆角卡片

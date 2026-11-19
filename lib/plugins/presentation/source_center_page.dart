@@ -72,7 +72,12 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
     );
   }
 
-  /// 读每个源的登录入口（manifest 里的 login）与已保存的 Cookie
+  /// 读每个源的登录入口与已保存的 Cookie。
+  ///
+  /// 两种格式一视同仁：
+  /// - JS/ZIP 源：读 manifest 里的 login；
+  /// - JAR（我的听书格式）：没有 manifest，问引擎的 ILogin（loginInfo），
+  ///   有登录地址就在卡片上显示登录入口。
   Future<void> _ensureAuth(List<PluginSource> list) async {
     if (_authLoading) return;
     final pending = list.where((s) => !_auth.containsKey(s.id)).toList();
@@ -82,8 +87,17 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
     final cfgRepo = ref.read(sourceConfigRepositoryProvider);
     for (final s in pending) {
       try {
-        final manifest = await repo.readManifest(s);
-        final entry = LoginEntry.parse(manifest);
+        var entry = LoginEntry.parse(await repo.readManifest(s));
+        // JAR 源没有 manifest，问引擎的 ILogin
+        if ((entry == null || !entry.valid) && s.isTingShu) {
+          try {
+            final engine = ref.read(tingShuEngineProvider);
+            await engine.attach(s);
+            final info = await engine.loginInfo();
+            final url = '${info?['url'] ?? ''}'.trim();
+            if (url.isNotEmpty) entry = LoginEntry(url: url);
+          } catch (_) {}
+        }
         var cookie = '';
         if (entry != null && entry.valid) {
           final cfg = await cfgRepo.load(s.id, s.type);
@@ -101,6 +115,8 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
   Future<void> _quickLogin(PluginSource s, _SourceAuth auth) async {
     final entry = auth.entry;
     if (entry == null || !entry.valid) return;
+    // 青空次元给手动 token 入口（旧手机 WebView 打不开登录页时用）
+    final isSorani = entry.url.toLowerCase().contains('sorani');
     final cookie = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => LoginWebPage(
@@ -108,6 +124,12 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
           url: entry.url,
           successUrl: entry.successUrl,
           cookieUrl: entry.cookieUrl,
+          tokenKey: isSorani ? 'sorani_auth_token' : '',
+          tokenHint: isSorani
+              ? '在电脑浏览器上打开青空次元并登录，然后按 F12 打开开发者工具，'
+                  '在控制台输入 localStorage.getItem("sorani_auth_token")，'
+                  '把引号里的那串字符复制过来粘贴进来。'
+              : '',
         ),
       ),
     );
@@ -118,6 +140,22 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
     }
     final cfgRepo = ref.read(sourceConfigRepositoryProvider);
     final cfg = await cfgRepo.load(s.id, s.type);
+    if (cookie.startsWith('TOKEN:')) {
+      final token = cookie.substring('TOKEN:'.length).trim();
+      if (token.isEmpty) {
+        if (mounted) _toast('Token 是空的，没保存');
+        return;
+      }
+      cfg.values['token'] = token;
+      if (isSorani) cfg.values['sorani_auth_token'] = token;
+      await cfgRepo.save(cfg);
+      auth.cookie = token;
+      if (mounted) {
+        setState(() {});
+        _toast('「${s.name}」Token 已保存');
+      }
+      return;
+    }
     cfg.values['cookie'] = cookie;
     cfg.loginState = cookie;
     await cfgRepo.save(cfg);

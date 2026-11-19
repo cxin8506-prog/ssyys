@@ -72,6 +72,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
   String? _error;
   String _keyword = '';
   List<_Group> _groups = [];
+  final Set<String> _expanded = {};
   List<String> _history = [];
   List<String> _hotWords = [];
 
@@ -275,84 +276,105 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
     );
   }
 
+  /// 点一下拉开的源选择条：默认「全部」，点开底部列表选源，选完收起并重搜
   Widget _sourceBar(List<PluginSource> sources) {
     final primary = Theme.of(context).colorScheme.primary;
-    Widget chip({
-      required String label,
-      required bool selected,
-      required VoidCallback onTap,
-      IconData? icon,
-    }) {
-      return InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: selected ? context.palette.primarySoft : context.cardColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: selected ? primary : context.palette.outline,
-              width: selected ? 1.4 : 1,
+    final current = _isAll
+        ? '全部'
+        : sources
+            .where((s) => s.id == _sourceId)
+            .map((s) => s.name)
+            .firstWhere((_) => true, orElse: () => '全部');
+    return InkWell(
+      onTap: () => _pickSource(sources),
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(Icons.extension_outlined, size: 18, color: primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('源：$current',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w600)),
             ),
-          ),
-          child: Row(
+            Icon(Icons.keyboard_arrow_down_rounded,
+                size: 20, color: context.subtleColor),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 底部弹出源列表，点一个就选上、收起、用同一关键词重搜
+  Future<void> _pickSource(List<PluginSource> sources) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              if (icon != null) ...[
-                Icon(icon,
-                    size: 14, color: selected ? primary : context.subtleColor),
-                const SizedBox(width: 5),
-              ],
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  color: selected ? primary : null,
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('选择源',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                 ),
               ),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    _sourceOption(ctx, _allKey, '全部', _isAll),
+                    for (final s in sources)
+                      _sourceOption(
+                          ctx, s.id, s.name, !_isAll && _sourceId == s.id),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
             ],
           ),
-        ),
-      );
+        );
+      },
+    );
+    if (picked == null) return;
+    if (picked == _allKey) {
+      setState(() => _sourceId = _allKey);
+    } else {
+      setState(() => _sourceId = picked);
+      setCurrentSource(ref, _type, picked);
     }
+    _loadHot();
+    if (_keyword.isNotEmpty) _search(_keyword);
+  }
 
-    return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 12),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: sources.length + 1,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          if (i == 0) {
-            return chip(
-              label: '全部',
-              icon: Icons.apps,
-              selected: _isAll,
-              onTap: () {
-                setState(() => _sourceId = _allKey);
-                _loadHot();
-                if (_keyword.isNotEmpty) _search(_keyword);
-              },
-            );
-          }
-          final s = sources[i - 1];
-          return chip(
-            label: s.name,
-            icon: (s.isJar || s.isTingShu) ? Icons.archive_outlined : Icons.code,
-            selected: !_isAll && _sourceId == s.id,
-            onTap: () {
-              setState(() => _sourceId = s.id);
-              setCurrentSource(ref, _type, s.id);
-              _loadHot();
-              // 切到另一个源，用同一个关键词立刻重新搜一遍
-              if (_keyword.isNotEmpty) _search(_keyword);
-            },
-          );
-        },
-      ),
+  Widget _sourceOption(
+      BuildContext ctx, String id, String name, bool selected) {
+    final primary = Theme.of(ctx).colorScheme.primary;
+    return ListTile(
+      leading: Icon(
+          selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          size: 20,
+          color: selected ? primary : null),
+      title: Text(name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+              fontSize: 14,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              color: selected ? primary : null)),
+      trailing: selected ? const Text('正在使用', style: TextStyle(fontSize: 11)) : null,
+      onTap: () => Navigator.pop(ctx, id),
     );
   }
 
@@ -426,10 +448,31 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
               style: TextStyle(fontSize: 12.5, color: context.subtleColor)),
         ));
       }
-      for (final r in g.items) {
+      final expanded = _expanded.contains(g.source.id);
+      final shown = expanded ? g.items : g.items.take(10).toList();
+      for (final r in shown) {
         rows.add(Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: _resultTile(r, g.source),
+        ));
+      }
+      if (g.items.length > 10) {
+        rows.add(Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Center(
+            child: TextButton(
+              onPressed: () => setState(() {
+                if (expanded) {
+                  _expanded.remove(g.source.id);
+                } else {
+                  _expanded.add(g.source.id);
+                }
+              }),
+              child: Text(expanded
+                  ? '收起'
+                  : '查看更多（还有 ${g.items.length - 10} 条）'),
+            ),
+          ),
         ));
       }
       rows.add(const SizedBox(height: 6));
@@ -726,6 +769,9 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
           url,
           width: 54,
           height: 72,
+          cacheWidth: 108,
+          cacheHeight: 144,
+          filterQuality: FilterQuality.low,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => _coverPlaceholder(title),
         ),
@@ -773,6 +819,7 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
       _error = null;
       _searched = true;
       _groups = [];
+      _expanded.clear();
       _pending = targets.length;
       _loading = true;
     });

@@ -301,6 +301,9 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
               ? Image.network(_cover,
                   width: 84,
                   height: 112,
+                  cacheWidth: 168,
+                  cacheHeight: 224,
+                  filterQuality: FilterQuality.low,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) => _coverBox())
               : _coverBox(),
@@ -598,6 +601,10 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
               voiceId: _voiceId ?? '',
               playlist: _chapters.map((e) => '${e['name']}').toList(),
               startIndex: index,
+              voices: _voices,
+              currentVoiceId: _voiceId,
+              onSwitchVoice: _switchVoiceFor(index),
+              onCacheThreshold: () => _prefetchFrom(index),
               onNext: (i) => _play(i),
             ),
           ));
@@ -626,16 +633,8 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
         throw Exception('源没有返回可播放地址');
       }
       if (!mounted) return;
-      // 播完当前一集，后台自动缓存后面的集（开关关着就不下）
-      AutoCache.prefetch(
-        ref: ref,
-        source: s,
-        bookUrl: widget.bookUrl,
-        chapters: _chapters,
-        currentIndex: index,
-        lineId: _lineId,
-        voiceId: _voiceId,
-      );
+      // 不在这里立刻预取：等播到缓存频率阈值（标准 30%）再由播放器回调触发，
+      // 播放时不跟播放抢资源，开关关着更是一个字节都不下
       if (_isAudio) {
         await Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => NetworkAudioPage(
@@ -655,6 +654,10 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
             voiceId: _voiceId ?? '',
             playlist: _chapters.map((e) => '${e['name']}').toList(),
             startIndex: index,
+            voices: _voices,
+            currentVoiceId: _voiceId,
+            onSwitchVoice: _switchVoiceFor(index),
+            onCacheThreshold: () => _prefetchFrom(index),
             onNext: (i) => _play(i),
           ),
         ));
@@ -694,6 +697,31 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
             .catchError((_) {});
       }
     }
+  }
+
+  /// 播放器里切音色：先存选择，再按新音色拿地址（番茄按书查 toneinfo、按名认 id，
+  /// id 在源里算，App 侧绝不写死），从当前进度接着播
+  Future<String> Function(String) _switchVoiceFor(int index) {
+    return (String newVoiceId) async {
+      _voiceId = newVoiceId;
+      await _saveVoice(newVoiceId);
+      return _resolveMediaUrl(index, _lineId);
+    };
+  }
+
+  /// 播到阈值时才预取后面几集（开关/集数/WiFi 都在 AutoCache 里再查一遍）
+  void _prefetchFrom(int index) {
+    final s = _source;
+    if (s == null) return;
+    AutoCache.prefetch(
+      ref: ref,
+      source: s,
+      bookUrl: widget.bookUrl,
+      chapters: _chapters,
+      currentIndex: index,
+      lineId: _lineId,
+      voiceId: _voiceId,
+    );
   }
 
   /// 向源要某一集在指定线路下的播放地址

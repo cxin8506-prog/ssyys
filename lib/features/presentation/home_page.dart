@@ -4,16 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/utils/path_utils.dart';
-import '../../features/audio/data/repository_providers.dart';
-import '../../features/audio/domain/media_item.dart' as domain;
 import '../../plugins/data/home_feed.dart';
 import '../../plugins/data/login_entry.dart';
 import '../../plugins/data/plugin_providers.dart';
 import '../../plugins/data/plugin_resume.dart';
 import '../../plugins/model/plugin_source.dart';
 import '../../plugins/presentation/source_book_page.dart';
-import '../../plugins/presentation/source_picker_sheet.dart';
 import '../../plugins/presentation/source_search_page.dart';
 import '../../shared/widgets/common.dart';
 
@@ -27,17 +23,29 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   final _filterCtrl = TextEditingController();
+  final _scroll = ScrollController();
   String _filter = '';
-  String _group = '全部';
+  /// 展开的分组（点横条展开/收起；默认展开第一个分组，其余收着）
+  final Set<String> _openGroups = {};
+  bool _groupsInit = false;
   final Map<String, bool> _loginFlags = {};
   String _lastIds = '';
-  List<PluginResume> _resumes = [];
-  int _lastResumeRefresh = 0;
+  int _lastRefresh = 0;
 
   @override
   void dispose() {
     _filterCtrl.dispose();
+    _scroll.dispose();
     super.dispose();
+  }
+
+  /// 回到源网格顶部：书源页本身就是源网格，顶部源名 /「换个源」点一下滚回网格
+  void _backToSourceGrid() {
+    if (_scroll.hasClients) {
+      _scroll.animateTo(0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut);
+    }
   }
 
   @override
@@ -48,20 +56,27 @@ class _HomePageState extends ConsumerState<HomePage> {
     final isActiveTab = ref.watch(shellTabProvider) == 0;
     if (isActiveTab) _maybeRefresh(enabled);
 
-    final groups = <String>['全部'];
+    // 分组：按源的 group 分，没写分组的归到「其他」；默认展开第一个分组
+    final groups = <String>[];
     for (final s in enabled) {
-      if (s.group.isNotEmpty && !groups.contains(s.group)) groups.add(s.group);
+      final g = s.group.isEmpty ? '其他' : s.group;
+      if (!groups.contains(g)) groups.add(g);
     }
-    if (!groups.contains(_group)) _group = '全部';
-
-    final filtered = enabled.where((s) {
-      if (_group != '全部' && s.group != _group) return false;
-      if (_filter.isNotEmpty &&
-          !s.name.toLowerCase().contains(_filter.toLowerCase())) {
-        return false;
-      }
-      return true;
-    }).toList(growable: false);
+    if (!_groupsInit && groups.isNotEmpty) {
+      _openGroups.add(groups.first);
+      _groupsInit = true;
+    }
+    final filtering = _filter.isNotEmpty;
+    bool isOpen(String g) => filtering || _openGroups.contains(g);
+    List<PluginSource> groupSources(String g) => enabled.where((s) {
+          final sg = s.group.isEmpty ? '其他' : s.group;
+          if (sg != g) return false;
+          if (filtering &&
+              !s.name.toLowerCase().contains(_filter.toLowerCase())) {
+            return false;
+          }
+          return true;
+        }).toList(growable: false);
     final columns = ref.watch(sourceColumnsProvider);
 
     return Scaffold(
@@ -69,17 +84,15 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: RefreshIndicator(
         onRefresh: () => _refresh(ref),
         child: CustomScrollView(
+          controller: _scroll,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             _appBar(context, ref, source),
             SliverToBoxAdapter(child: _filterBox(context)),
-            SliverToBoxAdapter(child: _continueSection(context)),
-            if (groups.length > 1)
-              SliverToBoxAdapter(child: _groupBar(context, groups)),
             SliverToBoxAdapter(child: _sourceListHeader(context, columns)),
             if (enabled.isEmpty)
               SliverToBoxAdapter(child: _noSource(context, ref))
-            else if (filtered.isEmpty)
+            else if (groups.every((g) => groupSources(g).isEmpty))
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -88,21 +101,37 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               )
             else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                sliver: SliverGrid(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    mainAxisExtent: 96,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (ctx, i) => _sourceCard(filtered[i]),
-                    childCount: filtered.length,
-                  ),
-                ),
-              ),
+              for (final g in groups)
+                if (groupSources(g).isNotEmpty) ...[
+                  SliverToBoxAdapter(
+                      child: _groupBar(context, g, groupSources(g).length,
+                          isOpen(g), () {
+                    setState(() {
+                      if (_openGroups.contains(g)) {
+                        _openGroups.remove(g);
+                      } else {
+                        _openGroups.add(g);
+                      }
+                    });
+                  })),
+                  if (isOpen(g))
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      sliver: SliverGrid(
+                        gridDelegate:
+                            SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          mainAxisExtent: 96,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, i) => _sourceCard(groupSources(g)[i]),
+                          childCount: groupSources(g).length,
+                        ),
+                      ),
+                    ),
+                ],
             ..._feedSlivers(context, ref, source),
             const SliverToBoxAdapter(child: SizedBox(height: 96)),
             SliverToBoxAdapter(
@@ -115,17 +144,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  /// 回到书源页时刷新断点和登录标记（节流 2 秒，避免反复 setState）
+  /// 回到书源页时刷新登录标记（节流 2 秒，避免反复 setState）。
+  /// 断点续播本身还在（播放页存断点、历史里接着播），只是书源页不再显示「继续」区。
   void _maybeRefresh(List<PluginSource> enabled) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastResumeRefresh < 2000) return;
-    _lastResumeRefresh = now;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final list = await PluginResumeStore.loadAll();
-      if (mounted) setState(() => _resumes = list);
-      ref.invalidate(continueListProvider(AppConstants.typeAudio));
-      ref.invalidate(continueListProvider(AppConstants.typeVideo));
-    });
+    if (now - _lastRefresh < 2000) return;
+    _lastRefresh = now;
     final ids = enabled.map((s) => s.id).join(',');
     if (ids != _lastIds) {
       _lastIds = ids;
@@ -133,7 +157,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
-  /// 读每个源的登录入口（manifest 里的 login），用来在卡片上标“登录”
+  /// 读每个源的登录入口，用来在卡片上标“登录”。
+  /// JS 源读 manifest 里的 login；JAR（我的听书格式）没有 manifest，
+  /// 问引擎的 ILogin，两种格式一视同仁。
   Future<void> _loadLoginFlags(List<PluginSource> sources) async {
     final repo = ref.read(sourceRepositoryProvider);
     var changed = false;
@@ -142,7 +168,16 @@ class _HomePageState extends ConsumerState<HomePage> {
       try {
         final manifest = await repo.readManifest(s);
         final entry = LoginEntry.parse(manifest);
-        _loginFlags[s.id] = entry != null && entry.valid;
+        var has = entry != null && entry.valid;
+        if (!has && s.isTingShu) {
+          try {
+            final engine = ref.read(tingShuEngineProvider);
+            await engine.attach(s);
+            final info = await engine.loginInfo();
+            has = '${info?['url'] ?? ''}'.trim().isNotEmpty;
+          } catch (_) {}
+        }
+        _loginFlags[s.id] = has;
       } catch (_) {
         _loginFlags[s.id] = false;
       }
@@ -169,7 +204,8 @@ class _HomePageState extends ConsumerState<HomePage> {
       titleSpacing: 0,
       title: _SourceTitle(
         source: source,
-        onTap: () => pickHomeSource(context, ref, currentId: source?.id),
+        // 书源页本身就是源网格：点顶部源名滚回网格顶，不弹底部选源 sheet
+        onTap: _backToSourceGrid,
       ),
       actions: [
         IconButton(
@@ -211,268 +247,48 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  // ------------------------------------------------------------ 继续区
-
-  Widget _continueSection(BuildContext context) {
-    final audioLocal =
-        ref.watch(continueListProvider(AppConstants.typeAudio)).value ?? [];
-    final videoLocal =
-        ref.watch(continueListProvider(AppConstants.typeVideo)).value ?? [];
-    final plugin = _resumes.take(2).toList();
-    final local = <domain.MediaItem>[...audioLocal, ...videoLocal]
-      ..sort((a, b) {
-        final x = a.lastReadAt ?? a.addedAt;
-        final y = b.lastReadAt ?? b.addedAt;
-        return y.compareTo(x);
-      });
-    final localTop = local.take(2).toList();
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _bar(context),
-              const SizedBox(width: 8),
-              Text('继续',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (plugin.isEmpty && localTop.isEmpty) ...[
-            _emptyContinue(context, '还没有在听的书', AppConstants.typeAudio),
-            const SizedBox(height: 8),
-            _emptyContinue(context, '还没有在看的视频', AppConstants.typeVideo),
-          ] else ...[
-            for (final r in plugin) ...[
-              _resumeCard(context, r),
-              const SizedBox(height: 8),
-            ],
-            for (final item in localTop) ...[
-              _localContinueCard(context, item),
-              const SizedBox(height: 8),
-            ],
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _emptyContinue(BuildContext context, String text, String type) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: context.cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: context.palette.outline),
-      ),
-      child: Row(
-        children: [
-          Icon(
-              type == AppConstants.typeAudio
-                  ? Icons.headphones_outlined
-                  : Icons.movie_outlined,
-              size: 20,
-              color: context.subtleColor),
-          const SizedBox(width: 10),
-          Expanded(
-              child: Text(text, style: const TextStyle(fontSize: 13.5))),
-          OutlinedButton(
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => SourceSearchPage(type: type),
-            )),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              minimumSize: const Size(0, 30),
-            ),
-            child: const Text('去找', style: TextStyle(fontSize: 12.5)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _resumeCard(BuildContext context, PluginResume r) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () => openResume(context, ref, r),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.palette.outline),
-        ),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: r.coverUrl.startsWith('http')
-                  ? Image.network(
-                      r.coverUrl,
-                      width: 48,
-                      height: 64,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _coverPlaceholder(r),
-                    )
-                  : _coverPlaceholder(r),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(r.bookTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 3),
-                  Text(
-                    '${r.chapterName} · 已播 ${PathUtils.formatDuration(r.positionMs)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: LinearProgressIndicator(
-                      value: r.progress,
-                      minHeight: 4,
-                      color: primary,
-                      backgroundColor: context.palette.surfaceAlt,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(Icons.play_circle_fill, size: 30, color: primary),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _coverPlaceholder(PluginResume r) {
-    return Container(
-      width: 48,
-      height: 64,
-      color: context.palette.surfaceAlt,
-      alignment: Alignment.center,
-      child: Icon(
-        r.isAudio ? Icons.headphones_outlined : Icons.movie_outlined,
-        size: 20,
-        color: Theme.of(context).colorScheme.primary.withOpacity(0.55),
-      ),
-    );
-  }
-
-  Widget _localContinueCard(BuildContext context, domain.MediaItem item) {
-    final primary = Theme.of(context).colorScheme.primary;
-    final p = item.progress > 1 ? item.progress / 100 : item.progress;
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () => openLocalItem(context, ref, item),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.palette.outline),
-        ),
-        child: Row(
-          children: [
-            CoverImage(
-                path: item.coverPath,
-                title: item.title,
-                size: 48,
-                isVideo: item.isVideo),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 3),
-                  Text(
-                    item.isAudio ? '听书 · 已听 ${(p * 100).round()}%' : '视频 · 已看 ${(p * 100).round()}%',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: LinearProgressIndicator(
-                      value: p.clamp(0.0, 1.0),
-                      minHeight: 4,
-                      color: primary,
-                      backgroundColor: context.palette.surfaceAlt,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(Icons.play_circle_fill, size: 30, color: primary),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ------------------------------------------------------------ 源组 / 源列表
 
-  Widget _groupBar(BuildContext context, List<String> groups) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Container(
-      height: 46,
-      padding: const EdgeInsets.only(top: 8),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: groups.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final g = groups[i];
-          final selected = _group == g;
-          return InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => setState(() => _group = g),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected
-                    ? context.palette.primarySoft
-                    : context.cardColor,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: selected ? primary : context.palette.outline,
-                  width: selected ? 1.4 : 1,
-                ),
-              ),
-              child: Text(g,
+  /// 分组横条（我的听书的样子）：整条主题主色淡底 + 主色组名居中，
+  /// 点一下展开这个分组的源卡片，再点一下收起。默认展开第一个分组。
+  /// 颜色跟主题走：底用 primarySoft、字用 primary，深色主题下也是深底亮字。
+  Widget _groupBar(BuildContext context, String name, int count, bool open,
+      VoidCallback onTap) {
+    final bg = context.palette.primarySoft;
+    final fg = Theme.of(context).colorScheme.primary;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 28),
+            Expanded(
+              child: Text(name,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                    color: selected ? primary : null,
-                  )),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: fg)),
             ),
-          );
-        },
+            Text('$count 个',
+                style: TextStyle(fontSize: 11, color: fg)),
+            const SizedBox(width: 2),
+            Icon(
+                open
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: fg),
+          ],
+        ),
       ),
     );
   }
@@ -490,10 +306,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                   .textTheme
                   .titleMedium
                   ?.copyWith(fontWeight: FontWeight.w700)),
-          if (_group != '全部') ...[
-            const SizedBox(width: 6),
-            Text(_group, style: Theme.of(context).textTheme.bodySmall),
-          ],
           const Spacer(),
           IconButton(
             icon: const Icon(Icons.grid_view_rounded, size: 20),
@@ -548,13 +360,6 @@ class _HomePageState extends ConsumerState<HomePage> {
           color: context.cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: context.palette.outline),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -773,19 +578,23 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _feedEmpty(BuildContext context, WidgetRef ref, PluginSource source) {
+    // 推荐位是空的，不代表源坏了：直接给搜索和分类入口，别让用户觉得源不能用。
     return _Notice(
       icon: Icons.widgets_outlined,
-      title: '「${source.name}」没有配置首页推荐',
-      message: '这个源只提供搜索能力，去搜索里找你想听的内容。',
+      title: '「${source.name}」暂时没有推荐',
+      message: '这个源没有首页推荐，但可以直接搜、也可以看看它的分类。',
       hint: '也可以在左上角换一个带推荐位的源。',
       actions: [
         ElevatedButton(
           onPressed: () => _openSearch(context, source),
           child: const Text('去搜索'),
         ),
+        OutlinedButton(
+          onPressed: () => ref.read(shellTabProvider.notifier).state = 1,
+          child: const Text('看看分类'),
+        ),
         TextButton(
-          onPressed: () =>
-              pickHomeSource(context, ref, currentId: source.id),
+          onPressed: _backToSourceGrid,
           child: const Text('换个源'),
         ),
       ],
@@ -958,6 +767,9 @@ class _BookCard extends StatelessWidget {
         book.cover,
         fit: BoxFit.cover,
         width: double.infinity,
+        cacheWidth: 240,
+        cacheHeight: 320,
+        filterQuality: FilterQuality.low,
         errorBuilder: (_, __, ___) => placeholder,
         loadingBuilder: (ctx, child, progress) =>
             progress == null ? child : placeholder,

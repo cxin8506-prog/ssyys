@@ -19,6 +19,7 @@ import 'features/onboarding/onboarding_page.dart';
 import 'features/presentation/discover_page.dart';
 import 'features/presentation/home_page.dart';
 import 'features/search/search_page.dart';
+import 'features/settings/cache_settings_page.dart';
 import 'features/settings/not_available_page.dart';
 import 'features/settings/playback_settings_page.dart';
 import 'features/settings/settings_page.dart';
@@ -151,6 +152,9 @@ class MyApp extends ConsumerWidget {
       case '/playback-settings':
         return MaterialPageRoute(
             builder: (_) => const PlaybackSettingsPage(), settings: settings);
+      case '/cache-settings':
+        return MaterialPageRoute(
+            builder: (_) => const CacheSettingsPage(), settings: settings);
       case '/widget-lock':
         return MaterialPageRoute(
             builder: (_) => const WidgetLockPage(), settings: settings);
@@ -348,6 +352,14 @@ class _AppBottomBar extends StatelessWidget {
     );
   }
 
+  /// 底部栏标签字号按名字长度自适应，保证源真名完整显示
+  double _labelFontSize(String label) {
+    final len = label.length;
+    if (len <= 4) return 10;
+    if (len <= 6) return 9;
+    return 8;
+  }
+
   Widget _tab(BuildContext context, int i) {
     final selected = i == index;
     final primary = Theme.of(context).colorScheme.primary;
@@ -378,7 +390,8 @@ class _AppBottomBar extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 10,
+                // 源真名完整显示：4 字及以内 10，5–6 字 9，更长 8
+                fontSize: _labelFontSize(it['label'] as String),
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                 color: selected ? primary : context.subtleColor,
               ),

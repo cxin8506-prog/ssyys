@@ -36,9 +36,20 @@ class JarPluginEngine implements PluginEngine {
   @override
   Future<void> attach(PluginSource source) async {
     _source = source;
-    final dir = await _repo.sourceDirPath(source.id);
-    final jar = File('$dir/plugin.jar');
-    if (!await jar.exists()) throw Exception('JAR 文件不存在，请重新安装该源');
+    // 优先用源自己记的 jarPath（installJar 把 JAR 存在共享目录 _jar_<sig> 时
+    // 就是这条路）；没有再回退到源目录下的 plugin.jar。两条路都找不到才报错。
+    File? jar;
+    final recorded = (source.jarPath ?? '').trim();
+    if (recorded.isNotEmpty) {
+      final f = File(recorded);
+      if (await f.exists()) jar = f;
+    }
+    if (jar == null) {
+      final dir = await _repo.sourceDirPath(source.id);
+      final f = File('$dir/plugin.jar');
+      if (await f.exists()) jar = f;
+    }
+    if (jar == null) throw Exception('JAR 文件不存在，请重新安装该源');
     _jarPath = jar.path;
 
     await _channel.invokeMethod<bool>('load', {'path': _jarPath});

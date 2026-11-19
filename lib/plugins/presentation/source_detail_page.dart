@@ -496,7 +496,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            '这个源没有声明任何配置项，装上就能直接用，不需要填东西。',
+            '这个源没有可设置的项，装上就能直接用。',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -766,6 +766,22 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       _toast('没有拿到 Cookie，登录可能没完成');
       return;
     }
+    // 手动 token：登录页以 TOKEN: 开头返回，存下来当登录态用
+    if (cookie.startsWith('TOKEN:')) {
+      final token = cookie.substring('TOKEN:'.length).trim();
+      if (token.isEmpty) {
+        _toast('Token 是空的，没保存');
+        return;
+      }
+      cfg.values[f.key] = token;
+      cfg.values['token'] = token;
+      cfg.syncLegacy(f.key, token);
+      await ref.read(sourceConfigRepositoryProvider).save(cfg);
+      if (!mounted) return;
+      setState(() {});
+      _toast('Token 已保存，播放时会用它登录');
+      return;
+    }
     cfg.values[f.key] = cookie;
     cfg.syncLegacy(f.key, cookie);
     await ref.read(sourceConfigRepositoryProvider).save(cfg);
@@ -876,14 +892,41 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
 
   Future<void> _openTingShuLogin(
       PluginSource s, String url, bool desktop) async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => LoginWebPage(
-        title: s.name,
-        url: url,
-        desktop: desktop,
+    // 青空次元的登录态是 localStorage 里的 sorani_auth_token，旧手机 WebView
+    // 跑不动它的登录页时会黑屏，所以给一个手动粘贴 token 的入口。
+    final isSorani = url.toLowerCase().contains('sorani');
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => LoginWebPage(
+          title: s.name,
+          url: url,
+          desktop: desktop,
+          tokenKey: isSorani ? 'sorani_auth_token' : '',
+          tokenHint: isSorani
+              ? '在电脑浏览器上打开青空次元并登录，然后按 F12 打开开发者工具，'
+                  '在控制台输入 localStorage.getItem("sorani_auth_token")，'
+                  '把引号里的那串字符复制过来粘贴进来。'
+              : '',
+        ),
       ),
-    ));
+    );
     if (!mounted) return;
+    // 手动 token：存进源配置（localStorage 里登录页已经写过一份了）
+    if (result != null && result.startsWith('TOKEN:')) {
+      final token = result.substring('TOKEN:'.length).trim();
+      if (token.isNotEmpty) {
+        try {
+          final repo = ref.read(sourceConfigRepositoryProvider);
+          final cfg = await repo.load(s.id, s.type);
+          cfg.values['token'] = token;
+          if (isSorani) cfg.values['sorani_auth_token'] = token;
+          await repo.save(cfg);
+        } catch (_) {}
+        setState(() {});
+        _toast('Token 已保存，播放时会用它登录');
+        return;
+      }
+    }
     setState(() {});
     _toast('登录页已关闭，Cookie 已同步给这个源');
   }

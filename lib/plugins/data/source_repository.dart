@@ -302,11 +302,24 @@ class SourceRepository {
       version: '1.0.0',
       description: hasDex ? '' : '该 JAR 未包含 classes.dex，Android 无法直接加载，需用 d8 转换',
       entry: entry,
+      // JAR 实际存在共享目录 _jar_<sig>/plugin.jar，引擎按这条路找；
+      // 不写 jarPath 的话引擎去源目录下找，永远找不到。
+      jarPath: jarFile.path,
       installedAt: DateTime.now().millisecondsSinceEpoch,
       sizeBytes: size,
     );
 
     final all = await loadAll();
+    // 重装同一个包：先清掉同名旧单文件 JAR，避免索引里留重复的坏条目
+    final dup = all
+        .where((e) => e.isJar && e.name == baseName)
+        .map((e) => e.id)
+        .toList();
+    all.removeWhere((e) => dup.contains(e.id));
+    for (final dupId in dup) {
+      final d = Directory(await sourceDirPath(dupId));
+      if (await d.exists()) await d.delete(recursive: true);
+    }
     all.add(source);
     await _saveIndex(all);
     appLogger.info('安装 JAR 源成功', detail: '${source.name} dex=$hasDex entry=$entry');

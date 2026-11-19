@@ -94,17 +94,29 @@ class TingShuPluginEngine implements PluginEngine {
         return _categories(r);
 
       case 'recommend':
-        // 我的听书没有推荐位，用第一个分类的第一页顶上
+        // 我的听书没有推荐位，用分类的第一页顶上。第一个分类可能没内容
+        // （比如要登录、或者这个分类本来就空），顺着往后试几个分类，
+        // 拿到书就返回，别因为第一个分类空就让整个推荐位空着。
         final menus = _categories(await _call('categories'));
         if (menus.isEmpty) return const <Map<String, dynamic>>[];
-        final first = menus.first;
-        final r = await _call('browse', {'category': first['url']});
-        return [
-          {
-            'title': '${first['name']}',
-            'books': _asList(r?['books']),
+        for (var i = 0; i < menus.length && i < 3; i++) {
+          final first = menus[i];
+          try {
+            final r = await _call('browse', {'category': first['url']});
+            final books = _asList(r?['books']);
+            if (books.isNotEmpty) {
+              return [
+                {
+                  'title': '${first['name']}',
+                  'books': books,
+                }
+              ];
+            }
+          } catch (_) {
+            // 这个分类打不开，试下一个
           }
-        ];
+        }
+        return const <Map<String, dynamic>>[];
 
       case 'browse':
         final r = await _call('browse', {

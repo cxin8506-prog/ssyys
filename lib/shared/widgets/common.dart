@@ -94,8 +94,9 @@ class CoverImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasCover =
-        path != null && path!.isNotEmpty && File(path!).existsSync();
+    final isHttp = path != null && path!.startsWith('http');
+    final hasCover = isHttp ||
+        (path != null && path!.isNotEmpty && File(path!).existsSync());
     return Container(
       width: size,
       height: size * 1.35,
@@ -104,10 +105,18 @@ class CoverImage extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       clipBehavior: Clip.antiAlias,
-      child: hasCover
-          ? Image.file(File(path!),
-              fit: BoxFit.cover, errorBuilder: (_, __, ___) => _placeholder(context))
-          : _placeholder(context),
+      child: !hasCover
+          ? _placeholder(context)
+          : isHttp
+              ? Image.network(path!,
+                  fit: BoxFit.cover,
+                  cacheWidth: (size * 2).round(),
+                  cacheHeight: (size * 2.7).round(),
+                  filterQuality: FilterQuality.low,
+                  errorBuilder: (_, __, ___) => _placeholder(context))
+              : Image.file(File(path!),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _placeholder(context)),
     );
   }
 

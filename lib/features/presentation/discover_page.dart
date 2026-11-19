@@ -11,8 +11,7 @@ import '../../plugins/data/home_feed.dart';
 import '../../plugins/data/plugin_providers.dart';
 import '../../plugins/engine/plugin_engine.dart';
 import '../../plugins/model/plugin_source.dart';
-import '../../plugins/presentation/source_book_page.dart';
-import '../../plugins/presentation/source_picker_sheet.dart';
+import '../../plugins/presentation/source_detail_dialog.dart';
 import '../../plugins/presentation/source_search_page.dart';
 import '../../shared/widgets/common.dart';
 
@@ -111,9 +110,14 @@ class DiscoverPage extends ConsumerStatefulWidget {
 class _DiscoverPageState extends ConsumerState<DiscoverPage> {
   PluginSource? _source;
 
+  /// 当前选中的分类（空表示用第一个分类）
+  DiscoverCategory? _selected;
+
   @override
   Widget build(BuildContext context) {
     final source = ref.watch(activeHomeSourceProvider);
+    // 换了源就回到第一个分类
+    if (source?.id != _source?.id) _selected = null;
     _source = source;
 
     return Scaffold(
@@ -128,16 +132,10 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
         ),
         title: InkWell(
           borderRadius: BorderRadius.circular(12),
+          // 我的听书的方法：没有底部弹层选源，点顶部源名就回书源页（源网格）去选
           onTap: source == null
               ? null
-              : () async {
-                  final picked = await showSourcePicker(context, ref,
-                      selectedId: source.id);
-                  if (picked != null) {
-                    setHomeSource(ref, picked);
-                    ref.invalidate(discoverCategoriesProvider(picked));
-                  }
-                },
+              : () => ref.read(shellTabProvider.notifier).state = 0,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
             child: Row(
@@ -160,11 +158,6 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
         ),
         actions: [
           if (source != null) ...[
-            IconButton(
-              icon: Icon(_modeIcon(_mode)),
-              tooltip: '显示方式：${_modeLabel(_mode)}',
-              onPressed: () => _cycleMode(source.id),
-            ),
             IconButton(
               icon: const Icon(Icons.search_rounded),
               tooltip: '搜索',
@@ -189,48 +182,6 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     );
   }
 
-  String get _mode => displayModeOf(
-      ref.read(sharedPrefsProvider), _source?.id ?? '');
-
-  static const _modeOrder = ['auto', 'list', 'table'];
-
-  String _modeLabel(String mode) {
-    switch (mode) {
-      case 'list':
-        return '列表';
-      case 'table':
-        return '表格';
-      default:
-        return '自动';
-    }
-  }
-
-  IconData _modeIcon(String mode) {
-    switch (mode) {
-      case 'list':
-        return Icons.view_list;
-      case 'table':
-        return Icons.grid_view;
-      default:
-        return Icons.view_module;
-    }
-  }
-
-  void _cycleMode(String sourceId) {
-    final prefs = ref.read(sharedPrefsProvider);
-    final cur = displayModeOf(prefs, sourceId);
-    final next =
-        _modeOrder[(_modeOrder.indexOf(cur) + 1) % _modeOrder.length];
-    prefs.setString(
-        AppConstants.keyDisplayModePrefix + sourceId, next);
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('显示方式：${_modeLabel(next)}'),
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 1),
-    ));
-  }
-
   Widget _noSource() {
     return Center(
       child: Padding(
@@ -250,36 +201,28 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     );
   }
 
+  /// 我的听书的样子：顶部一排可横向滑动的分类 tabs，点一下切分类，
+  /// 右边一个 ▼ 点一下展开全部分类；下面直接是当前分类的内容列表。
   Widget _content(PluginSource source) {
     final async = ref.watch(discoverCategoriesProvider(source.id));
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('读取分类失败：$e')),
+      error: (e, _) => _categoriesFailed(source),
       data: (cats) {
         if (cats.isEmpty) return _noCategories(source);
-        return ListView(
-          padding: pagePadding(context, top: 8, bottom: 24),
+        final selected = _selected != null &&
+                cats.any((c) => c.id == _selected!.id)
+            ? _selected!
+            : cats.first;
+        return Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: Text('${source.name} · 分类',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(fontSize: 12)),
-            ),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 2.1,
+            _categoryTabBar(source, cats, selected),
+            Expanded(
+              child: _CategoryList(
+                key: ValueKey('${source.id}|${selected.id}'),
+                sourceId: source.id,
+                category: selected,
               ),
-              itemCount: cats.length,
-              itemBuilder: (ctx, i) => _categoryTile(source, cats[i]),
             ),
           ],
         );
@@ -287,31 +230,136 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     );
   }
 
-  Widget _categoryTile(PluginSource s, DiscoverCategory c) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => DiscoverListPage(
-            sourceId: s.id,
-            category: c,
-          ),
-        ));
-      },
-      child: Container(
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.palette.outline),
-        ),
-        child: Text(
-          c.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+  /// 分类 tabs 横条 + 右边的 ▼（展开全部分类）
+  Widget _categoryTabBar(
+      PluginSource source, List<DiscoverCategory> cats, DiscoverCategory selected) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: context.palette.outline),
         ),
       ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                children: cats.map((c) {
+                  final on = c.id == selected.id;
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      if (_selected?.id != c.id) {
+                        setState(() => _selected = c);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: on ? primary : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                      child: Text(
+                        c.name,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              on ? FontWeight.w700 : FontWeight.w400,
+                          color: on ? primary : null,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 22),
+            tooltip: '全部分类',
+            onPressed: () => _showAllCategories(source, cats, selected),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ▼ 展开：底部弹出全部分类，点一个就切过去
+  Future<void> _showAllCategories(PluginSource source,
+      List<DiscoverCategory> cats, DiscoverCategory selected) async {
+    final picked = await showModalBottomSheet<DiscoverCategory>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final primary = Theme.of(context).colorScheme.primary;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('全部分类',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: cats.map((c) {
+                    final on = c.id == selected.id;
+                    return ListTile(
+                      title: Text(c.name,
+                          style: TextStyle(
+                              fontWeight: on
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                              color: on ? primary : null)),
+                      trailing: on
+                          ? Icon(Icons.check,
+                              size: 18, color: primary)
+                          : null,
+                      onTap: () => Navigator.pop(ctx, c),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked != null && picked.id != selected.id) {
+      setState(() => _selected = picked);
+    }
+  }
+
+  /// 分类读不出来：不甩英文错，直接给推荐和搜索入口
+  Widget _categoriesFailed(PluginSource source) {
+    return ListView(
+      padding: pagePadding(context, top: 8, bottom: 24),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: Text('「${source.name}」的分类暂时打不开，直接看推荐或者去搜索。',
+              style: Theme.of(context).textTheme.bodySmall),
+        ),
+        _recommendFallback(source),
+      ],
     );
   }
 
@@ -339,8 +387,34 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
       ),
       error: (e, _) => Padding(
         padding: const EdgeInsets.all(20),
-        child: Text('推荐也拿不到：$e',
-            style: Theme.of(context).textTheme.bodySmall),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('这个源的推荐暂时打不开，可以直接去搜索。',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                OutlinedButton(
+                  onPressed: () => ref.invalidate(homeFeedProvider(source.id)),
+                  child: const Text('重试'),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => SourceSearchPage(
+                      type: source.type,
+                      initialSourceId: source.id,
+                    ),
+                  )),
+                  child: const Text('去搜索'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
       data: (sections) {
         final books = sections.expand((e) => e.books).toList();
@@ -364,18 +438,8 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
           itemCount: books.length,
           itemBuilder: (ctx, i) => _FeedTile(
             book: books[i],
-            onTap: () {
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => SourceBookPage(
-                  sourceId: source.id,
-                  bookUrl: books[i].url,
-                  title: books[i].title,
-                  coverUrl: books[i].cover,
-                  author: books[i].author,
-                  intro: books[i].intro,
-                ),
-              ));
-            },
+            onTap: () => showSourceDetailDialog(context, ref,
+                source: source, book: books[i]),
           ),
         );
       },
@@ -383,22 +447,22 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
   }
 }
 
-/// 某个分类下的内容列表，支持翻页
-class DiscoverListPage extends ConsumerStatefulWidget {
+/// 某个分类下的内容列表（内联在源页面 tabs 下方），支持翻页
+class _CategoryList extends ConsumerStatefulWidget {
   final String sourceId;
   final DiscoverCategory category;
 
-  const DiscoverListPage({
+  const _CategoryList({
     super.key,
     required this.sourceId,
     required this.category,
   });
 
   @override
-  ConsumerState<DiscoverListPage> createState() => _DiscoverListPageState();
+  ConsumerState<_CategoryList> createState() => _CategoryListState();
 }
 
-class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
+class _CategoryListState extends ConsumerState<_CategoryList> {
   final _scroll = ScrollController();
   final List<FeedBook> _items = [];
   int _page = 1;
@@ -482,9 +546,7 @@ class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
   Widget build(BuildContext context) {
     final mode = displayModeOf(
         ref.read(sharedPrefsProvider), widget.sourceId);
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.category.name)),
-      body: _items.isEmpty && _loading
+    return _items.isEmpty && _loading
           ? const Center(child: CircularProgressIndicator())
           : _items.isEmpty
               ? Center(
@@ -546,21 +608,14 @@ class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
                           onTap: () => _openBook(b),
                         );
                       },
-                    ),
-    );
+                    );
   }
 
+  /// 点标题弹详情卡（取消/添加收藏/开始播放），不整页跳详情页
   void _openBook(FeedBook b) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => SourceBookPage(
-        sourceId: widget.sourceId,
-        bookUrl: b.url,
-        title: b.title,
-        coverUrl: b.cover,
-        author: b.author,
-        intro: b.intro,
-      ),
-    ));
+    final s = _source;
+    if (s == null) return;
+    showSourceDetailDialog(context, ref, source: s, book: b);
   }
 
   /// 列表显示：一行一个，带封面和简介
@@ -616,6 +671,9 @@ class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
                           b.cover,
                           width: 54,
                           height: 72,
+                          cacheWidth: 108,
+                          cacheHeight: 144,
+                          filterQuality: FilterQuality.low,
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Container(
                             width: 54,
@@ -668,6 +726,29 @@ class _DiscoverListPageState extends ConsumerState<DiscoverListPage> {
   }
 }
 
+/// 某个分类的独立页（从别处点分类进来时用）：直接复用内联分类列表
+class DiscoverListPage extends ConsumerWidget {
+  final String sourceId;
+  final DiscoverCategory category;
+
+  const DiscoverListPage({
+    super.key,
+    required this.sourceId,
+    required this.category,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      appBar: AppBar(title: Text(category.name)),
+      body: _CategoryList(
+        sourceId: sourceId,
+        category: category,
+      ),
+    );
+  }
+}
+
 /// 封面卡片：封面 + 标题 + 作者，封面失败显示首字占位
 class _FeedTile extends StatelessWidget {
   final FeedBook book;
@@ -716,6 +797,9 @@ class _FeedTile extends StatelessWidget {
     return Image.network(
       book.cover,
       fit: BoxFit.cover,
+      cacheWidth: 240,
+      cacheHeight: 320,
+      filterQuality: FilterQuality.low,
       errorBuilder: (_, __, ___) => _placeholder(context),
       loadingBuilder: (ctx, child, progress) {
         if (progress == null) return child;

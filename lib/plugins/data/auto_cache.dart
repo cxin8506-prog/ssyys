@@ -89,7 +89,72 @@ class AutoCache {
     return out;
   }
 
-  /// 是不是 WiFi（按网卡名判断：wlan 开头的接口在线）
+  /// 缓存频率对应的进度阈值：播到这个比例才触发缓存（暂停时不触发）
+  /// standard 标准 30% / fast 较快 15% / slow 较慢 50%
+  static double thresholdFor(String freq) {
+    switch (freq) {
+      case 'fast':
+        return 0.15;
+      case 'slow':
+        return 0.5;
+      default:
+        return 0.3;
+    }
+  }
+
+  /// 当前缓存的集数（文件个数）
+  static Future<int> cachedCount() async {
+    final map = await _loadMap();
+    return map.length;
+  }
+
+  /// 清除所有音频缓存：删文件 + 清记录，返回删掉的个数
+  static Future<int> clearAllAudioCache() async {
+    final map = await _loadMap();
+    final n = map.length;
+    for (final p in map.values) {
+      try {
+        final f = File(p);
+        if (f.existsSync()) f.deleteSync();
+      } catch (_) {}
+    }
+    await _saveMap({});
+    try {
+      final dir = await PathUtils.cacheDir;
+      final cacheDir = Directory('${dir.path}/autocache');
+      if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
+    } catch (_) {}
+    return n;
+  }
+
+  /// 按个数上限清理：超过上限时按文件时间从最老的开始删，直到不超
+  /// limit <= 0 表示不清理
+  static Future<void> enforceCountLimit(int limit) async {
+    if (limit <= 0) return;
+    final map = await _loadMap();
+    if (map.length <= limit) return;
+    final entries = <MapEntry<String, DateTime>>[];
+    for (final e in map.entries) {
+      DateTime t;
+      try {
+        t = File(e.value).lastModifiedSync();
+      } catch (_) {
+        t = DateTime.fromMillisecondsSinceEpoch(0);
+      }
+      entries.add(MapEntry(e.key, t));
+    }
+    entries.sort((a, b) => a.value.compareTo(b.value));
+    final over = map.length - limit;
+    for (var i = 0; i < over && i < entries.length; i++) {
+      final key = entries[i].key;
+      try {
+        final f = File(map[key]!);
+        if (f.existsSync()) f.deleteSync();
+      } catch (_) {}
+      map.remove(key);
+    }
+    await _saveMap(map);
+  }
   static Future<bool> isWifi() async {
     try {
       final ifs = await NetworkInterface.list();
@@ -145,18 +210,14 @@ class AutoCache {
   }) async {
     final prefs = await SharedPreferences.getInstance();
     if (!(prefs.getBool(AppConstants.keyAutoCache) ?? false)) return;
-    final count = prefs.getInt(AppConstants.keyAutoCacheCount) ?? 1;
+    // 视频源不缓存：isCacheable() 是 false 的源一律不下，App 层不绕过
+    if (source.type != AppConstants.typeAudio) return;
+    final count = prefs.getInt(AppConstants.keyAutoCacheCount) ?? 3;
     final wifiOnly = prefs.getBool(AppConstants.keyAutoCacheWifiOnly) ?? true;
     if (wifiOnly && !await isWifi()) return;
-    final limitMb = prefs.getInt(AppConstants.keyCacheLimitMb) ?? 512;
     final dir = await PathUtils.cacheDir;
     final cacheDir = Directory('${dir.path}/autocache');
     if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
-    var used = 0;
-    await for (final e in cacheDir.list()) {
-      if (e is File) used += await e.length();
-    }
-    if (used > limitMb * 1024 * 1024) return;
 
     final engine = engineForSource(ref, source);
     final map = await _loadMap();
@@ -187,5 +248,9 @@ class AutoCache {
       }
     }
     await _saveMap(map);
+    // 下完按个数上限清理（默认 40 个，0=不清理）
+    final cleanLimit =
+        prefs.getInt(AppConstants.keyAutoCleanLimit) ?? 40;
+    await enforceCountLimit(cleanLimit);
   }
 }

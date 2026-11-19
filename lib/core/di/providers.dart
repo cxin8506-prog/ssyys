@@ -69,10 +69,22 @@ final autoCacheProvider = StateProvider<bool>((ref) {
   return prefs.getBool(AppConstants.keyAutoCache) ?? false;
 });
 
-/// 自动缓存集数（1/3/5，默认 1）
+/// 自动缓存集数（1/3/5，默认 3）
 final autoCacheCountProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);
-  return prefs.getInt(AppConstants.keyAutoCacheCount) ?? 1;
+  return prefs.getInt(AppConstants.keyAutoCacheCount) ?? 3;
+});
+
+/// 自动清理缓存文件上限（缓存文件个数；0=不清理，默认 40）
+final autoCleanLimitProvider = StateProvider<int>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getInt(AppConstants.keyAutoCleanLimit) ?? 40;
+});
+
+/// 缓存频率：standard 标准（间隔约为时长的 30%）/ fast 较快 / slow 较慢
+final autoCacheFreqProvider = StateProvider<String>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getString(AppConstants.keyAutoCacheFreq) ?? 'standard';
 });
 
 /// 仅 WiFi 下缓存（默认开）
@@ -132,13 +144,6 @@ double fontScaleFor(String size) {
       return 1.0;
   }
 }
-
-/// 缓存上限（MB）
-final cacheLimitProvider = StateProvider<int>((ref) {
-  final prefs = ref.read(sharedPrefsProvider);
-  return prefs.getInt(AppConstants.keyCacheLimitMb) ??
-      AppConstants.defaultCacheLimitMb;
-});
 
 /// UA 配置仓储（基于 drift kv_settings，随数据库一起备份）
 final uaRepositoryProvider = Provider<UaRepository>((ref) {

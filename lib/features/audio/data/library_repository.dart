@@ -207,6 +207,52 @@ class LibraryRepository {
         ));
   }
 
+  /// 插件源的书/视频收藏：先在 mediaItems 里建一行（id 带源信息，path 存详情地址，
+  /// coverPath 存封面地址，sourceType 记 plugin），再写收藏行。
+  /// 已经收藏过就只改分组，不重复建行。
+  Future<void> savePluginFavorite({
+    required String sourceId,
+    required String bookUrl,
+    required String title,
+    required String author,
+    required String coverUrl,
+    required String type,
+    String group = '默认',
+  }) async {
+    final id = 'plugin|$sourceId|$bookUrl';
+    await _db.into(_db.mediaItems).insertOnConflictUpdate(
+          MediaItemsCompanion.insert(
+            id: id,
+            type: type,
+            title: title,
+            author: Value(author),
+            path: bookUrl,
+            coverPath: Value(coverUrl),
+            sourceType: const Value('plugin'),
+            chapterCount: const Value(0),
+            durationMs: const Value(null),
+            sizeBytes: const Value(0),
+            description: const Value(''),
+            status: const Value(AppConstants.statusUnread),
+            progress: const Value(0.0),
+            addedAt: DateTime.now(),
+            lastReadAt: const Value(null),
+          ),
+        );
+    if (await isFavorite(id)) {
+      await moveFavorite(id, group);
+      return;
+    }
+    await addFavorite(id, type, group: group);
+  }
+
+  /// 把一条收藏挪到另一个分组
+  Future<void> moveFavorite(String itemId, String group) async {
+    await (_db.update(_db.favorites)
+          ..where((t) => t.itemId.equals(itemId)))
+        .write(FavoritesCompanion(groupName: Value(group)));
+  }
+
   Future<void> removeFavorite(String itemId) =>
       (_db.delete(_db.favorites)..where((t) => t.itemId.equals(itemId))).go();
 

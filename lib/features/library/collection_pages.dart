@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/path_utils.dart';
 import '../../plugins/data/plugin_resume.dart';
@@ -14,6 +16,7 @@ import '../../shared/widgets/common.dart';
 import '../audio/data/repository_providers.dart';
 import '../audio/domain/media_item.dart';
 import '../audio/presentation/audio_player_page.dart';
+import '../../plugins/presentation/source_book_page.dart';
 import '../video/presentation/video_player_page.dart';
 
 /// 收藏 / 历史 通用页面：听书与视频分栏
@@ -34,13 +37,16 @@ class CollectionPage extends ConsumerStatefulWidget {
   ConsumerState<CollectionPage> createState() => _CollectionPageState();
 }
 
-class _CollectionPageState extends ConsumerState<CollectionPage>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabs;
+class _CollectionPageState extends ConsumerState<CollectionPage> {
   late String _type;
 
-  // 收藏：分组、排序、布局
-  List<String> _groups = ['默认'];
+  /// 听书/视频小开关是否收起（收起后只露当前类型 + 小箭头，点箭头再展开）
+  bool _typeHidden = false;
+
+  // 收藏：分组、排序、布局（默认没有任何分组，点铅笔输名字才建）
+  static const String _customGroupsKey = 'favorite_custom_groups';
+  static const String _typeSwitchHiddenKey = 'collection_type_hidden';
+  List<String> _groups = [];
   String _group = '全部';
   int _sort = 0; // 0 按加入时间，1 按名称，2 按最近阅读
   bool _grid = true; // true 网格，false 列表
@@ -52,31 +58,34 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
   void initState() {
     super.initState();
     _type = widget.initialType;
-    _tabs = TabController(
-        length: 2,
-        vsync: this,
-        initialIndex: _type == AppConstants.typeVideo ? 1 : 0);
-    _tabs.addListener(() {
-      if (!_tabs.indexIsChanging) {
-        setState(() {
-          _type = _tabs.index == 0
-              ? AppConstants.typeAudio
-              : AppConstants.typeVideo;
-        });
-      }
-    });
+    _typeHidden =
+        ref.read(sharedPrefsProvider).getBool(_typeSwitchHiddenKey) ?? false;
     if (widget.kind == CollectionKind.favorite) _loadGroups();
   }
 
   Future<void> _loadGroups() async {
-    final groups = await ref.read(libraryRepositoryProvider).favoriteGroups();
-    if (mounted) setState(() => _groups = groups);
+    final prefs = await _prefs();
+    final custom = prefs.getStringList(_customGroupsKey) ?? [];
+    final dbGroups =
+        await ref.read(libraryRepositoryProvider).favoriteGroups();
+    final all = <String>[
+      if (dbGroups.contains('默认')) '默认',
+      ...custom,
+      for (final g in dbGroups)
+        if (g != '默认' && !custom.contains(g)) g,
+    ];
+    if (mounted) setState(() => _groups = all);
   }
 
-  @override
-  void dispose() {
-    _tabs.dispose();
-    super.dispose();
+  Future<SharedPreferences> _prefs() async =>
+      SharedPreferences.getInstance();
+
+  /// 收起/展开听书/视频小开关（记下来，下次打开还这样）
+  void _toggleTypeHidden() {
+    setState(() => _typeHidden = !_typeHidden);
+    ref
+        .read(sharedPrefsProvider)
+        .setBool(_typeSwitchHiddenKey, _typeHidden);
   }
 
   @override
@@ -93,6 +102,12 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
         ),
         title: Text(_title),
         actions: [
+          if (widget.kind == CollectionKind.favorite)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: '新建分组',
+              onPressed: _createGroup,
+            ),
           if (widget.kind == CollectionKind.favorite) _favoriteMenu(),
           if (widget.kind == CollectionKind.history)
             IconButton(
@@ -101,18 +116,12 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
               onPressed: _confirmClear,
             ),
         ],
-        bottom: TabBar(
-          controller: _tabs,
-          indicatorColor: Colors.white,
-          indicatorSize: TabBarIndicatorSize.label,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [Tab(text: '听书'), Tab(text: '视频')],
-        ),
       ),
       body: Column(
         children: [
-          if (widget.kind == CollectionKind.favorite) _buildGroupChips(),
+          _typeSwitch(),
+          if (widget.kind == CollectionKind.favorite && _groups.isNotEmpty)
+            _buildGroupChips(),
           Expanded(
             child: FutureBuilder<List<MediaItem>>(
               future: _load(),
@@ -127,7 +136,7 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
                 if (items.isEmpty) {
                   return EmptyState(
                     icon: _icon,
-                    message: '还没有收藏',
+                    message: '暂无收藏',
                     hint: _type == AppConstants.typeAudio
                         ? '在听书页长按条目，或播放页点收藏'
                         : '在视频页长按条目即可加入',
@@ -288,6 +297,88 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
     }
   }
 
+  /// 听书/视频切换：紧凑的分段小开关，不占一整行大 tab；长按收起，
+  /// 收起后只露当前类型 + 小箭头，点箭头再展开。收藏/历史共用。
+  Widget _typeSwitch() {
+    final primary = Theme.of(context).colorScheme.primary;
+    if (_typeHidden) {
+      return Align(
+        alignment: Alignment.center,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: _toggleTypeHidden,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: context.palette.surfaceAlt,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_type == AppConstants.typeAudio ? '听书' : '视频',
+                      style: TextStyle(
+                          fontSize: 12, color: context.subtleColor)),
+                  const SizedBox(width: 2),
+                  Icon(Icons.keyboard_arrow_down_rounded,
+                      size: 16, color: context.subtleColor),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    Widget btn(String label, String type) {
+      final on = _type == type;
+      return GestureDetector(
+        onTap: () {
+          if (_type != type) setState(() => _type = type);
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          decoration: BoxDecoration(
+            color: on ? primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: on
+                      ? Theme.of(context).colorScheme.onPrimary
+                      : context.subtleColor,
+                  fontWeight:
+                      on ? FontWeight.w600 : FontWeight.w400)),
+        ),
+      );
+    }
+
+    return Align(
+      alignment: Alignment.center,
+      child: GestureDetector(
+        onLongPress: _toggleTypeHidden,
+        child: Container(
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: context.palette.surfaceAlt,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              btn('听书', AppConstants.typeAudio),
+              btn('视频', AppConstants.typeVideo),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ---------- 收藏：分组横条（长按改名） ----------
 
   Widget _buildGroupChips() {
@@ -307,14 +398,63 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
                 ? null
                 : () => _renameGroup(name),
             child: ChoiceChip(
-              label: Text(name),
+              label: Text(name,
+                  style: TextStyle(
+                      color: selected
+                          ? Theme.of(context).colorScheme.onPrimary
+                          : null,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.w400)),
               selected: selected,
+              selectedColor: Theme.of(context).colorScheme.primary,
               onSelected: (_) => setState(() => _group = name),
             ),
           );
         },
       ),
     );
+  }
+
+  /// 铅笔：输入名称新建自定义分组（没建之前页面上不显示任何分组）
+  Future<void> _createGroup() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('新建分组'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '输入分组名称'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    if (_groups.contains(name)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('已有「$name」分组')));
+      }
+      return;
+    }
+    final prefs = await _prefs();
+    final custom = prefs.getStringList(_customGroupsKey) ?? [];
+    custom.add(name);
+    await prefs.setStringList(_customGroupsKey, custom);
+    await _loadGroups();
+    if (mounted) {
+      setState(() => _group = name);
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已创建分组「$name」')));
+    }
   }
 
   /// 分类重命名（“默认”不能改）
@@ -343,6 +483,12 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
     await ref
         .read(libraryRepositoryProvider)
         .renameFavoriteGroup(oldName, newName);
+    final prefs = await _prefs();
+    final custom = prefs.getStringList(_customGroupsKey) ?? [];
+    if (custom.contains(oldName)) {
+      custom[custom.indexOf(oldName)] = newName;
+      await prefs.setStringList(_customGroupsKey, custom);
+    }
     if (_group == oldName) _group = newName;
     await _loadGroups();
     if (mounted) setState(() {});
@@ -449,6 +595,9 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
       child: url.startsWith('http')
           ? Image.network(url,
               fit: BoxFit.cover,
+              cacheWidth: 88,
+              cacheHeight: 120,
+              filterQuality: FilterQuality.low,
               errorBuilder: (_, __, ___) => _thumbIcon(r.isAudio))
           : _thumbIcon(r.isAudio),
     );
@@ -517,6 +666,26 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
   // ---------- 共用 ----------
 
   Future<void> _openItem(MediaItem item) async {
+    // 插件源的收藏：id 里带源信息，直接进源详情页接着看/播
+    if (item.id.startsWith('plugin|')) {
+      final rest = item.id.substring('plugin|'.length);
+      final sep = rest.indexOf('|');
+      if (sep > 0) {
+        final sourceId = rest.substring(0, sep);
+        final bookUrl = rest.substring(sep + 1);
+        if (!mounted) return;
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SourceBookPage(
+            sourceId: sourceId,
+            bookUrl: bookUrl.isEmpty ? item.path : bookUrl,
+            title: item.title,
+            coverUrl: item.coverPath,
+            author: item.author,
+          ),
+        ));
+        return;
+      }
+    }
     final chapters =
         await ref.read(libraryRepositoryProvider).chapters(item.id);
     if (chapters.isEmpty) return;
@@ -625,6 +794,41 @@ class _CollectionPageState extends ConsumerState<CollectionPage>
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               onTap: () => Navigator.pop(ctx),
             ),
+            if (widget.kind == CollectionKind.favorite)
+              ListTile(
+                leading: const Icon(Icons.drive_file_move_outlined),
+                title: const Text('移动到分组'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final groups = [
+                    '默认',
+                    ..._groups.where((g) => g != '默认'),
+                  ];
+                  final picked = await showDialog<String>(
+                    context: context,
+                    builder: (dctx) => SimpleDialog(
+                      title: const Text('移动到分组'),
+                      children: [
+                        for (final g in groups)
+                          SimpleDialogOption(
+                            onPressed: () => Navigator.pop(dctx, g),
+                            child: Text(g,
+                                style: const TextStyle(fontSize: 15)),
+                          ),
+                      ],
+                    ),
+                  );
+                  if (picked == null) return;
+                  await ref
+                      .read(libraryRepositoryProvider)
+                      .moveFavorite(item.id, picked);
+                  if (mounted) {
+                    setState(() {});
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('已移到 $picked 分组')));
+                  }
+                },
+              ),
             ListTile(
               leading: Icon(Icons.favorite_border,
                   color: Theme.of(context).colorScheme.primary),

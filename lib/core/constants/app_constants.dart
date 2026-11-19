@@ -52,6 +52,11 @@ class AppConstants {
   static const String keyAutoCache = 'auto_cache';
   static const String keyAutoCacheCount = 'auto_cache_count';
   static const String keyAutoCacheWifiOnly = 'auto_cache_wifi_only';
+  static const String keyAutoCacheFreq = 'auto_cache_freq';
+  static const String keyAutoCleanLimit = 'auto_clean_limit';
+
+  // ---------- 视频画面 ----------
+  static const String keyVideoFit = 'video_fit_mode';
 
   // ---------- 播放设置 ----------
   static const String keyAutoNext = 'auto_next';

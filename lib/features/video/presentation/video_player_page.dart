@@ -12,9 +12,11 @@ import '../../../core/log/app_logger.dart';
 import '../../../core/platform/pip_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/listen_stats.dart';
+import '../../../plugins/data/plugin_providers.dart';
 import '../../../plugins/data/plugin_resume.dart';
 
-enum ScreenFit { fit, fill, original }
+/// 画面模式：适应（完整显示，有黑边）/ 拉伸（拉满屏幕，不要黑边）/ 铺满（裁掉多余部分铺满，不变形）
+enum ScreenFit { fit, stretch, fill }
 
 /// 视频播放页：本地视频、手势、比例、全屏、界面锁定、连播、倍速
 class VideoPlayerPage extends ConsumerStatefulWidget {
@@ -79,8 +81,14 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   VideoPlayerController? _controller;
   int _index = 0;
   bool _locked = false;
-  bool _showControls = true;
-  ScreenFit _fit = ScreenFit.fit;
+
+  /// 控制条显隐只重建控制层：ValueNotifier + ValueListenableBuilder，
+  /// 不整页 setState，旧手机上点一下不卡
+  final _controlsVisible = ValueNotifier<bool>(true);
+
+  /// 默认铺满（裁掉多余部分铺满屏幕、不变形，不留大黑边），记住上次的选择
+  ScreenFit _fit = ScreenFit.fill;
+  bool _allLinesFailed = false;
   double _speed = 1.0;
   double _brightness = 1.0;
   double _volume = 1.0;
@@ -111,6 +119,19 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _speed = ref.read(defaultSpeedProvider);
     _lineId = widget.currentLineId ??
         (widget.lines.isNotEmpty ? '${widget.lines.first['id']}' : null);
+    final savedFit =
+        ref.read(sharedPrefsProvider).getString(AppConstants.keyVideoFit);
+    switch (savedFit) {
+      case 'fit':
+        _fit = ScreenFit.fit;
+        break;
+      case 'stretch':
+        _fit = ScreenFit.stretch;
+        break;
+      case 'fill':
+        _fit = ScreenFit.fill;
+        break;
+    }
     // 进播放页默认横屏全屏
     _enterFullscreen();
     _initController();
@@ -201,16 +222,16 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     setState(() {});
   }
 
-  /// 控制条 3 秒不动自动隐藏
+  /// 控制条 3 秒不动自动隐藏（只改 ValueNotifier，不重建整页）
   void _armHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && !_locked) setState(() => _showControls = false);
+      if (mounted && !_locked) _controlsVisible.value = false;
     });
   }
 
   void _showControlsTemporarily() {
-    setState(() => _showControls = true);
+    _controlsVisible.value = true;
     _armHideTimer();
   }
 
@@ -264,6 +285,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         _failedUrl = null;
         _finished = false;
         _handlingFinish = false;
+        _allLinesFailed = false;
       });
       await old?.dispose();
       await ctrl.play();
@@ -273,9 +295,9 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       if (!mounted) return;
       _lastPosition = keep;
       if (autoFallback && await _fallbackLine()) return;
-      // 所有线路都试过还不行：显示“播放失败”，给换线路重试/重试，不直接退出
+      // 所有线路都试过还不行才报「所有线路都无法播放」，不直接退出
       setState(() {
-        _error = '播放失败';
+        _error = _allLinesFailed ? '所有线路都无法播放' : '播放失败';
         _failedUrl = url;
       });
     }
@@ -309,6 +331,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     final list = widget.lines;
     final resolver = widget.onSwitchLine;
     if (list.length < 2 || resolver == null) return false;
+    _allLinesFailed = false;
     _failedLineId = _lineId;
     final startIdx = list.indexWhere((e) => '${e['id']}' == _lineId);
     for (var i = 1; i < list.length; i++) {
@@ -324,13 +347,28 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           _lineId = id;
           _failedLineId = null;
         });
+        _saveLine(id);
         _toast('这条线路不行，已自动切到「${cand['name']}」');
         return true;
       } catch (_) {
         _failedLineId = id;
       }
     }
+    _allLinesFailed = true;
     return false;
+  }
+
+  /// 记住这次用的线路：下次打开同一视频默认还用它
+  Future<void> _saveLine(String id) async {
+    if (widget.sourceId.isEmpty) return;
+    try {
+      final repo = ref.read(sourceConfigRepositoryProvider);
+      final cfg = await repo.load(widget.sourceId, AppConstants.typeVideo);
+      cfg.lines = widget.lines;
+      cfg.selectedLineId = id;
+      cfg.values['lineId'] = id;
+      await repo.save(cfg);
+    } catch (_) {}
   }
 
   /// 手动切线路：从当前进度接着播
@@ -348,6 +386,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         _lineId = id;
         _failedLineId = null;
       });
+      _saveLine(id);
       _toast('已切换线路，从当前进度继续');
     } catch (e) {
       if (mounted) _toast('切换失败：$e');
@@ -477,6 +516,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   @override
   void dispose() {
     _saveResume();
+    _controlsVisible.dispose();
     _resumeTimer?.cancel();
     _hideTimer?.cancel();
     _statsTimer?.cancel();
@@ -498,7 +538,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
             if (_gestureHint != null) _buildGestureHint(),
             if (_finished) _buildFinishedHint(),
             if (_error != null) _buildErrorOverlay(),
-            if (!_locked && _showControls) _buildControls(),
+            if (!_locked)
+              ValueListenableBuilder<bool>(
+                valueListenable: _controlsVisible,
+                builder: (_, visible, __) =>
+                    visible ? _buildControls() : const SizedBox.shrink(),
+              ),
             if (_pipAvailable && !_locked)
               Positioned(
                 top: 12,
@@ -563,11 +608,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         children: [
           const Icon(Icons.error_outline, size: 44, color: Colors.white70),
           const SizedBox(height: 14),
-          const Text('播放失败',
-              style: TextStyle(color: Colors.white, fontSize: 17)),
+          Text(_error ?? '播放失败',
+              style: const TextStyle(color: Colors.white, fontSize: 17)),
           const SizedBox(height: 6),
-          const Text('地址无效或网络断了',
-              style: TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(
+              _allLinesFailed ? '所有线路都试过了，换个源或稍后再试' : '地址无效或网络断了',
+              style: const TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 20),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -610,8 +656,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     return GestureDetector(
       onTap: () {
         if (_locked) return;
-        if (_showControls) {
-          setState(() => _showControls = false);
+        if (_controlsVisible.value) {
+          _controlsVisible.value = false;
           _hideTimer?.cancel();
         } else {
           _showControlsTemporarily();
@@ -650,12 +696,108 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           _showGestureHint('音量 ${(_volume * 100).round()}%');
         }
       },
-      child: Center(
-        child: AspectRatio(
-          aspectRatio: c.value.aspectRatio,
-          child: VideoPlayer(c),
-        ),
+      child: _fitVideo(c),
+    );
+  }
+
+  /// 画面模式：只换布局，不重建播放器、不闪黑。
+  /// 适应=完整显示（有黑边）；拉伸=拉满屏幕（不要黑边）；铺满=裁掉多余部分铺满（不变形）。
+  Widget _fitVideo(VideoPlayerController c) {
+    final video = VideoPlayer(c);
+    switch (_fit) {
+      case ScreenFit.fit:
+        return Center(
+          child: AspectRatio(
+            aspectRatio: c.value.aspectRatio,
+            child: video,
+          ),
+        );
+      case ScreenFit.stretch:
+        return SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.fill,
+            child: SizedBox(
+              width: c.value.size.width,
+              height: c.value.size.height,
+              child: video,
+            ),
+          ),
+        );
+      case ScreenFit.fill:
+        return SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: c.value.size.width,
+              height: c.value.size.height,
+              child: video,
+            ),
+          ),
+        );
+    }
+  }
+
+  String _fitName(ScreenFit f) {
+    switch (f) {
+      case ScreenFit.fit:
+        return '适应';
+      case ScreenFit.stretch:
+        return '拉伸';
+      case ScreenFit.fill:
+        return '铺满';
+    }
+  }
+
+  /// 画面按钮：点开选 适应/拉伸/铺满，切完立即生效并记住
+  void _showFitSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('画面',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              for (final f in ScreenFit.values)
+                ListTile(
+                  title: Text(_fitName(f),
+                      style: const TextStyle(fontSize: 14)),
+                  subtitle: Text(
+                      f == ScreenFit.fit
+                          ? '完整显示，有黑边也不怕'
+                          : f == ScreenFit.stretch
+                              ? '拉满整个屏幕，不要黑边'
+                              : '裁掉多余部分铺满屏幕，不变形',
+                      style: const TextStyle(fontSize: 11)),
+                  trailing: f == _fit ? const Icon(Icons.check, size: 18) : null,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (f != _fit) {
+                      setState(() => _fit = f);
+                      ref.read(sharedPrefsProvider).setString(
+                          AppConstants.keyVideoFit,
+                          f.toString().split('.').last);
+                    }
+                    _armHideTimer();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -804,6 +946,19 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                       },
                     ),
                     _speedButton(),
+                    TextButton(
+                      onPressed: () {
+                        _showFitSheet();
+                        _armHideTimer();
+                      },
+                      style: TextButton.styleFrom(
+                        primary: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 36),
+                      ),
+                      child: Text('画面·${_fitName(_fit)}',
+                          style: const TextStyle(fontSize: 13)),
+                    ),
                     if (_hasLines)
                       IconButton(
                         icon: _switching

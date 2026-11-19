@@ -299,18 +299,52 @@ final homeFeedProvider =
       : ref.read(jsPluginEngineProvider);
   await engine.attach(source);
 
-  // 优先用源自己声明的推荐接口；不支持的源退回「空关键词搜索」，
-  // 不少源的空搜索就是热门推荐，命中率还行。
-  dynamic raw;
+  // 按源的实际能力依次试：推荐接口 → 分类浏览 → 空关键词搜索，
+  // 哪个有内容用哪个。两个格式的源都要能出内容，别一律显示失败/空白。
+  var sections = <FeedSection>[];
+
+  // 1) 推荐接口
   try {
-    raw = await engine.invoke('recommend', params: {'page': 1});
+    final raw = await engine.invoke('recommend', params: {'page': 1});
+    sections = parseHomeFeed(raw, fallbackTitle: '为你推荐');
   } catch (e) {
     final msg = '$e';
-    if (!msg.contains('未实现') && !msg.contains('METHOD_NOT_FOUND')) rethrow;
-    raw = await engine.invoke('search', params: {'keyword': '', 'page': 1});
+    if (!msg.contains('未实现') && !msg.contains('METHOD_NOT_FOUND')) {
+      // 推荐接口本身报错（不是“没实现”）：先不抛，继续试分类/搜索
+      appLogger.warning('推荐接口失败，改试分类', detail: '$e');
+    }
   }
 
-  var sections = parseHomeFeed(raw, fallbackTitle: '为你推荐');
+  // 2) 分类浏览：拿分类列表，顺着试前几个分类，哪个有书用哪个
+  if (sections.isEmpty) {
+    try {
+      final cats = await engine.invoke('categories', params: {});
+      final list = cats is List ? cats : const [];
+      for (var i = 0; i < list.length && i < 3; i++) {
+        final c = list[i];
+        final id = c is Map
+            ? '${c['id'] ?? c['url'] ?? c['name'] ?? ''}'
+            : '$c';
+        final name = c is Map ? '${c['name'] ?? c['title'] ?? id}' : '$c';
+        if (id.isEmpty) continue;
+        try {
+          final raw = await engine.invoke('browse',
+              params: {'category': id, 'page': 1});
+          final got = parseHomeFeed(raw, fallbackTitle: name);
+          if (got.isNotEmpty) {
+            sections = got;
+            break;
+          }
+        } catch (_) {
+          // 这个分类打不开，试下一个
+        }
+      }
+    } catch (_) {
+      // 源没有分类接口，继续试搜索
+    }
+  }
+
+  // 3) 空关键词搜索：不少源的空搜索就是热门推荐
   if (sections.isEmpty) {
     try {
       final again =

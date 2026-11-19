@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -11,6 +12,16 @@ import '../data/web_session.dart';
 ///
 /// 登录完成后（点了「完成」或命中 successUrl）自动把该站点的 Cookie 读出来，
 /// 通过 `Navigator.pop(cookie)` 交回给调用方保存。
+///
+/// 旧手机兜底：旧 Android WebView 跑不动现代站点 JS 时页面会黑在那，
+/// 所以这里做了两层兜底——
+/// 1) 页面长时间加载不完 / 加载完正文是空的，就显示一句人话提示 + 手动入口，
+///    不让用户干等在一片黑屏上；
+/// 2) 传了 [tokenKey] 的源（比如青空次元的 sorani_auth_token）可以在登录页里
+///    点「手动输入 Token」，把在电脑浏览器上登录后拿到的 token 粘贴进来，
+///    点确定就写进这个站点的 localStorage（源播放时就从这里读 token，
+///    跟 WebView 登录拿到的 token 一个用法），同时以 `TOKEN:<token>` 的形式
+///    返回给调用方存进源配置。
 class LoginWebPage extends StatefulWidget {
   final String title;
   final String url;
@@ -20,6 +31,13 @@ class LoginWebPage extends StatefulWidget {
   /// true 用电脑版 UA 打开（有的站只认电脑版登录页）
   final bool desktop;
 
+  /// 手动粘贴 token 时写进 localStorage 的键（比如 sorani_auth_token）。
+  /// 空表示这个源不提供手动 token 入口。
+  final String tokenKey;
+
+  /// 手动 token 输入框里的说明文字
+  final String tokenHint;
+
   const LoginWebPage({
     super.key,
     required this.title,
@@ -27,6 +45,8 @@ class LoginWebPage extends StatefulWidget {
     this.successUrl = '',
     this.cookieUrl = '',
     this.desktop = false,
+    this.tokenKey = '',
+    this.tokenHint = '',
   });
 
   @override
@@ -38,13 +58,30 @@ class _LoginWebPageState extends State<LoginWebPage> {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36';
 
+  /// 页面一直加载不出来，超过这个时间就提示兜底入口
+  static const _loadTimeout = Duration(seconds: 20);
+
+  /// 页面加载完后等一会再检查正文是不是空的（SPA 渲染需要一点时间）
+  static const _blankCheckDelay = Duration(seconds: 4);
+
   WebViewController? _controller;
   int _progress = 0;
   String _currentUrl = '';
   bool _finishing = false;
   String? _error;
 
+  /// 页面是否触发过 onPageFinished
+  bool _pageLoaded = false;
+
+  /// 是否显示“页面可能打不开”的兜底提示条
+  bool _showFallbackHint = false;
+
+  Timer? _loadTimer;
+  Timer? _blankTimer;
+
   final _session = WebSession();
+
+  bool get _hasTokenEntry => widget.tokenKey.trim().isNotEmpty;
 
   String get _readUrl {
     if (widget.cookieUrl.isNotEmpty) return widget.cookieUrl;
@@ -57,12 +94,55 @@ class _LoginWebPageState extends State<LoginWebPage> {
   void initState() {
     super.initState();
     _currentUrl = widget.url;
+    // 一直加载不出来：提示兜底入口，别让用户干等
+    _loadTimer = Timer(_loadTimeout, () {
+      if (!mounted) return;
+      if (!_pageLoaded && _error == null) {
+        setState(() => _showFallbackHint = true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _loadTimer?.cancel();
+    _blankTimer?.cancel();
+    super.dispose();
   }
 
   bool _hitSuccess(String url) {
     final s = widget.successUrl.trim();
     if (s.isEmpty) return false;
     return url.startsWith(s);
+  }
+
+  /// 页面加载完后检查正文是不是空的：旧手机 WebView 跑不动现代站点 JS 时，
+  /// 页面能加载完但渲染出来是黑的，正文基本是空的。
+  Future<void> _checkBlank() async {
+    final c = _controller;
+    if (c == null || !mounted) return;
+    try {
+      final r = await c.evaluateJavascript(
+          'document.body ? document.body.innerText.length : 0');
+      if (!mounted) return;
+      if (r.trim() == '0') {
+        setState(() => _showFallbackHint = true);
+      }
+    } catch (_) {
+      // JS 求值失败就不提示，别误报
+    }
+  }
+
+  void _onPageFinished(String url) {
+    _currentUrl = url;
+    if (!_pageLoaded) {
+      _pageLoaded = true;
+      _loadTimer?.cancel();
+      // 等一会再检查空白，给 SPA 一点渲染时间
+      _blankTimer?.cancel();
+      _blankTimer = Timer(_blankCheckDelay, _checkBlank);
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _finish() async {
@@ -107,6 +187,136 @@ class _LoginWebPageState extends State<LoginWebPage> {
     }
   }
 
+  /// 手动输入 Token：粘贴进来后写进这个站点的 localStorage，
+  /// 再以 `TOKEN:<token>` 返回给调用方存进源配置。
+  Future<void> _showTokenDialog() async {
+    final ctrl = TextEditingController();
+    final token = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('手动输入 Token'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.tokenHint.isNotEmpty
+                  ? widget.tokenHint
+                  : '在电脑浏览器上登录这个站点后，把 ${widget.tokenKey} 的值复制过来粘贴进来。',
+              style: const TextStyle(fontSize: 12.5, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLines: 4,
+              minLines: 3,
+              decoration: InputDecoration(
+                hintText: widget.tokenKey,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    if (token == null || token.isEmpty) return;
+    // 写进这个站点的 localStorage：源播放时就从这里读 token。
+    // 旧手机上站点 JS 跑不动也不影响这一行，localStorage 本身能写就行。
+    final c = _controller;
+    if (c != null && _hasTokenEntry) {
+      try {
+        await c.evaluateJavascript(
+            'localStorage.setItem(${jsonEncode(widget.tokenKey)}, ${jsonEncode(token)})');
+      } catch (_) {
+        // 写不进去也没关系，调用方还会把 token 存进源配置
+      }
+    }
+    if (mounted) Navigator.of(context).pop('TOKEN:$token');
+  }
+
+  void _retry() {
+    setState(() {
+      _error = null;
+      _pageLoaded = false;
+      _showFallbackHint = false;
+      _progress = 0;
+    });
+    _loadTimer?.cancel();
+    _loadTimer = Timer(_loadTimeout, () {
+      if (!mounted) return;
+      if (!_pageLoaded && _error == null) {
+        setState(() => _showFallbackHint = true);
+      }
+    });
+    _controller?.reload();
+  }
+
+  /// “页面可能打不开”的兜底提示条：旧手机 WebView 黑屏/白屏时显示
+  Widget _fallbackBanner() {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      decoration: BoxDecoration(
+        color: context.palette.primarySoft,
+        border: Border(
+          bottom: BorderSide(color: context.palette.outline),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.info_outline, size: 16, color: primary),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  '这个登录页在旧手机上可能打不开（一直加载或一片空白），'
+                  '可以试试手动输入 Token 登录。',
+                  style: TextStyle(fontSize: 12.5, height: 1.4),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (_hasTokenEntry)
+                OutlinedButton(
+                  onPressed: _showTokenDialog,
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('手动输入 Token',
+                      style: TextStyle(fontSize: 12)),
+                ),
+              OutlinedButton(
+                onPressed: _retry,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child:
+                    const Text('重新加载', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
@@ -120,12 +330,28 @@ class _LoginWebPageState extends State<LoginWebPage> {
               const Icon(Icons.wifi_off, size: 44),
               const SizedBox(height: 14),
               Text('登录页打不开：$_error', textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              Text(
+                '旧手机 WebView 可能打不开这个站点的登录页，'
+                '可以试试手动输入 Token 登录。',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
               const SizedBox(height: 18),
-              OutlinedButton(
-                onPressed: () {
-                  setState(() => _error = null);
-                },
-                child: const Text('重试'),
+              Wrap(
+                spacing: 10,
+                alignment: WrapAlignment.center,
+                children: [
+                  if (_hasTokenEntry)
+                    OutlinedButton(
+                      onPressed: _showTokenDialog,
+                      child: const Text('手动输入 Token'),
+                    ),
+                  OutlinedButton(
+                    onPressed: _retry,
+                    child: const Text('重试'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -141,6 +367,12 @@ class _LoginWebPageState extends State<LoginWebPage> {
         ),
         title: Text('登录 · ${widget.title}', maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          if (_hasTokenEntry)
+            TextButton(
+              onPressed: _showTokenDialog,
+              child: const Text('手动输入 Token',
+                  style: TextStyle(fontSize: 13)),
+            ),
           TextButton(
             onPressed: _finishing ? null : _finish,
             child: _finishing
@@ -161,6 +393,7 @@ class _LoginWebPageState extends State<LoginWebPage> {
               value: _progress <= 0 ? null : _progress / 100,
               minHeight: 2,
             ),
+          if (_showFallbackHint) _fallbackBanner(),
           Expanded(
             child: WebView(
               initialUrl: widget.url,
@@ -170,10 +403,7 @@ class _LoginWebPageState extends State<LoginWebPage> {
               onProgress: (p) {
                 if (mounted) setState(() => _progress = p);
               },
-              onPageFinished: (url) {
-                _currentUrl = url;
-                if (mounted) setState(() {});
-              },
+              onPageFinished: _onPageFinished,
               onWebResourceError: (e) {
                 // 3.x 拿不到 isForMainFrame，主文档失败才提示；子资源失败忽略
                 if (_progress <= 20) {
@@ -198,7 +428,8 @@ class _LoginWebPageState extends State<LoginWebPage> {
                 16, 10, 16, 10 + MediaQuery.of(context).padding.bottom),
             child: Text(
               '在这个页面里自己登录（账号密码、验证码都在网页里操作），'
-              '登录成功后点右上角「完成」，App 会把 Cookie 同步给这个源。',
+              '登录成功后点右上角「完成」，App 会把 Cookie 同步给这个源。'
+              '${_hasTokenEntry ? '如果页面打不开，点右上角「手动输入 Token」。' : ''}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

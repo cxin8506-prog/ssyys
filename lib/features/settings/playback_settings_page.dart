@@ -74,6 +74,14 @@ class _PlaybackSettingsPageState
                       color: Theme.of(context).colorScheme.primary)),
               onTap: () => _pickSpeed(context, speed),
             ),
+            ListTile(
+              title: const Text('缓存设置'),
+              subtitle: const Text(
+                  '在播放时根据一定的时间规则，自动缓存后续章节。注意：暂停时不触发缓存。缓存过的书籍在没有网络时可从我的收藏打开进行离线播放。'),
+              trailing: const Icon(Icons.chevron_right, size: 20),
+              onTap: () =>
+                  Navigator.of(context).pushNamed('/cache-settings'),
+            ),
             SwitchListTile(
               title: const Text('自动播放下一集'),
               subtitle: const Text('开了播完一集自动播下一集，关了播完停住'),

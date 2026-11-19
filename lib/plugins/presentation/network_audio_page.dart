@@ -9,6 +9,7 @@ import '../../../core/di/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/path_utils.dart';
 import '../../features/audio/data/repository_providers.dart';
+import '../data/auto_cache.dart';
 import '../data/plugin_resume.dart';
 
 /// 网络音频播放页（插件源直接播放 URL）
@@ -41,6 +42,16 @@ class NetworkAudioPage extends ConsumerStatefulWidget {
   final String lineName;
   final String voiceId;
 
+  /// 可切换的音色：[{id, name}]，没有就不显示音色按钮
+  final List<Map<String, dynamic>> voices;
+  final String? currentVoiceId;
+
+  /// 切音色时向源要新地址（参数：音色 id），返回新播放地址
+  final Future<String> Function(String voiceId)? onSwitchVoice;
+
+  /// 播到缓存频率阈值时回调一次（触发自动缓存后续章节）
+  final VoidCallback? onCacheThreshold;
+
   const NetworkAudioPage({
     super.key,
     required this.url,
@@ -60,6 +71,10 @@ class NetworkAudioPage extends ConsumerStatefulWidget {
     this.lineId = '',
     this.lineName = '',
     this.voiceId = '',
+    this.voices = const [],
+    this.currentVoiceId,
+    this.onSwitchVoice,
+    this.onCacheThreshold,
   });
 
   @override
@@ -68,8 +83,14 @@ class NetworkAudioPage extends ConsumerStatefulWidget {
 
 class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
   final _player = AudioPlayer();
+
+  /// 进度只刷进度条本身：positionStream 只更新这个 ValueNotifier，
+  /// Slider + 时间行包在 ValueListenableBuilder 里，不整页 setState
+  final _positionNotifier = ValueNotifier<Duration>(Duration.zero);
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
+  String? _voiceId;
+  bool _cacheFired = false;
   double _speed = 1.0;
   bool _ready = false;
   String? _error;
@@ -90,8 +111,24 @@ class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
   @override
   void initState() {
     super.initState();
+    _voiceId = widget.currentVoiceId;
     _posSub = _player.positionStream.listen((p) {
-      if (mounted) setState(() => _position = p);
+      _position = p;
+      _positionNotifier.value = p;
+      // 缓存频率阈值：正在播、播到阈值（标准 30%）才触发一次自动缓存
+      if (!_cacheFired &&
+          widget.onCacheThreshold != null &&
+          _playing &&
+          _duration > Duration.zero) {
+        final freq = ref.read(sharedPrefsProvider).getString(
+                AppConstants.keyAutoCacheFreq) ??
+            'standard';
+        if (p.inMilliseconds / _duration.inMilliseconds >=
+            AutoCache.thresholdFor(freq)) {
+          _cacheFired = true;
+          widget.onCacheThreshold!();
+        }
+      }
     });
     _durSub = _player.durationStream.listen((d) {
       if (mounted && d != null) setState(() => _duration = d);
@@ -166,6 +203,7 @@ class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
   @override
   void dispose() {
     _saveResume();
+    _positionNotifier.dispose();
     _resumeTimer?.cancel();
     _sleepTimer?.cancel();
     _posSub?.cancel();
@@ -303,6 +341,63 @@ class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
     );
   }
 
+  /// 音色切换：点开底部列表选音色，选完从当前进度接着播
+  void _showVoiceSheet() {
+    if (widget.voices.isEmpty) return;
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(title: Text('音色')),
+            for (final v in widget.voices)
+              ListTile(
+                title: Text('${v['name'] ?? v['id']}'),
+                trailing: '${v['id']}' == _voiceId
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _switchVoice('${v['id']}');
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchVoice(String id) async {
+    final resolver = widget.onSwitchVoice;
+    if (resolver == null || id == _voiceId) return;
+    final pos = _positionNotifier.value;
+    try {
+      final url = await resolver(id);
+      if (url.isEmpty || !mounted) return;
+      if (url.startsWith('/')) {
+        await _player.setAudioSource(
+          AudioSource.uri(Uri.file(url)),
+        );
+      } else if (widget.headers.isNotEmpty) {
+        await _player.setAudioSource(
+          AudioSource.uri(Uri.parse(url), headers: widget.headers),
+        );
+      } else {
+        await _player.setUrl(url);
+      }
+      await _player.seek(pos);
+      await _player.play();
+      if (mounted) setState(() => _voiceId = id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('切换音色失败：$e')));
+      }
+    }
+  }
+
   /// 选集弹窗：点哪集播哪集
   void _showChapters() {
     if (widget.playlist.isEmpty) return;
@@ -370,6 +465,9 @@ class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
           widget.coverUrl,
           width: 220,
           height: 260,
+          cacheWidth: 440,
+          cacheHeight: 520,
+          filterQuality: FilterQuality.low,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => _coverPlaceholder(primary),
         ),
@@ -404,8 +502,6 @@ class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
     final primary = tint
         ? Theme.of(context).colorScheme.primary
         : const Color(0xFF6B7280);
-    final total = _duration.inMilliseconds;
-    final pos = _position.inMilliseconds.clamp(0, total == 0 ? 1 : total);
     return Scaffold(
       appBar: AppBar(
         title: const Text('正在播放'),
@@ -420,6 +516,12 @@ class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
             tooltip: '书签',
             onPressed: _showBookmarks,
           ),
+          if (widget.voices.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.record_voice_over_outlined),
+              tooltip: '音色',
+              onPressed: _showVoiceSheet,
+            ),
           if (widget.playlist.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.list),
@@ -480,24 +582,38 @@ class _NetworkAudioPageState extends ConsumerState<NetworkAudioPage> {
                           ?.copyWith(color: Theme.of(context).colorScheme.error)),
                 ),
               const Spacer(),
-              Slider(
-                value: pos.toDouble(),
-                max: total == 0 ? 1 : total.toDouble(),
-                onChanged: (v) =>
-                    _player.seek(Duration(milliseconds: v.toInt())),
-                activeColor: primary,
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(PathUtils.formatDuration(_position.inMilliseconds),
-                        style: Theme.of(context).textTheme.bodySmall),
-                    Text(PathUtils.formatDuration(_duration.inMilliseconds),
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ),
+              ValueListenableBuilder<Duration>(
+                valueListenable: _positionNotifier,
+                builder: (ctx, pos, _) {
+                  final totalMs = _duration.inMilliseconds;
+                  final posMs =
+                      pos.inMilliseconds.clamp(0, totalMs == 0 ? 1 : totalMs);
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Slider(
+                        value: posMs.toDouble(),
+                        max: totalMs == 0 ? 1 : totalMs.toDouble(),
+                        onChanged: (v) => _player
+                            .seek(Duration(milliseconds: v.toInt())),
+                        activeColor: primary,
+                      ),
+                      Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(PathUtils.formatDuration(posMs),
+                                style: Theme.of(context).textTheme.bodySmall),
+                            Text(PathUtils.formatDuration(totalMs),
+                                style: Theme.of(context).textTheme.bodySmall),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 12),
               Row(
