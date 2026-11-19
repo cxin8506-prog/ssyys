@@ -51,3 +51,4 @@ app.*.map.json
 
 # APK 构建产物
 *.apk
+*.idsig
