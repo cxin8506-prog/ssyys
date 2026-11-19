@@ -92,15 +92,15 @@ class AppTheme {
   /// 内置配色（设置页可切换）
   static const List<AppScheme> schemes = [
     AppScheme(
-      name: '青玉',
-      primary: Color(0xFF3DD9A4),
-      accent: Color(0xFFFFC46B),
-      darkBg: Color(0xFF0F1412),
-      darkSurface: Color(0xFF18201D),
-      darkSurfaceAlt: Color(0xFF223028),
-      lightBg: Color(0xFFF4F8F6),
+      name: '暖阳',
+      primary: Color(0xFFF08C3A),
+      accent: Color(0xFFFFB877),
+      darkBg: Color(0xFF14100C),
+      darkSurface: Color(0xFF1F1913),
+      darkSurfaceAlt: Color(0xFF2B231A),
+      lightBg: Color(0xFFFBF6F0),
       lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFE9F2ED),
+      lightSurfaceAlt: Color(0xFFF6EADF),
     ),
     AppScheme(
       name: '海蓝',
@@ -178,8 +178,8 @@ class AppTheme {
 
   static const Color darkText = Color(0xFFECEFF1);
   static const Color darkTextSub = Color(0xFF9AA0A6);
-  static const Color lightText = Color(0xFF1A1C1E);
-  static const Color lightTextSub = Color(0xFF5F6368);
+  static const Color lightText = Color(0xFF2A2724);
+  static const Color lightTextSub = Color(0xFF837A70);
 
   static ThemeData dark([int schemeIndex = 0]) {
     final s = schemeAt(schemeIndex);
@@ -205,7 +205,7 @@ class AppTheme {
     final s = schemeAt(schemeIndex);
     final palette = AppPalette(
       surfaceAlt: s.lightSurfaceAlt,
-      outline: const Color(0xFFE2E8E5),
+      outline: const Color(0xFFEDE3D8),
       subtle: lightTextSub,
       primarySoft: s.primary.withOpacity(0.14),
     );
@@ -224,7 +224,7 @@ class AppTheme {
   /// 浅色主题下主色需要压暗一点，否则按钮上的白字对比度不足
   static Color _darkenForLight(Color c) {
     final hsl = HSLColor.fromColor(c);
-    return hsl.withLightness((hsl.lightness * 0.62).clamp(0.28, 0.52)).toColor();
+    return hsl.withLightness((hsl.lightness * 0.74).clamp(0.30, 0.56)).toColor();
   }
 
   static ThemeData _build({

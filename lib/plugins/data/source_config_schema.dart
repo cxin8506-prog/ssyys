@@ -46,6 +46,15 @@ class ConfigField {
   /// action 类型点击时调用的源方法
   final String action;
 
+  /// login 类型：网页登录地址
+  final String loginUrl;
+
+  /// login 类型：登录成功后跳到的地址（用于自动判定登录完成）
+  final String successUrl;
+
+  /// login 类型：登录后从这个地址读 Cookie（默认用 loginUrl 的 origin）
+  final String cookieUrl;
+
   const ConfigField({
     required this.key,
     required this.name,
@@ -57,9 +66,13 @@ class ConfigField {
     this.options = const [],
     this.optionSource = '',
     this.action = '',
+    this.loginUrl = '',
+    this.successUrl = '',
+    this.cookieUrl = '',
   });
 
   bool get isAction => type == 'action';
+  bool get isLogin => type == 'login';
   bool get needsFetch => optionSource.isNotEmpty && options.isEmpty;
 
   /// 默认值（switch 一定是 bool，number 一定是 num）
@@ -244,6 +257,9 @@ ConfigField? _field(dynamic e, int index) {
     options: opts,
     optionSource: _str(m, const ['source', 'from', 'optionsFrom', 'dynamic']) ?? '',
     action: _str(m, const ['action', 'command', 'method']) ?? '',
+    loginUrl: _str(m, const ['url', 'loginUrl', 'loginURL', 'href', 'link']) ?? '',
+    successUrl: _str(m, const ['successUrl', 'successURL', 'redirectUrl']) ?? '',
+    cookieUrl: _str(m, const ['cookieUrl', 'cookieURL', 'domain']) ?? '',
   );
 }
 
@@ -291,6 +307,13 @@ String normalizeType(String? raw) {
     case 'button':
     case 'command':
       return 'action';
+    case 'login':
+    case 'webview':
+    case 'web-login':
+    case 'web_login':
+    case 'oauth':
+    case 'auth':
+      return 'login';
     default:
       return 'text';
   }

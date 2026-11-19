@@ -16,6 +16,7 @@ import 'features/backup/log_page.dart';
 import 'features/library/collection_pages.dart';
 import 'features/library/library_page.dart';
 import 'features/onboarding/onboarding_page.dart';
+import 'features/presentation/discover_page.dart';
 import 'features/presentation/home_page.dart';
 import 'features/search/search_page.dart';
 import 'features/settings/settings_page.dart';
@@ -31,6 +32,14 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final prefs = await SharedPreferences.getInstance();
+
+  // 老版本默认深色，这里统一迁到暖色浅色（只做一次，之后用户手动改的尊重）
+  if (!(prefs.getBool('theme_migrated_warm') ?? false)) {
+    await prefs.setInt(AppConstants.keyThemeMode, 1);
+    await prefs.setInt(AppConstants.keyThemeColor, 0);
+    await prefs.setBool('theme_migrated_warm', true);
+  }
+
   final db = AppDatabase();
   appLogger.attachDatabase(db);
 
@@ -198,7 +207,7 @@ class _MainShellState extends ConsumerState<MainShell> {
     final pages = <Widget>[
       const HomePage(),
       const LibraryPage(),
-      const SourceCenterPage(),
+      const DiscoverPage(),
       const SettingsPage(),
     ];
     if (_index >= pages.length) _index = 0;
@@ -225,7 +234,7 @@ class _AppBottomBar extends StatelessWidget {
     final items = <Map<String, dynamic>>[
       {'label': '首页', 'icon': Icons.home_outlined, 'active': Icons.home},
       {'label': '书架', 'icon': Icons.menu_book_outlined, 'active': Icons.menu_book},
-      {'label': '源', 'icon': Icons.extension_outlined, 'active': Icons.extension},
+      {'label': '发现', 'icon': Icons.explore_outlined, 'active': Icons.explore},
       {'label': '我的', 'icon': Icons.person_outline, 'active': Icons.person},
     ];
 

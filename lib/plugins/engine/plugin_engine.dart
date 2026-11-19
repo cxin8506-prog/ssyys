@@ -54,6 +54,23 @@ class PluginMethods {
       'getConfigSchema',
     ],
     'action': ['action', 'onAction', 'doAction', 'runAction'],
+    'categories': [
+      'categories',
+      'categoryList',
+      'getCategories',
+      'classify',
+      'kinds',
+      'types',
+      'category',
+    ],
+    'browse': [
+      'browse',
+      'categoryItems',
+      'categoryBrowse',
+      'getCategoryList',
+      'listByCategory',
+      'getList',
+    ],
   };
 
   static const Map<String, String> labels = {
@@ -65,5 +82,7 @@ class PluginMethods {
     'lines': '线路列表',
     'voices': '音色列表',
     'config': '配置声明',
+    'categories': '分类列表',
+    'browse': '分类内容',
   };
 }

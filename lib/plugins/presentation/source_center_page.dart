@@ -4,8 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/path_utils.dart';
+import '../data/login_entry.dart';
 import '../data/plugin_providers.dart';
+import '../data/web_session.dart';
 import '../model/plugin_source.dart';
+import 'login_web_page.dart';
 import 'source_detail_page.dart';
 import '../../shared/widgets/common.dart';
 
@@ -20,6 +23,10 @@ class SourceCenterPage extends ConsumerStatefulWidget {
 class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
   bool _busy = false;
   String _stage = '';
+
+  /// 每个源的登录入口与登录状态
+  final Map<String, _SourceAuth> _auth = {};
+  bool _authLoading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +45,9 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('读取源失败：$e')),
-        data: (list) => Stack(
+        data: (list) {
+          _ensureAuth(list);
+          return Stack(
           children: [
             _buildBody(list),
             if (_busy)
@@ -57,9 +66,66 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
                 ),
               ),
           ],
+        );
+        },
+      ),
+    );
+  }
+
+  /// 读每个源的登录入口（manifest 里的 login）与已保存的 Cookie
+  Future<void> _ensureAuth(List<PluginSource> list) async {
+    if (_authLoading) return;
+    final pending = list.where((s) => !_auth.containsKey(s.id)).toList();
+    if (pending.isEmpty) return;
+    _authLoading = true;
+    final repo = ref.read(sourceRepositoryProvider);
+    final cfgRepo = ref.read(sourceConfigRepositoryProvider);
+    for (final s in pending) {
+      try {
+        final manifest = await repo.readManifest(s);
+        final entry = LoginEntry.parse(manifest);
+        var cookie = '';
+        if (entry != null && entry.valid) {
+          final cfg = await cfgRepo.load(s.id, s.type);
+          cookie = (cfg.loginState ?? '').trim();
+        }
+        _auth[s.id] = _SourceAuth(entry: entry, cookie: cookie);
+      } catch (_) {
+        _auth[s.id] = _SourceAuth(entry: null, cookie: '');
+      }
+    }
+    _authLoading = false;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _quickLogin(PluginSource s, _SourceAuth auth) async {
+    final entry = auth.entry;
+    if (entry == null || !entry.valid) return;
+    final cookie = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => LoginWebPage(
+          title: s.name,
+          url: entry.url,
+          successUrl: entry.successUrl,
+          cookieUrl: entry.cookieUrl,
         ),
       ),
     );
+    if (cookie == null) return;
+    if (cookie.isEmpty) {
+      if (mounted) _toast('没有拿到 Cookie');
+      return;
+    }
+    final cfgRepo = ref.read(sourceConfigRepositoryProvider);
+    final cfg = await cfgRepo.load(s.id, s.type);
+    cfg.values['cookie'] = cookie;
+    cfg.loginState = cookie;
+    await cfgRepo.save(cfg);
+    auth.cookie = cookie;
+    if (mounted) {
+      setState(() {});
+      _toast('「${s.name}」登录成功');
+    }
   }
 
   Widget _buildBody(List<PluginSource> list) {
@@ -231,6 +297,40 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
                   ],
                 ),
               ),
+              if (_auth[s.id]?.hasLogin == true)
+                TextButton(
+                  onPressed: () => _quickLogin(s, _auth[s.id]!),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 30),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _auth[s.id]!.logged
+                            ? Icons.verified_user
+                            : Icons.person_outline,
+                        size: 13,
+                        color: _auth[s.id]!.logged
+                            ? primary
+                            : context.subtleColor,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        _auth[s.id]!.logged ? '已登录' : '登录',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _auth[s.id]!.logged ? primary : null,
+                          fontWeight: _auth[s.id]!.logged
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Switch(
                 value: s.enabled,
                 onChanged: (v) async {
@@ -319,4 +419,17 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
       duration: const Duration(seconds: 3),
     ));
   }
+}
+
+/// 源的登录信息（列表页用）
+class _SourceAuth {
+  final LoginEntry? entry;
+  String cookie;
+
+  _SourceAuth({required this.entry, required this.cookie});
+
+  bool get hasLogin => entry != null && entry!.valid;
+  bool get logged => cookie.trim().isNotEmpty;
+
+  String get mask => WebSession.mask(cookie);
 }

@@ -81,6 +81,42 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        // ---------- 源登录：读写 WebView Cookie ----------
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "suishou/web")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "cookies" -> {
+                            val url = call.argument<String>("url") ?: ""
+                            if (url.isEmpty()) {
+                                result.success("")
+                            } else {
+                                val cm = android.webkit.CookieManager.getInstance()
+                                cm.setAcceptCookie(true)
+                                result.success(cm.getCookie(url) ?: "")
+                            }
+                        }
+                        "clearCookies" -> {
+                            val cm = android.webkit.CookieManager.getInstance()
+                            val url = call.argument<String>("url")
+                            if (!url.isNullOrEmpty()) {
+                                cm.setCookie(url, "")
+                            }
+                            cm.removeAllCookies(null)
+                            cm.flush()
+                            result.success(true)
+                        }
+                        "flush" -> {
+                            android.webkit.CookieManager.getInstance().flush()
+                            result.success(true)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (t: Throwable) {
+                    result.error("WEB_ERROR", t.message ?: t.toString(), null)
+                }
+            }
+
         // ---------- 画中画 ----------
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "suishou/pip")
             .setMethodCallHandler { call, result ->

@@ -194,7 +194,10 @@ class JarPluginEngine implements PluginEngine {
       case 'voices':
         return [params['url'] ?? ''];
       case 'config':
+      case 'categories':
         return [];
+      case 'browse':
+        return [params['category'] ?? '', params['page'] ?? 1];
       default:
         return [params];
     }

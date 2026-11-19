@@ -23,7 +23,7 @@ final sharedPrefsProvider = Provider<SharedPreferences>((ref) {
 /// 主题模式：0=跟随系统 1=浅色 2=深色，默认深色
 final themeModeProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);
-  return prefs.getInt(AppConstants.keyThemeMode) ?? 2;
+  return prefs.getInt(AppConstants.keyThemeMode) ?? 1;
 });
 
 /// 视频功能总开关

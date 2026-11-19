@@ -21,6 +21,15 @@ class VideoPlayerPage extends ConsumerStatefulWidget {
   /// true 表示 path/playlist 是网络地址（插件源在线播放）
   final bool network;
 
+  /// 可切换的线路：[{id, name}]
+  final List<Map<String, dynamic>> lines;
+
+  /// 当前线路 id
+  final String? currentLineId;
+
+  /// 切线路时向源要新地址（参数：线路 id）
+  final Future<String> Function(String lineId)? onSwitchLine;
+
   const VideoPlayerPage({
     super.key,
     required this.path,
@@ -28,6 +37,9 @@ class VideoPlayerPage extends ConsumerStatefulWidget {
     this.initialIndex = 0,
     required this.title,
     this.network = false,
+    this.lines = const [],
+    this.currentLineId,
+    this.onSwitchLine,
   });
 
   @override
@@ -45,10 +57,19 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   double _volume = 1.0;
   bool _pipAvailable = false;
 
+  String? _lineId;
+  String? _failedLineId;
+  Duration _lastPosition = Duration.zero;
+  bool _switching = false;
+
+  bool get _hasLines => widget.lines.length > 1 && widget.onSwitchLine != null;
+
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
+    _lineId = widget.currentLineId ??
+        (widget.lines.isNotEmpty ? '${widget.lines.first['id']}' : null);
     _initController();
     PipService.isAvailable().then((v) {
       if (mounted && v) setState(() => _pipAvailable = v);
@@ -58,37 +79,157 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   Future<void> _initController() async {
     final paths = widget.playlist.isNotEmpty ? widget.playlist : [widget.path];
     final safeIndex = _index.clamp(0, paths.length - 1);
+    await _openUrl(paths[safeIndex]);
+  }
+
+  /// 用某个地址起播。startAt 为空时从当前进度续播。
+  Future<void> _openUrl(String url,
+      {Duration? startAt, bool autoFallback = true}) async {
+    final keep = startAt ??
+        (_controller?.value.isInitialized == true
+            ? _controller!.value.position
+            : _lastPosition);
     final ctrl = widget.network
-        ? VideoPlayerController.network(paths[safeIndex])
-        : VideoPlayerController.file(File(paths[safeIndex]));
+        ? VideoPlayerController.network(url)
+        : VideoPlayerController.file(File(url));
     try {
       await ctrl.initialize();
       await ctrl.setPlaybackSpeed(_speed);
       await ctrl.setVolume(_volume);
-      if (mounted) {
-        setState(() => _controller = ctrl);
-      } else {
+      if (keep > Duration.zero) await ctrl.seekTo(keep);
+      if (!mounted) {
         await ctrl.dispose();
         return;
       }
+      final old = _controller;
+      setState(() => _controller = ctrl);
+      await old?.dispose();
       await ctrl.play();
     } catch (e, st) {
-      // 损坏视频跳过并写日志
-      appLogger.error('视频播放失败，已跳过', error: e, stack: st);
+      appLogger.error('视频播放失败', error: e, stack: st);
       await ctrl.dispose();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('视频加载失败，已跳过。若来自网络源，可尝试修改 UA 后重试'),
-            action: SnackBarAction(
-              label: 'UA 设置',
-              onPressed: () => Navigator.of(context).pushNamed('/ua-settings'),
-            ),
+      if (!mounted) return;
+      _lastPosition = keep;
+      if (autoFallback && await _fallbackLine()) return;
+      _toast(_hasLines ? '所有线路都无法播放' : '视频加载失败');
+      if (widget.playlist.isNotEmpty) _next();
+    }
+  }
+
+  /// 当前线路失败：按顺序试下一条，成功返回 true
+  Future<bool> _fallbackLine() async {
+    final list = widget.lines;
+    final resolver = widget.onSwitchLine;
+    if (list.length < 2 || resolver == null) return false;
+    _failedLineId = _lineId;
+    final startIdx = list.indexWhere((e) => '${e['id']}' == _lineId);
+    for (var i = 1; i < list.length; i++) {
+      final cand = list[(startIdx + i) % list.length];
+      final id = '${cand['id']}';
+      if (id == _lineId) continue;
+      try {
+        final url = await resolver(id);
+        if (url.isEmpty) continue;
+        await _openUrl(url, startAt: _lastPosition, autoFallback: false);
+        if (!mounted) return true;
+        setState(() {
+          _lineId = id;
+          _failedLineId = null;
+        });
+        _toast('这条线路不行，已自动切到「${cand['name']}」');
+        return true;
+      } catch (_) {
+        _failedLineId = id;
+      }
+    }
+    return false;
+  }
+
+  /// 手动切线路：从当前进度接着播
+  Future<void> _switchLine(String id) async {
+    final resolver = widget.onSwitchLine;
+    if (resolver == null || id == _lineId || _switching) return;
+    setState(() => _switching = true);
+    final pos = _controller?.value.position ?? _lastPosition;
+    try {
+      final url = await resolver(id);
+      if (url.isEmpty) throw Exception('这条线路没有返回地址');
+      await _openUrl(url, startAt: pos, autoFallback: false);
+      if (!mounted) return;
+      setState(() {
+        _lineId = id;
+        _failedLineId = null;
+      });
+      _toast('已切换线路，从当前进度继续');
+    } catch (e) {
+      if (mounted) _toast('切换失败：$e');
+    } finally {
+      if (mounted) setState(() => _switching = false);
+    }
+  }
+
+  void _showLineSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('切换线路',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              for (final l in widget.lines)
+                ListTile(
+                  leading: Icon(
+                    '${l['id']}' == _lineId
+                        ? Icons.radio_button_checked
+                        : (_failedLineId == '${l['id']}'
+                            ? Icons.error_outline
+                            : Icons.radio_button_unchecked),
+                    color: '${l['id']}' == _lineId
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                    size: 20,
+                  ),
+                  title: Text('${l['name'] ?? l['id']}',
+                      style: const TextStyle(fontSize: 14)),
+                  subtitle: _failedLineId == '${l['id']}'
+                      ? const Text('上次加载失败', style: TextStyle(fontSize: 11))
+                      : null,
+                  trailing: '${l['id']}' == _lineId
+                      ? const Text('正在使用', style: TextStyle(fontSize: 11))
+                      : null,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _switchLine('${l['id']}');
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
           ),
         );
-      }
-      _next();
-    }
+      },
+    );
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 2),
+    ));
   }
 
   Future<void> _next() async {
@@ -152,6 +293,20 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
                           );
                         }
                       },
+                    ),
+                  if (_hasLines && !_locked)
+                    IconButton(
+                      icon: _switching
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.swap_horiz),
+                      color: Colors.white,
+                      tooltip: '切换线路',
+                      onPressed: _switching ? null : _showLineSheet,
                     ),
                   IconButton(
                     icon: Icon(_locked ? Icons.lock : Icons.lock_open),

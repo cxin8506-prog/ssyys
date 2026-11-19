@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../data/login_entry.dart';
 import '../data/plugin_providers.dart';
 import '../model/plugin_source.dart';
 import '../model/plugin_source.dart' show PluginSource;
 import '../../features/video/presentation/video_player_page.dart';
 import 'network_audio_page.dart';
+import 'source_detail_page.dart';
 import '../../shared/widgets/common.dart';
 
 /// 源里的书详情：简介 + 音色 + 章节，点章节直接播放
@@ -42,6 +44,8 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
   String? _lineId;
   bool _loading = true;
   String? _error;
+  String? _voiceError;
+  bool _needLogin = false;
   int _playingIndex = -1;
 
   @override
@@ -68,6 +72,15 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     _voiceId = cfg.selectedVoiceId;
     _lines = cfg.lines;
     _lineId = cfg.selectedLineId;
+
+    // 源声明了登录入口但还没登录：给个提示，别让用户撞到解析错误
+    try {
+      final manifest = await repo.readManifest(s);
+      final login = LoginEntry.parse(manifest);
+      if (login != null && login.valid) {
+        _needLogin = (cfg.loginState ?? '').trim().isEmpty;
+      }
+    } catch (_) {}
     try {
       final engine = s.isJar
           ? ref.read(jarPluginEngineProvider)
@@ -90,16 +103,33 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
       }
       _chapters = _normalizeChapters(chapters);
 
+      // 音色 / 线路：源自己会给列表，自动拉一次并记下来，不用用户手动点
       if (_voices.isEmpty && s.isAudio) {
         try {
           final vs = await engine.invoke('voices', params: {'url': widget.bookUrl});
           _voices = _normalizeOptions(vs);
-        } catch (_) {}
+          if (_voices.isNotEmpty) {
+            _voiceId ??= '${_voices.first['id']}';
+            cfg.voices = _voices;
+            cfg.selectedVoiceId = _voiceId;
+            cfg.values['voiceId'] = _voiceId;
+            await ref.read(sourceConfigRepositoryProvider).save(cfg);
+          }
+        } catch (e) {
+          _voiceError = '$e';
+        }
       }
       if (_lines.isEmpty && !s.isAudio) {
         try {
           final ls = await engine.invoke('lines', params: {'url': widget.bookUrl});
           _lines = _normalizeOptions(ls);
+          if (_lines.isNotEmpty) {
+            _lineId ??= '${_lines.first['id']}';
+            cfg.lines = _lines;
+            cfg.selectedLineId = _lineId;
+            cfg.values['lineId'] = _lineId;
+            await ref.read(sourceConfigRepositoryProvider).save(cfg);
+          }
         } catch (_) {}
       }
       if (!mounted) return;
@@ -199,6 +229,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
               : ListView(
                   padding: pagePadding(context, bottom: 24),
                   children: [
+                    if (_needLogin) _loginBanner(),
                     _header(),
                     if (_voices.isNotEmpty && _isAudio) ...[
                       const SizedBox(height: 16),
@@ -409,6 +440,39 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     );
   }
 
+  /// 没登录时的提示条：直接引到源详情的登录
+  Widget _loginBanner() {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: context.palette.primarySoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: primary.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.lock_outline, size: 16, color: primary),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text('这个源需要登录才能看完整内容，请先登录',
+                style: TextStyle(fontSize: 12.5)),
+          ),
+          TextButton(
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => SourceDetailPage(sourceId: widget.sourceId),
+              ));
+              if (mounted) _load();
+            },
+            child: const Text('去登录'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveVoice(String id) async {
     final s = _source;
     if (s == null) return;
@@ -475,16 +539,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     }
     setState(() => _playingIndex = index);
     try {
-      final engine = s.isJar
-          ? ref.read(jarPluginEngineProvider)
-          : ref.read(jsPluginEngineProvider);
-      await engine.attach(s);
-      final r = await engine.invoke('content', params: {
-        'url': url,
-        'voiceId': _voiceId,
-        'lineId': _lineId,
-      });
-      final mediaUrl = _extractUrl(r);
+      final mediaUrl = await _resolveMediaUrl(index, _lineId);
       if (mediaUrl.isEmpty) {
         throw Exception('源没有返回可播放地址');
       }
@@ -508,6 +563,12 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
             path: mediaUrl,
             network: true,
             title: '${widget.title} · ${ch['name']}',
+            lines: [
+              for (final l in _lines)
+                {'id': '${l['id']}', 'name': '${l['name'] ?? l['id']}'}
+            ],
+            currentLineId: _lineId,
+            onSwitchLine: (lineId) => _resolveMediaUrl(index, lineId),
           ),
         ));
       }
@@ -516,6 +577,36 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
     } finally {
       if (mounted) setState(() => _playingIndex = -1);
     }
+  }
+
+  /// 向源要某一集在指定线路下的播放地址
+  Future<String> _resolveMediaUrl(int index, String? lineId) async {
+    final s = _source;
+    if (s == null) return '';
+    if (index < 0 || index >= _chapters.length) return '';
+    final ch = _chapters[index];
+    final engine = s.isJar
+        ? ref.read(jarPluginEngineProvider)
+        : ref.read(jsPluginEngineProvider);
+    await engine.attach(s);
+    final r = await engine.invoke('content', params: {
+      'url': '${ch['url']}',
+      'voiceId': _voiceId,
+      'lineId': lineId,
+    });
+    final u = _extractUrl(r);
+    if (u.isNotEmpty && lineId != null && lineId != _lineId) {
+      // 记住这次用的线路，下次打开默认还用它
+      _lineId = lineId;
+      try {
+        final repo = ref.read(sourceConfigRepositoryProvider);
+        final cfg = await repo.load(s.id, s.type);
+        cfg.selectedLineId = lineId;
+        cfg.values['lineId'] = lineId;
+        await repo.save(cfg);
+      } catch (_) {}
+    }
+    return u;
   }
 
   String _extractUrl(dynamic r) {

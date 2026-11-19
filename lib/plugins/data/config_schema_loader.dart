@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../../core/log/app_logger.dart';
 import '../engine/plugin_engine.dart';
 import '../model/plugin_source.dart';
+import 'login_entry.dart';
 import 'source_config_schema.dart';
 import 'source_repository.dart';
 
@@ -19,12 +20,14 @@ class ConfigSchemaLoader {
   ConfigSchemaLoader(this.repo);
 
   Future<ConfigSchema> load(PluginSource s, PluginEngine engine) async {
-    // 1) manifest
     final manifest = await repo.readManifest(s);
+    final login = LoginEntry.parse(manifest);
+
+    // 1) manifest
     for (final k in const ['config', 'configs', 'settings', 'params', 'fields']) {
       if (!manifest.containsKey(k)) continue;
       final schema = parseConfigSchema(manifest[k], origin: 'manifest');
-      if (!schema.isEmpty) return schema;
+      if (!schema.isEmpty) return _withLogin(schema, login);
     }
 
     // 2) 脚本声明（config 可能是函数，也可能是全局对象，直接试）
@@ -32,7 +35,7 @@ class ConfigSchemaLoader {
       await engine.attach(s);
       final raw = await engine.invoke('config', params: {});
       final schema = parseConfigSchema(raw, origin: 'script');
-      if (!schema.isEmpty) return schema;
+      if (!schema.isEmpty) return _withLogin(schema, login);
     } catch (e) {
       final msg = '$e';
       final silent = msg.contains('未实现') || msg.contains('METHOD_NOT_FOUND');
@@ -48,7 +51,38 @@ class ConfigSchemaLoader {
       voices = (await engine.hasMethod('voices')) == true;
       lines = (await engine.hasMethod('lines')) == true;
     } catch (_) {}
-    return inferredSchema(voices: voices, lines: lines);
+    return _withLogin(inferredSchema(voices: voices, lines: lines), login);
+  }
+
+  /// 源声明了登录地址时，把登录做成一个配置项：
+  /// 已经有 cookie / token 字段的就把它升级成网页登录，没有就补一项在最前面。
+  ConfigSchema _withLogin(ConfigSchema schema, LoginEntry? login) {
+    if (login == null || !login.valid) return schema;
+    if (schema.fields.any((f) => f.isLogin)) return schema;
+
+    ConfigField build(String key) => ConfigField(
+          key: key,
+          name: '登录',
+          type: 'login',
+          loginUrl: login.url,
+          successUrl: login.successUrl,
+          cookieUrl: login.cookieUrl,
+          desc: '点「去登录」跳到源的网页，登录完成后自动同步 Cookie',
+        );
+
+    final idx = schema.fields.indexWhere(
+        (f) => f.key == 'cookie' || f.key == 'loginState' || f.key == 'token');
+    final list = [...schema.fields];
+    if (idx >= 0) {
+      list[idx] = build(schema.fields[idx].key);
+    } else {
+      list.insert(0, build('cookie'));
+    }
+    return ConfigSchema(
+      fields: list,
+      origin: schema.origin == 'none' ? 'manifest' : schema.origin,
+      note: schema.note,
+    );
   }
 
   /// 「从源获取」选项：调源方法（voices/lines/自定义），归一化成 value/label

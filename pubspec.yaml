@@ -44,6 +44,9 @@ dependencies:
 
   # 二期：网络（坚果云 WebDAV 同步、插件联网请求）
   http: 0.13.5
+
+  # 源登录：内置网页登录，登录完自动抓 Cookie
+  webview_flutter: 3.0.4
   # 二期：随身听书风格 JS 插件执行（QuickJS）
   flutter_js: 0.6.0
 

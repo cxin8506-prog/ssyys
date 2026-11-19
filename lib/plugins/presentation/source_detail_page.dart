@@ -9,10 +9,12 @@ import '../../shared/widgets/common.dart';
 import '../data/config_schema_loader.dart';
 import '../data/plugin_providers.dart';
 import '../data/source_config_schema.dart';
+import '../data/web_session.dart';
 import '../engine/jar_plugin_engine.dart';
 import '../engine/js_plugin_engine.dart';
 import '../engine/plugin_engine.dart';
 import '../model/plugin_source.dart';
+import 'login_web_page.dart';
 
 /// 源详情：基本信息 + 源自己声明的配置项 + 试跑。
 ///
@@ -561,6 +563,9 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
 
   Widget _fieldInput(PluginSource s, ConfigField f) {
     switch (f.type) {
+      case 'login':
+        return _loginBlock(s, f);
+
       case 'switch':
         final on = _currentValue(f) == true;
         return Row(
@@ -658,8 +663,172 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     }
   }
 
-  Widget _emptyOptions(ConfigField f) {
-    return Container(
+  /// 网页登录：点「去登录」开 WebView，登录完自动把 Cookie 存成配置值
+  Widget _loginBlock(PluginSource s, ConfigField f) {
+    final cookie = '${_cfg?.values[f.key] ?? ''}'.trim();
+    final logged = cookie.isNotEmpty;
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(logged ? Icons.verified_user : Icons.person_off_outlined,
+                size: 16, color: logged ? primary : context.subtleColor),
+            const SizedBox(width: 6),
+            Text(
+              logged ? '已登录' : '未登录',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: logged ? primary : null,
+              ),
+            ),
+            if (logged) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  WebSession.mask(cookie),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ] else
+              const Spacer(),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _openLogin(s, f),
+                icon: const Icon(Icons.login, size: 16),
+                label: Text(logged ? '重新登录' : '去登录'),
+              ),
+            ),
+            if (logged) ...[
+              const SizedBox(width: 10),
+              OutlinedButton(
+                onPressed: () => _logout(s, f),
+                child: const Text('退出登录'),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 2),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => _manualCookie(f),
+            icon: const Icon(Icons.edit_note, size: 16),
+            label: const Text('手动填写 Cookie'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openLogin(PluginSource s, ConfigField f) async {
+    if (f.loginUrl.isEmpty) {
+      _toast('这个源没有提供登录地址，只能在源里补 login，或手动填 Cookie');
+      return;
+    }
+    final cookie = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => LoginWebPage(
+          title: s.name,
+          url: f.loginUrl,
+          successUrl: f.successUrl,
+          cookieUrl: f.cookieUrl,
+        ),
+      ),
+    );
+    if (cookie == null) return; // 用户关掉了登录页
+    final cfg = _cfg;
+    if (cfg == null) return;
+    if (cookie.isEmpty) {
+      _toast('没有拿到 Cookie，登录可能没完成');
+      return;
+    }
+    cfg.values[f.key] = cookie;
+    cfg.syncLegacy(f.key, cookie);
+    await ref.read(sourceConfigRepositoryProvider).save(cfg);
+    if (!mounted) return;
+    setState(() {});
+    _toast('登录成功，Cookie 已同步给这个源');
+  }
+
+  Future<void> _logout(PluginSource s, ConfigField f) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出登录'),
+        content: const Text('会清掉这个源保存的 Cookie，下次看需要登录的内容要重新登录。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('退出')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final cfg = _cfg;
+    if (cfg == null) return;
+    cfg.values[f.key] = '';
+    cfg.syncLegacy(f.key, '');
+    await ref.read(sourceConfigRepositoryProvider).save(cfg);
+    if (!mounted) return;
+    setState(() {});
+    _toast('已退出登录');
+  }
+
+  Future<void> _manualCookie(ConfigField f) async {
+    final ctrl = TextEditingController(text: '${_cfg?.values[f.key] ?? ''}');
+    final v = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('手动填写 Cookie'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('从浏览器登录后，复制请求里的 Cookie 整段粘进来。',
+                style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              maxLines: 6,
+              minLines: 4,
+              decoration: const InputDecoration(hintText: 'key=value; key2=value2'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    if (v == null) return;
+    final cfg = _cfg;
+    if (cfg == null) return;
+    cfg.values[f.key] = v;
+    cfg.syncLegacy(f.key, v);
+    await ref.read(sourceConfigRepositoryProvider).save(cfg);
+    if (!mounted) return;
+    setState(() {});
+    _toast(v.isEmpty ? '已清空 Cookie' : 'Cookie 已保存');
+  }
+
+  Widget _emptyOptions(ConfigField f) {    return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
@@ -875,11 +1044,32 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     } catch (e) {
       setState(() {
         _testOk = false;
-        _testResult = '调用失败：\n$e';
+        _testResult = '调用失败：\n${_friendlyError('$e')}';
       });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// 把底层异常翻译成能看懂的原因
+  String _friendlyError(String msg) {
+    if (msg.contains('Failed resolution of') ||
+        msg.contains('NoClassDefFoundError') ||
+        msg.contains('ClassNotFoundException')) {
+      final m = RegExp(r'L([\w/$]+);').firstMatch(msg);
+      final cls = m == null ? '' : '${m.group(1)}'.replaceAll('/', '.');
+      return '这个 JAR 插件依赖「我的听书」宿主里的类'
+          '${cls.isEmpty ? '' : '（$cls）'}，\n'
+          '单独加载时会找不到父类，所以调不起来。\n'
+          '需要给这个插件补一份宿主兼容层，或者换用 JS/ZIP 版本的源。';
+    }
+    if (msg.contains('METHOD_NOT_FOUND') || msg.contains('未实现')) {
+      return '这个源没有实现对应的方法（搜索/目录/播放地址）。';
+    }
+    if (msg.contains('SocketException') || msg.contains('TimeoutException')) {
+      return '网络不通或超时：$msg';
+    }
+    return msg;
   }
 
   String _preview(dynamic raw) {
