@@ -68,6 +68,8 @@ class ConfigSchemaLoader {
     } catch (_) {
       voices = null;
     }
-    return inferredSchema(voices: voices, lines: lines);
+    return inferredSchema(
+        voices: voices != null && voices.isNotEmpty,
+        lines: lines != null && lines.isNotEmpty);
   }
 }

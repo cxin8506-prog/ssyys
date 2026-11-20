@@ -1,8 +1,10 @@
 import '../model/plugin_source.dart';
 
 /// 插件引擎统一接口。三个引擎（JS / 通用 JAR / 我的听书格式 JAR）
-/// 各自实现全部方法——基类加方法时，每个引擎必须自己实现，
-/// 不能只改基类不管实现（1.0.2 的教训）。
+/// 都继承这个类：format / attach / invoke / dispose 必须各自实现；
+/// config / lines / voices / content / isCacheable 是具体方法，
+/// 一律委托给 invoke()，引擎直接继承，不用逐个写（1.0.2 的教训是
+/// 加方法不能只改基类不管实现——这 5 个是纯委托，继承即实现）。
 abstract class PluginEngine {
   /// 引擎格式标识：`js` / `jar` / `tingshu`。
   String get format;
@@ -25,10 +27,53 @@ abstract class PluginEngine {
   /// - `lines`：params `{url}`，返回 `[{id, name}]`，由源暴露，App 只做归一化，
   ///   不许写死返回 `[]`。
   /// - `voices`：params `{url}`，返回 `[{id, name}]`，同样不许写死返回 `[]`。
+  /// - `hot` / `hotSearch`：热门搜索，返回词列表（源没提供就抛错，
+  ///   调用方按“源没提供”处理，不显示热门）。
+  /// - `searchVerificationResult`：params `{html, url, keyword}`，
+  ///   只解析当前验证页的 HTML，不发起网络请求；明确识别到结果返回
+  ///   `{verified: true, books, totalPage}`，否则返回 null，
+  ///   调用方走重搜那条路。
   /// - `config`：返回源声明的配置项（原始结构，由 ConfigSchemaLoader 解析）。
   /// - `isCacheable`：返回源能不能缓存（默认 true；视频源一律 false）。
   Future<dynamic> invoke(String method,
       {Map<String, dynamic> params = const <String, dynamic>{}});
+
+  /// 源声明的配置项（原始结构，由 ConfigSchemaLoader 解析）。
+  /// 具体方法：委托给 invoke('config')，三个引擎不用逐个实现。
+  Future<dynamic> config() => invoke('config');
+
+  /// 线路列表：invoke('lines', params: {url})，归一化成 [{value, label}]。
+  Future<List<Map<String, String>>> lines({String url = ''}) async {
+    final r = await invoke('lines', params: <String, dynamic>{'url': url});
+    return _normalizeOptions(r);
+  }
+
+  /// 音色列表：invoke('voices', params: {url})，归一化成 [{value, label}]。
+  Future<List<Map<String, String>>> voices({String url = ''}) async {
+    final r = await invoke('voices', params: <String, dynamic>{'url': url});
+    return _normalizeOptions(r);
+  }
+
+  /// 播放地址：invoke('content', params: {url, voiceId, lineId})。
+  /// lineId 必须传进源，不许丢——切线靠它。
+  /// 返回结果归一化成 Map（不是 Map 就包成 {'url': '$r'}）。
+  Future<Map<String, dynamic>> content(
+      {required String url, String? lineId, String? voiceId}) async {
+    final r = await invoke('content', params: <String, dynamic>{
+      'url': url,
+      'lineId': lineId,
+      'voiceId': voiceId,
+    });
+    if (r is Map) return Map<String, dynamic>.from(r);
+    return <String, dynamic>{'url': '$r'};
+  }
+
+  /// 源能不能缓存：invoke('isCacheable')，返回 bool 就用它，否则默认 true。
+  Future<bool> isCacheable() async {
+    final r = await invoke('isCacheable');
+    if (r is bool) return r;
+    return true;
+  }
 
   /// 源是否实现了某个方法：true / false，null 表示无法判断。
   /// 默认返回 null；引擎有能力判断时重写。
@@ -47,6 +92,33 @@ abstract class PluginEngine {
 
   /// 释放引擎持有的会话/加载器。App 退出或源被删时调。
   Future<void> dispose();
+}
+
+/// 把 invoke('lines' / 'voices') 的返回归一化成 [{value, label}]。
+/// value 取 id/value/key，label 取 name/label/title；
+/// 元素不是 Map 时 value 和 label 都用它本身的字符串。
+/// 注意：这里不能 import config_schema_loader.dart 用它那份
+/// normalizeOptions，会循环依赖，所以本地写一份小的。
+List<Map<String, String>> _normalizeOptions(dynamic raw) {
+  final out = <Map<String, String>>[];
+  if (raw is List) {
+    for (final e in raw) {
+      if (e is Map) {
+        final v = e['value'] ?? e['id'] ?? e['key'];
+        final l = e['label'] ?? e['name'] ?? e['title'] ?? v;
+        if (v != null) {
+          out.add(<String, String>{'value': '$v', 'label': '$l'});
+        }
+      } else if (e != null) {
+        out.add(<String, String>{'value': '$e', 'label': '$e'});
+      }
+    }
+  } else if (raw is Map) {
+    raw.forEach((k, v) {
+      out.add(<String, String>{'value': '$k', 'label': '$v'});
+    });
+  }
+  return out;
 }
 
 /// 源方法名兼容映射：不同插件作者用的函数名不一样，
@@ -97,6 +169,9 @@ class PluginMethods {
     ],
     'lines': <String>['lines', 'lineList', 'getLines', 'videoLines'],
     'voices': <String>['voices', 'voiceList', 'getVoices', 'tones'],
+    'hot': <String>['hotSearch', 'hot', 'hotWords', 'hotKeywords'],
+    'hotSearch': <String>['hotSearch', 'hot', 'hotWords', 'hotKeywords'],
+    'searchVerificationResult': <String>['searchVerificationResult'],
     'config': <String>[
       'config',
       'getConfig',
@@ -119,6 +194,9 @@ class PluginMethods {
     'content': '正文/播放地址',
     'lines': '线路列表',
     'voices': '音色列表',
+    'hot': '热门搜索',
+    'hotSearch': '热门搜索',
+    'searchVerificationResult': '验证结果解析',
     'config': '配置声明',
     'isCacheable': '是否可缓存',
   };

@@ -210,6 +210,7 @@ class _WebDavPlayPageState extends ConsumerState<WebDavPlayPage> {
         sourceId: 'webdav',
         sourceName: 'WebDAV',
         type: 'audio',
+        createdAt: DateTime.now(),
       ));
       await repo.saveChapters(
         bookId,

@@ -18,7 +18,7 @@ import 'plugin_engine.dart';
 ///
 /// 和「我的听书」格式的区别：这里调的是主类自己的静态方法，
 /// 不是 SourceEntry.getSources() 拆出来的源；两个引擎不要混用。
-class JarPluginEngine implements PluginEngine {
+class JarPluginEngine extends PluginEngine {
   static const MethodChannel _channel = MethodChannel('suishou/jar');
 
   final SourceRepository _repo;

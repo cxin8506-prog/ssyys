@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/database/app_database.dart';
+import '../../core/database/library_repository.dart';
 import '../../core/log/app_logger.dart';
 import '../../core/utils/path_utils.dart';
 import '../backup/backup_service.dart';
@@ -244,7 +245,7 @@ class _SyncPageState extends ConsumerState<SyncPage> {
     });
     try {
       final tmp = File(
-          '${PathUtils.appFilesDir.path}${Platform.pathSeparator}backups'
+          '${(await PathUtils.appFilesDir).path}${Platform.pathSeparator}backups'
           '${Platform.pathSeparator}cloud_restore.tmp.zip');
       await tmp.parent.create(recursive: true);
       await _client.download(item.name, tmp);

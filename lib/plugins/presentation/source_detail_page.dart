@@ -35,7 +35,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
   bool _configLoading = true;
   String? _configError;
   final Map<String, TextEditingController> _textCtrls = {};
-  final Map<String, dynamic> _values = {};
+  Map<String, dynamic> _values = {};
   bool _busy = false;
   String? _testResult;
   bool _testOk = true;

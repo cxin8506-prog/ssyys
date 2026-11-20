@@ -85,7 +85,7 @@ Future<void> main() async {
         await audioHandler.stop();
         break;
       case 'todayPlaybackTime':
-        final stats = await fetchListenStats();
+        final stats = await ListenStats.fetchListenStats();
         final today = stats['todaySeconds'];
         final seconds = today is int
             ? today
@@ -154,8 +154,8 @@ final GoRouter _router = GoRouter(
       path: '/source/:id',
       builder: (context, state) {
         final id = state.params['id'] ?? '';
-        final bookUrl = state.queryParameters['bookUrl'] ?? '';
-        final title = state.queryParameters['title'] ?? '';
+        final bookUrl = state.queryParams['bookUrl'] ?? '';
+        final title = state.queryParams['title'] ?? '';
         return SourceBookPage(
           sourceId: id,
           bookUrl: bookUrl,
@@ -166,8 +166,8 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/search',
       builder: (context, state) => SourceSearchPage(
-        type: state.queryParameters['type'] ?? 'audio',
-        initialSourceId: state.queryParameters['sourceId'],
+        type: state.queryParams['type'] ?? 'audio',
+        initialSourceId: state.queryParams['sourceId'],
       ),
     ),
     GoRoute(
@@ -215,10 +215,10 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/video-player',
       builder: (context, state) {
-        final bookKey = state.queryParameters['book'] ?? '';
+        final bookKey = state.queryParams['book'] ?? '';
         final chapter =
-            int.tryParse(state.queryParameters['chapter'] ?? '') ?? 0;
-        final lineId = state.queryParameters['lineId'] ?? '';
+            int.tryParse(state.queryParams['chapter'] ?? '') ?? 0;
+        final lineId = state.queryParams['lineId'] ?? '';
         return _VideoPlayerRouteLoader(
           bookKey: bookKey,
           chapterIndex: chapter,
@@ -399,6 +399,7 @@ class _VideoPlayerRouteLoaderState
       chapterUrl: chapterUrl,
       chapterName: chapterNames[index],
       chapterNames: chapterNames,
+      chapterUrls: chapters.map(_chapterUrl).toList(),
       voiceId: voiceId,
       lines: lines,
       lineId: lineId,
@@ -496,7 +497,7 @@ class _VideoPlayerRouteLoaderState
       future: _future,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
+          return Scaffold(
             body: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -556,6 +557,13 @@ class _VideoPlayerRouteLoaderState
             if (resolved.isEmpty) throw Exception('这条线路没有返回地址');
             return resolved;
           },
+          // 只听声音自动切下一章：按需现解析，不预解析（限时签名会过期）；
+          // 解析失败返回 null，handler 停住。
+          onResolveChapter: (i) async {
+            final m = await t.resolveChapterMedia(i);
+            return (m == null || m.url.isEmpty) ? null : m.url;
+          },
+          onResolveChapterHeaders: (i) => t.headersFor(i),
         );
       },
     );
@@ -581,6 +589,7 @@ class _VideoTarget {
     required this.chapterUrl,
     required this.chapterName,
     required this.chapterNames,
+    required this.chapterUrls,
     required this.voiceId,
     required this.lines,
     required this.lineId,
@@ -597,6 +606,10 @@ class _VideoTarget {
   final String chapterUrl;
   final String chapterName;
   final List<String> chapterNames;
+
+  /// 全部章节的源地址（与 chapterNames 一一对应）：只听声音自动切
+  /// 下一章时按需解析，不预解析（分段地址带限时签名，提前解析会过期）。
+  final List<String> chapterUrls;
   final String voiceId;
   final List<Map<String, dynamic>> lines;
   final String lineId;
@@ -604,6 +617,50 @@ class _VideoTarget {
   final int startAtMs;
   final String path;
   final Map<String, String> headers;
+
+  /// 已解析过的某一章请求头（下标 → 头）：和 resolveChapterMedia
+  /// 同一次解析里拿到的，播下一章时取。
+  final Map<int, Map<String, String>> _chapterHeaders =
+      <int, Map<String, String>>{};
+
+  /// 按需解析一章的可播地址 + 请求头（只听声音自动切下一章用）。
+  /// 解析失败返回 null，调用方停住，不抛错。
+  Future<_ResolvedMedia?> resolveChapterMedia(int index) async {
+    if (index < 0 || index >= chapterUrls.length) return null;
+    final url = chapterUrls[index];
+    if (url.isEmpty) return null;
+    try {
+      final raw = await engine.invoke(
+        'content',
+        params: {
+          'url': url,
+          'voiceId': voiceId,
+          'lineId': lineId,
+        },
+      );
+      var headers = const <String, String>{};
+      if (raw is Map) {
+        final h = raw['headers'];
+        if (h is Map) {
+          headers = h.map((k, v) => MapEntry('$k', '$v'));
+        }
+      }
+      final u = raw is String
+          ? raw
+          : (raw is Map
+              ? '${raw['url'] ?? raw['audioUrl'] ?? raw['src'] ?? raw['playUrl'] ?? ''}'
+              : '');
+      if (u.isEmpty) return null;
+      _chapterHeaders[index] = headers;
+      return _ResolvedMedia(url: u, headers: headers);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 已解析过的某一章请求头；没解析过返回空。
+  Map<String, String> headersFor(int index) =>
+      _chapterHeaders[index] ?? const <String, String>{};
 
   /// 切线路：现调 content 解析同一集的新线地址。
   Future<String> resolveLine(String newLineId) async {
@@ -799,7 +856,8 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
         theme: AppTheme.light(themeColor),
         darkTheme: AppTheme.dark(themeColor, pureBlack),
         themeMode: effectiveMode,
-        routerConfig: _router,
+        routeInformationParser: _router.routeInformationParser,
+        routerDelegate: _router.routerDelegate,
         // 字体大小全站生效（Flutter 3.0 用 textScaleFactor；
         // textScaler 是 Flutter 3.13+ 的 API，3.0 编不过）。
         builder: (context, child) {

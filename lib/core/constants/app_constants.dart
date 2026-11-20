@@ -41,6 +41,7 @@ class AppConstants {
   static const String keyExactSearch = 'exact_search';
   static const String keySearchConcurrency = 'search_concurrency';
   static const String keySearchTimeoutSeconds = 'search_timeout_seconds';
+  static const String keySearchSuggestions = 'search_suggestions_enabled';
 
   // ---------- 设置键：存储 / 缓存 ----------
   static const String keyAutoCache = 'auto_cache';

@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../plugins/model/plugin_source.dart';
+
 /// App 级 provider（U 定义）。
 ///
 /// 约定：每个设置项的默认值都写死在这里，和提示词第六节（六）/
@@ -24,6 +26,14 @@ final shellTabProvider = StateProvider<int>((ref) => 0);
 /// 首页回顶部信号：底栏书源 tab 被重复点时 +1，HomePage 监听到就
 /// 把列表滚回顶部（双击书架回顶部同款做法）。
 final homeScrollToTopProvider = StateProvider<int>((ref) => 0);
+
+/// 当前首页源（发现页读它取分类、底栏读它显示当前源名、书源页读它
+/// 标选中卡片）：null = 还没选源。
+/// 设源写法（统一口径）：调用方直接改 state，不另设 setHomeSource 方法：
+///   ref.read(activeHomeSourceProvider.notifier).state = source;
+/// 其中 source 是 PluginSource（不是 id 字符串）。
+final activeHomeSourceProvider =
+    StateProvider<PluginSource?>((ref) => null);
 
 /// 源顺序：源 ID 列表。不在列表里的排最后，再按名称排（随身听书做法）。
 final sourceOrderProvider = StateProvider<List<String>>((ref) {
@@ -148,6 +158,13 @@ final searchConcurrencyProvider = StateProvider<int>((ref) {
 final searchTimeoutProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);
   return prefs.getInt('search_timeout_seconds') ?? 20;
+});
+
+/// 搜索建议：默认开。输入停 300ms 后出下拉建议（热门词 + 搜索历史里含
+/// 输入词的），词少于 2 个字符不显示；点一条直接搜。
+final searchSuggestionsProvider = StateProvider<bool>((ref) {
+  final prefs = ref.read(sharedPrefsProvider);
+  return prefs.getBool('search_suggestions_enabled') ?? true;
 });
 
 // ------------------------------------------------------------------ 存储

@@ -39,7 +39,7 @@ import '../../features/ua/ua_resolver.dart';
 /// 换 UA 不用重建会话就生效；解析器返回 null（自动选择关了）时，
 /// 手机请求用内置手机 UA、电脑请求用内置电脑 UA——
 /// 绝不能像旧版那样关掉自动选择反而钉死在桌面 UA 上。
-class JsPluginEngine implements PluginEngine {
+class JsPluginEngine extends PluginEngine {
   final SourceRepository _repo;
   final SourceConfigRepository _configRepo;
   final UaResolver _uaResolver;
@@ -327,6 +327,14 @@ class JsPluginEngine implements PluginEngine {
             'typeof (globalThis.__sstsById[${jsonEncode(sstsId)}] || {}).voices !== "undefined" || '
             'typeof (globalThis.__sstsById[${jsonEncode(sstsId)}] || {}).voiceList !== "undefined" || '
             'typeof (globalThis.__sstsById[${jsonEncode(sstsId)}] || {}).getVoices !== "undefined"');
+      case 'hot':
+      case 'hotSearch':
+        // 热门搜索不在随身听书规范里：源对象上有函数或数组才算提供。
+        return session.evalBool(
+            '["hotSearch","hot","hotWords","hotKeywords"].some(function(n){ var v = (globalThis.__sstsById[${jsonEncode(sstsId)}] || {})[n]; return typeof v === "function" || Array.isArray(v); })');
+      case 'searchVerificationResult':
+        return session.evalBool(
+            _sstsFnCheck(sstsId, 'searchVerificationResult'));
       case 'config':
         return session.evalBool(
             'Array.isArray((globalThis.__sstsById[${jsonEncode(sstsId)}] || {}).config)');
@@ -485,6 +493,35 @@ class JsPluginEngine implements PluginEngine {
       case 'voices':
         return _sstsOptions(session, sstsId, 'voices',
             url: '${params['url'] ?? ''}');
+      case 'hot':
+      case 'hotSearch':
+        return _sstsHotWords(session, sstsId);
+      case 'searchVerificationResult':
+        {
+          // 只解析当前验证页的 HTML，不发起网络请求（随身听书文档第 5 节）；
+          // 源没写这个方法就抛错，调用方走重搜那条路。
+          final hasFn = session.evalBool(
+              _sstsFnCheck(sstsId, 'searchVerificationResult'));
+          if (!hasFn) throw Exception('该源不支持验证结果解析');
+          final r = await session.evalSstsMethod(
+              sstsId,
+              'searchVerificationResult',
+              <dynamic>[
+                params['html'] ?? '',
+                params['url'] ?? '',
+                params['keyword'] ?? '',
+              ]);
+          if (r is Map && r['verified'] == true) {
+            final books = _asList(r['books']);
+            if (books.isEmpty) return null;
+            return <String, dynamic>{
+              'verified': true,
+              'books': books,
+              'totalPage': (r['totalPage'] as num?)?.toInt() ?? 1,
+            };
+          }
+          return null;
+        }
       case 'config':
         {
           final raw = session.evalJson(
@@ -528,6 +565,68 @@ class JsPluginEngine implements PluginEngine {
     return const <Map<String, dynamic>>[];
   }
 
+  /// 热门搜索：随身听书规范里没有这个方法，所以这里是“探”不是“写死”：
+  /// 先看源对象上有没有 hotSearch / hot / hotWords / hotKeywords
+  /// （函数或数组），有就调它/读它并归一化成词；都没有就抛错，
+  /// 调用方（搜索页）按“源没提供”处理，不显示热门。
+  Future<List<String>> _sstsHotWords(
+      _JsSession session, String sstsId) async {
+    const names = <String>['hotSearch', 'hot', 'hotWords', 'hotKeywords'];
+    final obj = '(globalThis.__sstsById[${jsonEncode(sstsId)}] || {})';
+    for (final name in names) {
+      try {
+        final isFn = session.evalBool(
+            'typeof $obj[${jsonEncode(name)}] === "function"');
+        if (isFn) {
+          final r =
+              await session.evalSstsMethod(sstsId, name, <dynamic>[]);
+          final words = _normalizeHotWords(r);
+          if (words.isNotEmpty) return words;
+          continue;
+        }
+        final raw = session.evalJson(
+            'JSON.stringify($obj[${jsonEncode(name)}] || null)');
+        final words = _normalizeHotWords(raw);
+        if (words.isNotEmpty) return words;
+      } catch (_) {}
+    }
+    throw Exception('该源不支持热门搜索');
+  }
+
+  /// 热门词归一化：数组里的字符串直接取；Map 取 list/data/hot/words；
+  /// 每项是 Map 就取 name/title/keyword；去重、去空。
+  List<String> _normalizeHotWords(dynamic raw) {
+    final list = raw is List
+        ? raw
+        : (raw is Map
+            ? (raw['list'] ?? raw['data'] ?? raw['hot'] ?? raw['words'])
+            : null);
+    if (list is! List) return const <String>[];
+    final out = <String>[];
+    for (final e in list) {
+      final w = e is Map
+          ? '${e['name'] ?? e['title'] ?? e['keyword'] ?? ''}'
+          : '$e';
+      final t = w.trim();
+      if (t.isNotEmpty && !out.contains(t)) out.add(t);
+    }
+    return out;
+  }
+
+  /// 旧式全局函数的热门词数组：函数没找到时探全局数组。
+  Future<List<String>> _legacyHotWords(_JsSession session) async {
+    const names = <String>['hotSearch', 'hot', 'hotWords', 'hotKeywords'];
+    for (final name in names) {
+      try {
+        final raw = session.evalJson(
+            'JSON.stringify(globalThis[${jsonEncode(name)}] || null)');
+        final words = _normalizeHotWords(raw);
+        if (words.isNotEmpty) return words;
+      } catch (_) {}
+    }
+    return const <String>[];
+  }
+
   Future<dynamic> _invokeLegacy(
       _JsSession session, String method, Map<String, dynamic> params) async {
     final names = PluginMethods.aliases[method] ?? <String>[method];
@@ -545,6 +644,11 @@ class JsPluginEngine implements PluginEngine {
       } catch (_) {}
     }
     if (found == null) {
+      // 热门搜索：旧式插件可能把热门词写成全局数组而不是函数，先探数组。
+      if (method == 'hot' || method == 'hotSearch') {
+        final words = await _legacyHotWords(session);
+        if (words.isNotEmpty) return words;
+      }
       if (method == 'recommend') return const <Map<String, dynamic>>[];
       if (method == 'lines' || method == 'voices') {
         return const <Map<String, dynamic>>[];
@@ -578,6 +682,12 @@ class JsPluginEngine implements PluginEngine {
       case 'lines':
       case 'voices':
         return <dynamic>[params['url'] ?? ''];
+      case 'searchVerificationResult':
+        return <dynamic>[
+          params['html'] ?? '',
+          params['url'] ?? '',
+          params['keyword'] ?? '',
+        ];
       default:
         return <dynamic>[];
     }
@@ -659,6 +769,20 @@ class JsPluginEngine implements PluginEngine {
       case 'lines':
       case 'voices':
         return _normalizeOptions(data);
+      case 'hot':
+      case 'hotSearch':
+        return _normalizeHotWords(data);
+      case 'searchVerificationResult':
+        if (data is Map && data['verified'] == true) {
+          final books = _asList(data['books']);
+          if (books.isEmpty) return null;
+          return <String, dynamic>{
+            'verified': true,
+            'books': books,
+            'totalPage': (data['totalPage'] as num?)?.toInt() ?? 1,
+          };
+        }
+        return null;
       case 'config':
         return data ?? const <dynamic>[];
       default:

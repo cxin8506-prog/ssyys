@@ -25,7 +25,7 @@ import 'plugin_engine.dart';
 ///    原生侧反射探源有没有 lines()/lineList()/getLines()/videoLines()
 ///   （voices 同理），有就归一化返回，没有才返回空——空是探出来的结果，
 ///    不是写死的占位。源本身没有线路概念时，返回空是诚实的。
-class TingShuPluginEngine implements PluginEngine {
+class TingShuPluginEngine extends PluginEngine {
   final SourceRepository _repo;
   final UaResolver _uaResolver;
   final SourceConfigRepository? _configRepo;

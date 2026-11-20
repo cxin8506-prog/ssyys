@@ -98,13 +98,13 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
             ),
           ),
           Expanded(
-            child: FutureBuilder<List<MediaItem>>(
+            child: FutureBuilder<List<TimelineEntry>>(
               future: _load(repo),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final all = snapshot.data ?? const <MediaItem>[];
+                final all = snapshot.data ?? const <TimelineEntry>[];
                 final items = _sorted(_filtered(all));
                 if (items.isEmpty) {
                   return EmptyState(
@@ -117,9 +117,9 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
                   );
                 }
                 final totalSeconds =
-                    items.fold<int>(0, (s, e) => s + e.lastPositionMs) ~/ 1000;
-                final top3 = List<MediaItem>.from(items)
-                  ..sort((a, b) => b.lastPositionMs.compareTo(a.lastPositionMs));
+                    items.fold<int>(0, (s, e) => s + e.positionMs) ~/ 1000;
+                final top3 = List<TimelineEntry>.from(items)
+                  ..sort((a, b) => b.positionMs.compareTo(a.positionMs));
                 return ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                   itemCount: items.length + 2,
@@ -149,15 +149,15 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     );
   }
 
-  Future<List<MediaItem>> _load(LibraryRepository repo) async {
+  Future<List<TimelineEntry>> _load(LibraryRepository repo) async {
     try {
       return await repo.getHistory(type: _type);
     } catch (_) {
-      return const <MediaItem>[];
+      return const <TimelineEntry>[];
     }
   }
 
-  List<MediaItem> _filtered(List<MediaItem> items) {
+  List<TimelineEntry> _filtered(List<TimelineEntry> items) {
     if (_query.isEmpty) return items;
     final q = _query.toLowerCase();
     return items.where((e) {
@@ -167,49 +167,50 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     }).toList();
   }
 
-  List<MediaItem> _sorted(List<MediaItem> items) {
-    final list = List<MediaItem>.from(items);
+  List<TimelineEntry> _sorted(List<TimelineEntry> items) {
+    final list = List<TimelineEntry>.from(items);
     switch (_sort) {
       case 'name':
         list.sort((a, b) => a.title.compareTo(b.title));
         break;
       case 'duration':
-        list.sort((a, b) => b.lastDurationMs.compareTo(a.lastDurationMs));
+        // TimelineEntry 里没有总时长，只有上次听到的位置（positionMs），
+        // 阅读时长档按位置倒序排。
+        list.sort((a, b) => b.positionMs.compareTo(a.positionMs));
         break;
       default: // recent
-        list.sort((a, b) {
-          final at = a.lastPlayedAt;
-          final bt = b.lastPlayedAt;
-          if (at == null && bt == null) return 0;
-          if (at == null) return 1;
-          if (bt == null) return -1;
-          return bt.compareTo(at);
-        });
+        list.sort((a, b) => b.visitedAt.compareTo(a.visitedAt));
     }
     return list;
   }
 
-  String _bookUrlOf(MediaItem item) {
-    final parts = item.id.split('|');
+  String _bookUrlOf(TimelineEntry item) {
+    final parts = item.bookId.split('|');
     if (parts.length >= 2) return parts.sublist(1).join('|');
     return '';
   }
 
-  void _open(MediaItem item) {
+  /// 从 bookId（约定 'sourceId|bookUrl'）里还原 sourceId，见 home_page。
+  String _sourceIdOf(TimelineEntry item) {
+    final parts = item.bookId.split('|');
+    if (parts.length >= 2) return parts.first;
+    return '';
+  }
+
+  void _open(TimelineEntry item) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SourceBookPage(
-          sourceId: item.sourceId,
+          sourceId: _sourceIdOf(item),
           bookUrl: _bookUrlOf(item),
           title: item.title,
-          coverUrl: item.coverUrl,
           author: item.author,
         ),
       ),
     );
   }
 
-  Future<void> _deleteOne(MediaItem item) async {
+  Future<void> _deleteOne(TimelineEntry item) async {
     final yes = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -229,7 +230,7 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     );
     if (yes != true) return;
     try {
-      await ref.read(libraryRepositoryProvider).deleteHistoryByBook(item.id);
+      await ref.read(libraryRepositoryProvider).deleteHistoryByBook(item.bookId);
     } catch (_) {}
     if (!mounted) return;
     setState(() {});
@@ -351,7 +352,7 @@ class _SortMenu extends StatelessWidget {
 
 class _SummaryCard extends StatelessWidget {
   final String totalText;
-  final List<MediaItem> top3;
+  final List<TimelineEntry> top3;
 
   const _SummaryCard({required this.totalText, required this.top3});
 
@@ -374,7 +375,7 @@ class _SummaryCard extends StatelessWidget {
               const SizedBox(height: 4),
               for (var i = 0; i < top3.length; i++)
                 Text(
-                  '${i + 1}. ${top3[i].title}（${formatListen(top3[i].lastPositionMs ~/ 1000)}）',
+                  '${i + 1}. ${top3[i].title}（${formatListen(top3[i].positionMs ~/ 1000)}）',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -391,7 +392,7 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _HistoryRow extends StatelessWidget {
-  final MediaItem item;
+  final TimelineEntry item;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
@@ -404,7 +405,7 @@ class _HistoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final author = item.author ?? '';
-    final chapter = _chapterLabel(item.lastChapterUrl);
+    final chapter = _chapterLabel(item.chapterUrl);
     return InkWell(
       onTap: onTap,
       onLongPress: () async {
@@ -432,7 +433,7 @@ class _HistoryRow extends StatelessWidget {
         child: Row(
           children: [
             CoverImage(
-              url: item.coverUrl,
+              url: null,
               title: item.title,
               width: 48,
               height: 64,
@@ -466,10 +467,9 @@ class _HistoryRow extends StatelessWidget {
                   Text(
                     // 行里显示日期时间，不只显示进度时间。
                     [
-                      if (item.lastPlayedAt != null)
-                        formatDateTime(item.lastPlayedAt),
-                      if (item.lastPositionMs > 0)
-                        '听到 ${formatDuration(item.lastPositionMs)}',
+                      formatDateTime(item.visitedAt),
+                      if (item.positionMs > 0)
+                        '听到 ${formatDuration(item.positionMs)}',
                     ].join(' · '),
                     style: TextStyle(fontSize: 12, color: context.subtleColor),
                   ),
@@ -487,7 +487,7 @@ class _HistoryRow extends StatelessWidget {
     );
   }
 
-  /// 章节名：lastChapterUrl 是地址时只取最后一段当提示，不编章名。
+  /// 章节名：chapterUrl 是地址时只取最后一段当提示，不编章名。
   String _chapterLabel(String? url) {
     if (url == null || url.isEmpty) return '';
     final clean = url.split('?').first;

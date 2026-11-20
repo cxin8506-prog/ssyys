@@ -9,6 +9,10 @@ import 'package:webview_flutter/webview_flutter.dart';
 /// 关闭时不报“登录成功”：调用方关掉页面后要重新查登录状态
 ///（引擎 loginInfo / checkLogin），没拿到登录态别报成功。
 /// 旧坑：关掉登录页无条件 toast“Cookie 已同步”是错的。
+///
+/// 注意：pubspec 锁的是 webview_flutter 3.0.4，用 3.x 的 WebView 写法
+///（initialUrl / JavascriptMode / navigationDelegate 回调），不要写成
+/// 4.x 的 WebViewController / WebViewWidget。
 class LoginWebPage extends StatefulWidget {
   final String url;
   final String title;
@@ -26,23 +30,7 @@ class LoginWebPage extends StatefulWidget {
 }
 
 class _LoginWebPageState extends State<LoginWebPage> {
-  late final WebViewController _controller;
   bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (_) {
-            if (mounted) setState(() => _loading = false);
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(widget.url));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -69,7 +57,17 @@ class _LoginWebPageState extends State<LoginWebPage> {
             ),
           ),
           if (_loading) const LinearProgressIndicator(),
-          Expanded(child: WebViewWidget(controller: _controller)),
+          Expanded(
+            child: WebView(
+              initialUrl: widget.url,
+              javascriptMode: JavascriptMode.unrestricted,
+              navigationDelegate: (request) =>
+                  NavigationDecision.navigate,
+              onPageFinished: (_) {
+                if (mounted) setState(() => _loading = false);
+              },
+            ),
+          ),
         ],
       ),
     );

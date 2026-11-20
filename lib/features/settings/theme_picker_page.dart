@@ -320,12 +320,13 @@ class _PreviewCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                CoverImage(url: null, title: '示例书名', width: 48, height: 64),
+                const CoverImage(
+                    url: null, title: '示例书名', width: 48, height: 64),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                    children: const [
                       Text(
                         '示例书名',
                         style: TextStyle(

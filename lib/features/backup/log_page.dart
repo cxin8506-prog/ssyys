@@ -39,7 +39,9 @@ class _LogPageState extends ConsumerState<LogPage> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          final logs = snapshot.data ?? const [];
+          // getLogs() 返回 List<Log>，但生成的数据库类缺失时
+          // snapshot.data 会退化成 Object，先按 List 取。
+          final logs = (snapshot.data as List?) ?? const [];
           if (logs.isEmpty) {
             return const Center(child: Text('暂无日志'));
           }

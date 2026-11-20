@@ -17,7 +17,8 @@ import '../../shared/widgets/common.dart';
 ///   必须写 color，dropdownColor 钉死主题表面色；源名不截断。
 /// - 点书卡进详情整页（SourceBookPage），不要只弹详情弹窗。
 /// - 源没有分类时不留白，显示推荐 fallback。
-/// - 源切换会记住（setHomeSource），下次打开发现页默认用这个源。
+/// - 源切换走 activeHomeSourceProvider（直接改 state），下次打开发现页
+///   默认用这个源（仅本次运行内记忆，不落盘）。
 class DiscoverPage extends ConsumerStatefulWidget {
   const DiscoverPage({super.key});
 
@@ -119,7 +120,7 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
                   sourcesAsync: sourcesAsync,
                   videoEnabled: videoEnabled,
                   onChanged: (s) {
-                    setHomeSource(ref, s.id);
+                    ref.read(activeHomeSourceProvider.notifier).state = s;
                   },
                 ),
                 if (_loadingCategories)

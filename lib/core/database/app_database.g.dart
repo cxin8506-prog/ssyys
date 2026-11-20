@@ -1,18 +1,8 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
-//
-// 注意：沙箱无 build_runner，本文件是按 drift 2.4.0 生成代码结构手写的等价实现，
-// 对应 lib/core/database/tables.dart 的 9 张表。CI 有 build_runner 时应以
-// `flutter pub run build_runner build` 重新生成并核对；手写版省略了
-// fromJson/toJson/copyWith/hashCode/==/toString 这些纯便利方法（不影响 drift 运行）。
 
 part of 'app_database.dart';
 
 // ignore_for_file: type=lint
-
-// ---------------------------------------------------------------------------
-// MediaItems
-// ---------------------------------------------------------------------------
-
 class MediaItem extends DataClass implements Insertable<MediaItem> {
   final String id;
   final String title;
@@ -96,6 +86,136 @@ class MediaItem extends DataClass implements Insertable<MediaItem> {
       createdAt: Value(createdAt),
     );
   }
+
+  factory MediaItem.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MediaItem(
+      id: serializer.fromJson<String>(json['id']),
+      title: serializer.fromJson<String>(json['title']),
+      author: serializer.fromJson<String?>(json['author']),
+      coverUrl: serializer.fromJson<String?>(json['coverUrl']),
+      sourceId: serializer.fromJson<String>(json['sourceId']),
+      sourceName: serializer.fromJson<String>(json['sourceName']),
+      type: serializer.fromJson<String>(json['type']),
+      lastChapterUrl: serializer.fromJson<String?>(json['lastChapterUrl']),
+      lastPositionMs: serializer.fromJson<int>(json['lastPositionMs']),
+      lastDurationMs: serializer.fromJson<int>(json['lastDurationMs']),
+      isFinished: serializer.fromJson<bool>(json['isFinished']),
+      isFavorite: serializer.fromJson<bool>(json['isFavorite']),
+      lastPlayedAt: serializer.fromJson<DateTime?>(json['lastPlayedAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'title': serializer.toJson<String>(title),
+      'author': serializer.toJson<String?>(author),
+      'coverUrl': serializer.toJson<String?>(coverUrl),
+      'sourceId': serializer.toJson<String>(sourceId),
+      'sourceName': serializer.toJson<String>(sourceName),
+      'type': serializer.toJson<String>(type),
+      'lastChapterUrl': serializer.toJson<String?>(lastChapterUrl),
+      'lastPositionMs': serializer.toJson<int>(lastPositionMs),
+      'lastDurationMs': serializer.toJson<int>(lastDurationMs),
+      'isFinished': serializer.toJson<bool>(isFinished),
+      'isFavorite': serializer.toJson<bool>(isFavorite),
+      'lastPlayedAt': serializer.toJson<DateTime?>(lastPlayedAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  MediaItem copyWith(
+          {String? id,
+          String? title,
+          Value<String?> author = const Value.absent(),
+          Value<String?> coverUrl = const Value.absent(),
+          String? sourceId,
+          String? sourceName,
+          String? type,
+          Value<String?> lastChapterUrl = const Value.absent(),
+          int? lastPositionMs,
+          int? lastDurationMs,
+          bool? isFinished,
+          bool? isFavorite,
+          Value<DateTime?> lastPlayedAt = const Value.absent(),
+          DateTime? createdAt}) =>
+      MediaItem(
+        id: id ?? this.id,
+        title: title ?? this.title,
+        author: author.present ? author.value : this.author,
+        coverUrl: coverUrl.present ? coverUrl.value : this.coverUrl,
+        sourceId: sourceId ?? this.sourceId,
+        sourceName: sourceName ?? this.sourceName,
+        type: type ?? this.type,
+        lastChapterUrl:
+            lastChapterUrl.present ? lastChapterUrl.value : this.lastChapterUrl,
+        lastPositionMs: lastPositionMs ?? this.lastPositionMs,
+        lastDurationMs: lastDurationMs ?? this.lastDurationMs,
+        isFinished: isFinished ?? this.isFinished,
+        isFavorite: isFavorite ?? this.isFavorite,
+        lastPlayedAt:
+            lastPlayedAt.present ? lastPlayedAt.value : this.lastPlayedAt,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('MediaItem(')
+          ..write('id: $id, ')
+          ..write('title: $title, ')
+          ..write('author: $author, ')
+          ..write('coverUrl: $coverUrl, ')
+          ..write('sourceId: $sourceId, ')
+          ..write('sourceName: $sourceName, ')
+          ..write('type: $type, ')
+          ..write('lastChapterUrl: $lastChapterUrl, ')
+          ..write('lastPositionMs: $lastPositionMs, ')
+          ..write('lastDurationMs: $lastDurationMs, ')
+          ..write('isFinished: $isFinished, ')
+          ..write('isFavorite: $isFavorite, ')
+          ..write('lastPlayedAt: $lastPlayedAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      id,
+      title,
+      author,
+      coverUrl,
+      sourceId,
+      sourceName,
+      type,
+      lastChapterUrl,
+      lastPositionMs,
+      lastDurationMs,
+      isFinished,
+      isFavorite,
+      lastPlayedAt,
+      createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MediaItem &&
+          other.id == this.id &&
+          other.title == this.title &&
+          other.author == this.author &&
+          other.coverUrl == this.coverUrl &&
+          other.sourceId == this.sourceId &&
+          other.sourceName == this.sourceName &&
+          other.type == this.type &&
+          other.lastChapterUrl == this.lastChapterUrl &&
+          other.lastPositionMs == this.lastPositionMs &&
+          other.lastDurationMs == this.lastDurationMs &&
+          other.isFinished == this.isFinished &&
+          other.isFavorite == this.isFavorite &&
+          other.lastPlayedAt == this.lastPlayedAt &&
+          other.createdAt == this.createdAt);
 }
 
 class MediaItemsCompanion extends UpdateCompanion<MediaItem> {
@@ -184,6 +304,39 @@ class MediaItemsCompanion extends UpdateCompanion<MediaItem> {
     });
   }
 
+  MediaItemsCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? title,
+      Value<String?>? author,
+      Value<String?>? coverUrl,
+      Value<String>? sourceId,
+      Value<String>? sourceName,
+      Value<String>? type,
+      Value<String?>? lastChapterUrl,
+      Value<int>? lastPositionMs,
+      Value<int>? lastDurationMs,
+      Value<bool>? isFinished,
+      Value<bool>? isFavorite,
+      Value<DateTime?>? lastPlayedAt,
+      Value<DateTime>? createdAt}) {
+    return MediaItemsCompanion(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      author: author ?? this.author,
+      coverUrl: coverUrl ?? this.coverUrl,
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+      type: type ?? this.type,
+      lastChapterUrl: lastChapterUrl ?? this.lastChapterUrl,
+      lastPositionMs: lastPositionMs ?? this.lastPositionMs,
+      lastDurationMs: lastDurationMs ?? this.lastDurationMs,
+      isFinished: isFinished ?? this.isFinished,
+      isFavorite: isFavorite ?? this.isFavorite,
+      lastPlayedAt: lastPlayedAt ?? this.lastPlayedAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -231,6 +384,27 @@ class MediaItemsCompanion extends UpdateCompanion<MediaItem> {
     }
     return map;
   }
+
+  @override
+  String toString() {
+    return (StringBuffer('MediaItemsCompanion(')
+          ..write('id: $id, ')
+          ..write('title: $title, ')
+          ..write('author: $author, ')
+          ..write('coverUrl: $coverUrl, ')
+          ..write('sourceId: $sourceId, ')
+          ..write('sourceName: $sourceName, ')
+          ..write('type: $type, ')
+          ..write('lastChapterUrl: $lastChapterUrl, ')
+          ..write('lastPositionMs: $lastPositionMs, ')
+          ..write('lastDurationMs: $lastDurationMs, ')
+          ..write('isFinished: $isFinished, ')
+          ..write('isFavorite: $isFavorite, ')
+          ..write('lastPlayedAt: $lastPlayedAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
 }
 
 class $MediaItemsTable extends MediaItems
@@ -249,8 +423,7 @@ class $MediaItemsTable extends MediaItems
   late final GeneratedColumn<String> title = GeneratedColumn<String>(
       'title', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _authorMeta =
-      const VerificationMeta('author');
+  static const VerificationMeta _authorMeta = const VerificationMeta('author');
   @override
   late final GeneratedColumn<String> author = GeneratedColumn<String>(
       'author', aliasedName, true,
@@ -303,35 +476,35 @@ class $MediaItemsTable extends MediaItems
   static const VerificationMeta _isFinishedMeta =
       const VerificationMeta('isFinished');
   @override
-  late final GeneratedColumn<bool> isFinished = GeneratedColumn<bool>(
-      'is_finished', aliasedName, false,
-      type: DriftSqlType.bool,
-      requiredDuringInsert: false,
-      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
-        SqlDialect.sqlite: 'CHECK ("is_finished" IN (0, 1))',
-        SqlDialect.mysql: '',
-        SqlDialect.postgres: '',
-      }),
-      defaultValue: const Constant(false));
+  late final GeneratedColumn<bool> isFinished =
+      GeneratedColumn<bool>('is_finished', aliasedName, false,
+          type: DriftSqlType.bool,
+          requiredDuringInsert: false,
+          defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+            SqlDialect.sqlite: 'CHECK ("is_finished" IN (0, 1))',
+            SqlDialect.mysql: '',
+            SqlDialect.postgres: '',
+          }),
+          defaultValue: const Constant(false));
   static const VerificationMeta _isFavoriteMeta =
       const VerificationMeta('isFavorite');
   @override
-  late final GeneratedColumn<bool> isFavorite = GeneratedColumn<bool>(
-      'is_favorite', aliasedName, false,
-      type: DriftSqlType.bool,
-      requiredDuringInsert: false,
-      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
-        SqlDialect.sqlite: 'CHECK ("is_favorite" IN (0, 1))',
-        SqlDialect.mysql: '',
-        SqlDialect.postgres: '',
-      }),
-      defaultValue: const Constant(false));
+  late final GeneratedColumn<bool> isFavorite =
+      GeneratedColumn<bool>('is_favorite', aliasedName, false,
+          type: DriftSqlType.bool,
+          requiredDuringInsert: false,
+          defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+            SqlDialect.sqlite: 'CHECK ("is_favorite" IN (0, 1))',
+            SqlDialect.mysql: '',
+            SqlDialect.postgres: '',
+          }),
+          defaultValue: const Constant(false));
   static const VerificationMeta _lastPlayedAtMeta =
       const VerificationMeta('lastPlayedAt');
   @override
-  late final GeneratedColumn<DateTime> lastPlayedAt =
-      GeneratedColumn<DateTime>('last_played_at', aliasedName, true,
-          type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  late final GeneratedColumn<DateTime> lastPlayedAt = GeneratedColumn<DateTime>(
+      'last_played_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
   static const VerificationMeta _createdAtMeta =
       const VerificationMeta('createdAt');
   @override
@@ -422,12 +595,16 @@ class $MediaItemsTable extends MediaItems
               data['last_duration_ms']!, _lastDurationMsMeta));
     }
     if (data.containsKey('is_finished')) {
-      context.handle(_isFinishedMeta,
-          isFinished.isAcceptableOrUnknown(data['is_finished']!, _isFinishedMeta));
+      context.handle(
+          _isFinishedMeta,
+          isFinished.isAcceptableOrUnknown(
+              data['is_finished']!, _isFinishedMeta));
     }
     if (data.containsKey('is_favorite')) {
-      context.handle(_isFavoriteMeta,
-          isFavorite.isAcceptableOrUnknown(data['is_favorite']!, _isFavoriteMeta));
+      context.handle(
+          _isFavoriteMeta,
+          isFavorite.isAcceptableOrUnknown(
+              data['is_favorite']!, _isFavoriteMeta));
     }
     if (data.containsKey('last_played_at')) {
       context.handle(
@@ -456,28 +633,28 @@ class $MediaItemsTable extends MediaItems
           .read(DriftSqlType.string, data['${effectivePrefix}title'])!,
       author: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}author']),
-      coverUrl: attachedDatabase.typeMapping.read(
-          DriftSqlType.string, data['${effectivePrefix}cover_url']),
+      coverUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}cover_url']),
       sourceId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}source_id'])!,
-      sourceName: attachedDatabase.typeMapping.read(
-          DriftSqlType.string, data['${effectivePrefix}source_name'])!,
+      sourceName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}source_name'])!,
       type: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
       lastChapterUrl: attachedDatabase.typeMapping.read(
           DriftSqlType.string, data['${effectivePrefix}last_chapter_url']),
-      lastPositionMs: attachedDatabase.typeMapping.read(
-          DriftSqlType.int, data['${effectivePrefix}last_position_ms'])!,
-      lastDurationMs: attachedDatabase.typeMapping.read(
-          DriftSqlType.int, data['${effectivePrefix}last_duration_ms'])!,
-      isFinished: attachedDatabase.typeMapping.read(
-          DriftSqlType.bool, data['${effectivePrefix}is_finished'])!,
-      isFavorite: attachedDatabase.typeMapping.read(
-          DriftSqlType.bool, data['${effectivePrefix}is_favorite'])!,
+      lastPositionMs: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}last_position_ms'])!,
+      lastDurationMs: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}last_duration_ms'])!,
+      isFinished: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_finished'])!,
+      isFavorite: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_favorite'])!,
       lastPlayedAt: attachedDatabase.typeMapping.read(
           DriftSqlType.dateTime, data['${effectivePrefix}last_played_at']),
-      createdAt: attachedDatabase.typeMapping.read(
-          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -486,10 +663,6 @@ class $MediaItemsTable extends MediaItems
     return $MediaItemsTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Chapters
-// ---------------------------------------------------------------------------
 
 class Chapter extends DataClass implements Insertable<Chapter> {
   final String id;
@@ -533,6 +706,73 @@ class Chapter extends DataClass implements Insertable<Chapter> {
           : Value(durationMs),
     );
   }
+
+  factory Chapter.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Chapter(
+      id: serializer.fromJson<String>(json['id']),
+      itemId: serializer.fromJson<String>(json['itemId']),
+      title: serializer.fromJson<String>(json['title']),
+      url: serializer.fromJson<String?>(json['url']),
+      orderIndex: serializer.fromJson<int>(json['orderIndex']),
+      durationMs: serializer.fromJson<int?>(json['durationMs']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'itemId': serializer.toJson<String>(itemId),
+      'title': serializer.toJson<String>(title),
+      'url': serializer.toJson<String?>(url),
+      'orderIndex': serializer.toJson<int>(orderIndex),
+      'durationMs': serializer.toJson<int?>(durationMs),
+    };
+  }
+
+  Chapter copyWith(
+          {String? id,
+          String? itemId,
+          String? title,
+          Value<String?> url = const Value.absent(),
+          int? orderIndex,
+          Value<int?> durationMs = const Value.absent()}) =>
+      Chapter(
+        id: id ?? this.id,
+        itemId: itemId ?? this.itemId,
+        title: title ?? this.title,
+        url: url.present ? url.value : this.url,
+        orderIndex: orderIndex ?? this.orderIndex,
+        durationMs: durationMs.present ? durationMs.value : this.durationMs,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('Chapter(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('title: $title, ')
+          ..write('url: $url, ')
+          ..write('orderIndex: $orderIndex, ')
+          ..write('durationMs: $durationMs')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, itemId, title, url, orderIndex, durationMs);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Chapter &&
+          other.id == this.id &&
+          other.itemId == this.itemId &&
+          other.title == this.title &&
+          other.url == this.url &&
+          other.orderIndex == this.orderIndex &&
+          other.durationMs == this.durationMs);
 }
 
 class ChaptersCompanion extends UpdateCompanion<Chapter> {
@@ -579,6 +819,23 @@ class ChaptersCompanion extends UpdateCompanion<Chapter> {
     });
   }
 
+  ChaptersCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? itemId,
+      Value<String>? title,
+      Value<String?>? url,
+      Value<int>? orderIndex,
+      Value<int?>? durationMs}) {
+    return ChaptersCompanion(
+      id: id ?? this.id,
+      itemId: itemId ?? this.itemId,
+      title: title ?? this.title,
+      url: url ?? this.url,
+      orderIndex: orderIndex ?? this.orderIndex,
+      durationMs: durationMs ?? this.durationMs,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -601,6 +858,19 @@ class ChaptersCompanion extends UpdateCompanion<Chapter> {
       map['duration_ms'] = Variable<int>(durationMs.value);
     }
     return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ChaptersCompanion(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('title: $title, ')
+          ..write('url: $url, ')
+          ..write('orderIndex: $orderIndex, ')
+          ..write('durationMs: $durationMs')
+          ..write(')'))
+        .toString();
   }
 }
 
@@ -674,17 +944,22 @@ class $ChaptersTable extends Chapters with TableInfo<$ChaptersTable, Chapter> {
       context.missing(_titleMeta);
     }
     if (data.containsKey('url')) {
-      context.handle(_urlMeta, url.isAcceptableOrUnknown(data['url']!, _urlMeta));
+      context.handle(
+          _urlMeta, url.isAcceptableOrUnknown(data['url']!, _urlMeta));
     }
     if (data.containsKey('order_index')) {
-      context.handle(_orderIndexMeta,
-          orderIndex.isAcceptableOrUnknown(data['order_index']!, _orderIndexMeta));
+      context.handle(
+          _orderIndexMeta,
+          orderIndex.isAcceptableOrUnknown(
+              data['order_index']!, _orderIndexMeta));
     } else if (isInserting) {
       context.missing(_orderIndexMeta);
     }
     if (data.containsKey('duration_ms')) {
-      context.handle(_durationMsMeta,
-          durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta));
+      context.handle(
+          _durationMsMeta,
+          durationMs.isAcceptableOrUnknown(
+              data['duration_ms']!, _durationMsMeta));
     }
     return context;
   }
@@ -715,10 +990,6 @@ class $ChaptersTable extends Chapters with TableInfo<$ChaptersTable, Chapter> {
     return $ChaptersTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Progress
-// ---------------------------------------------------------------------------
 
 class Progres extends DataClass implements Insertable<Progres> {
   final String itemId;
@@ -756,6 +1027,73 @@ class Progres extends DataClass implements Insertable<Progres> {
       updatedAt: Value(updatedAt),
     );
   }
+
+  factory Progres.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Progres(
+      itemId: serializer.fromJson<String>(json['itemId']),
+      chapterUrl: serializer.fromJson<String>(json['chapterUrl']),
+      positionMs: serializer.fromJson<int>(json['positionMs']),
+      durationMs: serializer.fromJson<int>(json['durationMs']),
+      isFinished: serializer.fromJson<bool>(json['isFinished']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'itemId': serializer.toJson<String>(itemId),
+      'chapterUrl': serializer.toJson<String>(chapterUrl),
+      'positionMs': serializer.toJson<int>(positionMs),
+      'durationMs': serializer.toJson<int>(durationMs),
+      'isFinished': serializer.toJson<bool>(isFinished),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  Progres copyWith(
+          {String? itemId,
+          String? chapterUrl,
+          int? positionMs,
+          int? durationMs,
+          bool? isFinished,
+          DateTime? updatedAt}) =>
+      Progres(
+        itemId: itemId ?? this.itemId,
+        chapterUrl: chapterUrl ?? this.chapterUrl,
+        positionMs: positionMs ?? this.positionMs,
+        durationMs: durationMs ?? this.durationMs,
+        isFinished: isFinished ?? this.isFinished,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('Progres(')
+          ..write('itemId: $itemId, ')
+          ..write('chapterUrl: $chapterUrl, ')
+          ..write('positionMs: $positionMs, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('isFinished: $isFinished, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      itemId, chapterUrl, positionMs, durationMs, isFinished, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Progres &&
+          other.itemId == this.itemId &&
+          other.chapterUrl == this.chapterUrl &&
+          other.positionMs == this.positionMs &&
+          other.durationMs == this.durationMs &&
+          other.isFinished == this.isFinished &&
+          other.updatedAt == this.updatedAt);
 }
 
 class ProgressCompanion extends UpdateCompanion<Progres> {
@@ -801,6 +1139,23 @@ class ProgressCompanion extends UpdateCompanion<Progres> {
     });
   }
 
+  ProgressCompanion copyWith(
+      {Value<String>? itemId,
+      Value<String>? chapterUrl,
+      Value<int>? positionMs,
+      Value<int>? durationMs,
+      Value<bool>? isFinished,
+      Value<DateTime>? updatedAt}) {
+    return ProgressCompanion(
+      itemId: itemId ?? this.itemId,
+      chapterUrl: chapterUrl ?? this.chapterUrl,
+      positionMs: positionMs ?? this.positionMs,
+      durationMs: durationMs ?? this.durationMs,
+      isFinished: isFinished ?? this.isFinished,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -823,6 +1178,19 @@ class ProgressCompanion extends UpdateCompanion<Progres> {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
     return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProgressCompanion(')
+          ..write('itemId: $itemId, ')
+          ..write('chapterUrl: $chapterUrl, ')
+          ..write('positionMs: $positionMs, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('isFinished: $isFinished, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
   }
 }
 
@@ -864,16 +1232,16 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
   static const VerificationMeta _isFinishedMeta =
       const VerificationMeta('isFinished');
   @override
-  late final GeneratedColumn<bool> isFinished = GeneratedColumn<bool>(
-      'is_finished', aliasedName, false,
-      type: DriftSqlType.bool,
-      requiredDuringInsert: false,
-      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
-        SqlDialect.sqlite: 'CHECK ("is_finished" IN (0, 1))',
-        SqlDialect.mysql: '',
-        SqlDialect.postgres: '',
-      }),
-      defaultValue: const Constant(false));
+  late final GeneratedColumn<bool> isFinished =
+      GeneratedColumn<bool>('is_finished', aliasedName, false,
+          type: DriftSqlType.bool,
+          requiredDuringInsert: false,
+          defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+            SqlDialect.sqlite: 'CHECK ("is_finished" IN (0, 1))',
+            SqlDialect.mysql: '',
+            SqlDialect.postgres: '',
+          }),
+          defaultValue: const Constant(false));
   static const VerificationMeta _updatedAtMeta =
       const VerificationMeta('updatedAt');
   @override
@@ -899,22 +1267,30 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
       context.missing(_itemIdMeta);
     }
     if (data.containsKey('chapter_url')) {
-      context.handle(_chapterUrlMeta,
-          chapterUrl.isAcceptableOrUnknown(data['chapter_url']!, _chapterUrlMeta));
+      context.handle(
+          _chapterUrlMeta,
+          chapterUrl.isAcceptableOrUnknown(
+              data['chapter_url']!, _chapterUrlMeta));
     } else if (isInserting) {
       context.missing(_chapterUrlMeta);
     }
     if (data.containsKey('position_ms')) {
-      context.handle(_positionMsMeta,
-          positionMs.isAcceptableOrUnknown(data['position_ms']!, _positionMsMeta));
+      context.handle(
+          _positionMsMeta,
+          positionMs.isAcceptableOrUnknown(
+              data['position_ms']!, _positionMsMeta));
     }
     if (data.containsKey('duration_ms')) {
-      context.handle(_durationMsMeta,
-          durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta));
+      context.handle(
+          _durationMsMeta,
+          durationMs.isAcceptableOrUnknown(
+              data['duration_ms']!, _durationMsMeta));
     }
     if (data.containsKey('is_finished')) {
-      context.handle(_isFinishedMeta,
-          isFinished.isAcceptableOrUnknown(data['is_finished']!, _isFinishedMeta));
+      context.handle(
+          _isFinishedMeta,
+          isFinished.isAcceptableOrUnknown(
+              data['is_finished']!, _isFinishedMeta));
     }
     if (data.containsKey('updated_at')) {
       context.handle(_updatedAtMeta,
@@ -951,10 +1327,6 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
     return $ProgressTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Bookmarks
-// ---------------------------------------------------------------------------
 
 class Bookmark extends DataClass implements Insertable<Bookmark> {
   final String id;
@@ -998,6 +1370,73 @@ class Bookmark extends DataClass implements Insertable<Bookmark> {
       createdAt: Value(createdAt),
     );
   }
+
+  factory Bookmark.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Bookmark(
+      id: serializer.fromJson<String>(json['id']),
+      itemId: serializer.fromJson<String>(json['itemId']),
+      chapterUrl: serializer.fromJson<String?>(json['chapterUrl']),
+      positionMs: serializer.fromJson<int>(json['positionMs']),
+      note: serializer.fromJson<String?>(json['note']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'itemId': serializer.toJson<String>(itemId),
+      'chapterUrl': serializer.toJson<String?>(chapterUrl),
+      'positionMs': serializer.toJson<int>(positionMs),
+      'note': serializer.toJson<String?>(note),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  Bookmark copyWith(
+          {String? id,
+          String? itemId,
+          Value<String?> chapterUrl = const Value.absent(),
+          int? positionMs,
+          Value<String?> note = const Value.absent(),
+          DateTime? createdAt}) =>
+      Bookmark(
+        id: id ?? this.id,
+        itemId: itemId ?? this.itemId,
+        chapterUrl: chapterUrl.present ? chapterUrl.value : this.chapterUrl,
+        positionMs: positionMs ?? this.positionMs,
+        note: note.present ? note.value : this.note,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('Bookmark(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('chapterUrl: $chapterUrl, ')
+          ..write('positionMs: $positionMs, ')
+          ..write('note: $note, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, itemId, chapterUrl, positionMs, note, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Bookmark &&
+          other.id == this.id &&
+          other.itemId == this.itemId &&
+          other.chapterUrl == this.chapterUrl &&
+          other.positionMs == this.positionMs &&
+          other.note == this.note &&
+          other.createdAt == this.createdAt);
 }
 
 class BookmarksCompanion extends UpdateCompanion<Bookmark> {
@@ -1043,6 +1482,23 @@ class BookmarksCompanion extends UpdateCompanion<Bookmark> {
     });
   }
 
+  BookmarksCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? itemId,
+      Value<String?>? chapterUrl,
+      Value<int>? positionMs,
+      Value<String?>? note,
+      Value<DateTime>? createdAt}) {
+    return BookmarksCompanion(
+      id: id ?? this.id,
+      itemId: itemId ?? this.itemId,
+      chapterUrl: chapterUrl ?? this.chapterUrl,
+      positionMs: positionMs ?? this.positionMs,
+      note: note ?? this.note,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1065,6 +1521,19 @@ class BookmarksCompanion extends UpdateCompanion<Bookmark> {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
     return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BookmarksCompanion(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('chapterUrl: $chapterUrl, ')
+          ..write('positionMs: $positionMs, ')
+          ..write('note: $note, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
   }
 }
 
@@ -1136,12 +1605,16 @@ class $BookmarksTable extends Bookmarks
       context.missing(_itemIdMeta);
     }
     if (data.containsKey('chapter_url')) {
-      context.handle(_chapterUrlMeta,
-          chapterUrl.isAcceptableOrUnknown(data['chapter_url']!, _chapterUrlMeta));
+      context.handle(
+          _chapterUrlMeta,
+          chapterUrl.isAcceptableOrUnknown(
+              data['chapter_url']!, _chapterUrlMeta));
     }
     if (data.containsKey('position_ms')) {
-      context.handle(_positionMsMeta,
-          positionMs.isAcceptableOrUnknown(data['position_ms']!, _positionMsMeta));
+      context.handle(
+          _positionMsMeta,
+          positionMs.isAcceptableOrUnknown(
+              data['position_ms']!, _positionMsMeta));
     }
     if (data.containsKey('note')) {
       context.handle(
@@ -1172,8 +1645,8 @@ class $BookmarksTable extends Bookmarks
           .read(DriftSqlType.int, data['${effectivePrefix}position_ms'])!,
       note: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}note']),
-      createdAt: attachedDatabase.typeMapping.read(
-          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -1182,10 +1655,6 @@ class $BookmarksTable extends Bookmarks
     return $BookmarksTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Favorites
-// ---------------------------------------------------------------------------
 
 class Favorite extends DataClass implements Insertable<Favorite> {
   final String id;
@@ -1215,6 +1684,57 @@ class Favorite extends DataClass implements Insertable<Favorite> {
       createdAt: Value(createdAt),
     );
   }
+
+  factory Favorite.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Favorite(
+      id: serializer.fromJson<String>(json['id']),
+      itemId: serializer.fromJson<String>(json['itemId']),
+      type: serializer.fromJson<String>(json['type']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'itemId': serializer.toJson<String>(itemId),
+      'type': serializer.toJson<String>(type),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  Favorite copyWith(
+          {String? id, String? itemId, String? type, DateTime? createdAt}) =>
+      Favorite(
+        id: id ?? this.id,
+        itemId: itemId ?? this.itemId,
+        type: type ?? this.type,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('Favorite(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('type: $type, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, itemId, type, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Favorite &&
+          other.id == this.id &&
+          other.itemId == this.itemId &&
+          other.type == this.type &&
+          other.createdAt == this.createdAt);
 }
 
 class FavoritesCompanion extends UpdateCompanion<Favorite> {
@@ -1251,6 +1771,19 @@ class FavoritesCompanion extends UpdateCompanion<Favorite> {
     });
   }
 
+  FavoritesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? itemId,
+      Value<String>? type,
+      Value<DateTime>? createdAt}) {
+    return FavoritesCompanion(
+      id: id ?? this.id,
+      itemId: itemId ?? this.itemId,
+      type: type ?? this.type,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1267,6 +1800,17 @@ class FavoritesCompanion extends UpdateCompanion<Favorite> {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
     return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FavoritesCompanion(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('type: $type, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
   }
 }
 
@@ -1349,8 +1893,8 @@ class $FavoritesTable extends Favorites
           .read(DriftSqlType.string, data['${effectivePrefix}item_id'])!,
       type: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
-      createdAt: attachedDatabase.typeMapping.read(
-          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -1359,10 +1903,6 @@ class $FavoritesTable extends Favorites
     return $FavoritesTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// History
-// ---------------------------------------------------------------------------
 
 class HistoryData extends DataClass implements Insertable<HistoryData> {
   final String id;
@@ -1400,6 +1940,66 @@ class HistoryData extends DataClass implements Insertable<HistoryData> {
       visitedAt: Value(visitedAt),
     );
   }
+
+  factory HistoryData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return HistoryData(
+      id: serializer.fromJson<String>(json['id']),
+      itemId: serializer.fromJson<String>(json['itemId']),
+      type: serializer.fromJson<String>(json['type']),
+      chapterUrl: serializer.fromJson<String?>(json['chapterUrl']),
+      visitedAt: serializer.fromJson<DateTime>(json['visitedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'itemId': serializer.toJson<String>(itemId),
+      'type': serializer.toJson<String>(type),
+      'chapterUrl': serializer.toJson<String?>(chapterUrl),
+      'visitedAt': serializer.toJson<DateTime>(visitedAt),
+    };
+  }
+
+  HistoryData copyWith(
+          {String? id,
+          String? itemId,
+          String? type,
+          Value<String?> chapterUrl = const Value.absent(),
+          DateTime? visitedAt}) =>
+      HistoryData(
+        id: id ?? this.id,
+        itemId: itemId ?? this.itemId,
+        type: type ?? this.type,
+        chapterUrl: chapterUrl.present ? chapterUrl.value : this.chapterUrl,
+        visitedAt: visitedAt ?? this.visitedAt,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('HistoryData(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('type: $type, ')
+          ..write('chapterUrl: $chapterUrl, ')
+          ..write('visitedAt: $visitedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, itemId, type, chapterUrl, visitedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is HistoryData &&
+          other.id == this.id &&
+          other.itemId == this.itemId &&
+          other.type == this.type &&
+          other.chapterUrl == this.chapterUrl &&
+          other.visitedAt == this.visitedAt);
 }
 
 class HistoryCompanion extends UpdateCompanion<HistoryData> {
@@ -1441,6 +2041,21 @@ class HistoryCompanion extends UpdateCompanion<HistoryData> {
     });
   }
 
+  HistoryCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? itemId,
+      Value<String>? type,
+      Value<String?>? chapterUrl,
+      Value<DateTime>? visitedAt}) {
+    return HistoryCompanion(
+      id: id ?? this.id,
+      itemId: itemId ?? this.itemId,
+      type: type ?? this.type,
+      chapterUrl: chapterUrl ?? this.chapterUrl,
+      visitedAt: visitedAt ?? this.visitedAt,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1460,6 +2075,18 @@ class HistoryCompanion extends UpdateCompanion<HistoryData> {
       map['visited_at'] = Variable<DateTime>(visitedAt.value);
     }
     return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HistoryCompanion(')
+          ..write('id: $id, ')
+          ..write('itemId: $itemId, ')
+          ..write('type: $type, ')
+          ..write('chapterUrl: $chapterUrl, ')
+          ..write('visitedAt: $visitedAt')
+          ..write(')'))
+        .toString();
   }
 }
 
@@ -1528,8 +2155,10 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
       context.missing(_typeMeta);
     }
     if (data.containsKey('chapter_url')) {
-      context.handle(_chapterUrlMeta,
-          chapterUrl.isAcceptableOrUnknown(data['chapter_url']!, _chapterUrlMeta));
+      context.handle(
+          _chapterUrlMeta,
+          chapterUrl.isAcceptableOrUnknown(
+              data['chapter_url']!, _chapterUrlMeta));
     }
     if (data.containsKey('visited_at')) {
       context.handle(_visitedAtMeta,
@@ -1554,8 +2183,8 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
       chapterUrl: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}chapter_url']),
-      visitedAt: attachedDatabase.typeMapping.read(
-          DriftSqlType.dateTime, data['${effectivePrefix}visited_at'])!,
+      visitedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}visited_at'])!,
     );
   }
 
@@ -1564,10 +2193,6 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
     return $HistoryTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Logs
-// ---------------------------------------------------------------------------
 
 class Log extends DataClass implements Insertable<Log> {
   final int id;
@@ -1604,6 +2229,66 @@ class Log extends DataClass implements Insertable<Log> {
       createdAt: Value(createdAt),
     );
   }
+
+  factory Log.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Log(
+      id: serializer.fromJson<int>(json['id']),
+      level: serializer.fromJson<String>(json['level']),
+      message: serializer.fromJson<String>(json['message']),
+      detail: serializer.fromJson<String?>(json['detail']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'level': serializer.toJson<String>(level),
+      'message': serializer.toJson<String>(message),
+      'detail': serializer.toJson<String?>(detail),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  Log copyWith(
+          {int? id,
+          String? level,
+          String? message,
+          Value<String?> detail = const Value.absent(),
+          DateTime? createdAt}) =>
+      Log(
+        id: id ?? this.id,
+        level: level ?? this.level,
+        message: message ?? this.message,
+        detail: detail.present ? detail.value : this.detail,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('Log(')
+          ..write('id: $id, ')
+          ..write('level: $level, ')
+          ..write('message: $message, ')
+          ..write('detail: $detail, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, level, message, detail, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Log &&
+          other.id == this.id &&
+          other.level == this.level &&
+          other.message == this.message &&
+          other.detail == this.detail &&
+          other.createdAt == this.createdAt);
 }
 
 class LogsCompanion extends UpdateCompanion<Log> {
@@ -1644,6 +2329,21 @@ class LogsCompanion extends UpdateCompanion<Log> {
     });
   }
 
+  LogsCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? level,
+      Value<String>? message,
+      Value<String?>? detail,
+      Value<DateTime>? createdAt}) {
+    return LogsCompanion(
+      id: id ?? this.id,
+      level: level ?? this.level,
+      message: message ?? this.message,
+      detail: detail ?? this.detail,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1663,6 +2363,18 @@ class LogsCompanion extends UpdateCompanion<Log> {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
     return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LogsCompanion(')
+          ..write('id: $id, ')
+          ..write('level: $level, ')
+          ..write('message: $message, ')
+          ..write('detail: $detail, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
   }
 }
 
@@ -1755,8 +2467,8 @@ class $LogsTable extends Logs with TableInfo<$LogsTable, Log> {
           .read(DriftSqlType.string, data['${effectivePrefix}message'])!,
       detail: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}detail']),
-      createdAt: attachedDatabase.typeMapping.read(
-          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -1765,10 +2477,6 @@ class $LogsTable extends Logs with TableInfo<$LogsTable, Log> {
     return $LogsTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// KvSettings
-// ---------------------------------------------------------------------------
 
 class KvSetting extends DataClass implements Insertable<KvSetting> {
   final String key;
@@ -1788,6 +2496,45 @@ class KvSetting extends DataClass implements Insertable<KvSetting> {
       value: Value(value),
     );
   }
+
+  factory KvSetting.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return KvSetting(
+      key: serializer.fromJson<String>(json['key']),
+      value: serializer.fromJson<String>(json['value']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'key': serializer.toJson<String>(key),
+      'value': serializer.toJson<String>(value),
+    };
+  }
+
+  KvSetting copyWith({String? key, String? value}) => KvSetting(
+        key: key ?? this.key,
+        value: value ?? this.value,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('KvSetting(')
+          ..write('key: $key, ')
+          ..write('value: $value')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(key, value);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is KvSetting &&
+          other.key == this.key &&
+          other.value == this.value);
 }
 
 class KvSettingsCompanion extends UpdateCompanion<KvSetting> {
@@ -1812,6 +2559,13 @@ class KvSettingsCompanion extends UpdateCompanion<KvSetting> {
     });
   }
 
+  KvSettingsCompanion copyWith({Value<String>? key, Value<String>? value}) {
+    return KvSettingsCompanion(
+      key: key ?? this.key,
+      value: value ?? this.value,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1822,6 +2576,15 @@ class KvSettingsCompanion extends UpdateCompanion<KvSetting> {
       map['value'] = Variable<String>(value.value);
     }
     return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('KvSettingsCompanion(')
+          ..write('key: $key, ')
+          ..write('value: $value')
+          ..write(')'))
+        .toString();
   }
 }
 
@@ -1885,10 +2648,6 @@ class $KvSettingsTable extends KvSettings
     return $KvSettingsTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// SourceConfigs
-// ---------------------------------------------------------------------------
 
 class SourceConfig extends DataClass implements Insertable<SourceConfig> {
   final String sourceId;
@@ -1961,6 +2720,94 @@ class SourceConfig extends DataClass implements Insertable<SourceConfig> {
           extra == null && nullToAbsent ? const Value.absent() : Value(extra),
     );
   }
+
+  factory SourceConfig.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SourceConfig(
+      sourceId: serializer.fromJson<String>(json['sourceId']),
+      type: serializer.fromJson<String>(json['type']),
+      enabled: serializer.fromJson<bool>(json['enabled']),
+      loginState: serializer.fromJson<String?>(json['loginState']),
+      voiceList: serializer.fromJson<String?>(json['voiceList']),
+      selectedVoiceId: serializer.fromJson<String?>(json['selectedVoiceId']),
+      lineList: serializer.fromJson<String?>(json['lineList']),
+      selectedLineId: serializer.fromJson<String?>(json['selectedLineId']),
+      extra: serializer.fromJson<String?>(json['extra']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'sourceId': serializer.toJson<String>(sourceId),
+      'type': serializer.toJson<String>(type),
+      'enabled': serializer.toJson<bool>(enabled),
+      'loginState': serializer.toJson<String?>(loginState),
+      'voiceList': serializer.toJson<String?>(voiceList),
+      'selectedVoiceId': serializer.toJson<String?>(selectedVoiceId),
+      'lineList': serializer.toJson<String?>(lineList),
+      'selectedLineId': serializer.toJson<String?>(selectedLineId),
+      'extra': serializer.toJson<String?>(extra),
+    };
+  }
+
+  SourceConfig copyWith(
+          {String? sourceId,
+          String? type,
+          bool? enabled,
+          Value<String?> loginState = const Value.absent(),
+          Value<String?> voiceList = const Value.absent(),
+          Value<String?> selectedVoiceId = const Value.absent(),
+          Value<String?> lineList = const Value.absent(),
+          Value<String?> selectedLineId = const Value.absent(),
+          Value<String?> extra = const Value.absent()}) =>
+      SourceConfig(
+        sourceId: sourceId ?? this.sourceId,
+        type: type ?? this.type,
+        enabled: enabled ?? this.enabled,
+        loginState: loginState.present ? loginState.value : this.loginState,
+        voiceList: voiceList.present ? voiceList.value : this.voiceList,
+        selectedVoiceId: selectedVoiceId.present
+            ? selectedVoiceId.value
+            : this.selectedVoiceId,
+        lineList: lineList.present ? lineList.value : this.lineList,
+        selectedLineId:
+            selectedLineId.present ? selectedLineId.value : this.selectedLineId,
+        extra: extra.present ? extra.value : this.extra,
+      );
+  @override
+  String toString() {
+    return (StringBuffer('SourceConfig(')
+          ..write('sourceId: $sourceId, ')
+          ..write('type: $type, ')
+          ..write('enabled: $enabled, ')
+          ..write('loginState: $loginState, ')
+          ..write('voiceList: $voiceList, ')
+          ..write('selectedVoiceId: $selectedVoiceId, ')
+          ..write('lineList: $lineList, ')
+          ..write('selectedLineId: $selectedLineId, ')
+          ..write('extra: $extra')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(sourceId, type, enabled, loginState,
+      voiceList, selectedVoiceId, lineList, selectedLineId, extra);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SourceConfig &&
+          other.sourceId == this.sourceId &&
+          other.type == this.type &&
+          other.enabled == this.enabled &&
+          other.loginState == this.loginState &&
+          other.voiceList == this.voiceList &&
+          other.selectedVoiceId == this.selectedVoiceId &&
+          other.lineList == this.lineList &&
+          other.selectedLineId == this.selectedLineId &&
+          other.extra == this.extra);
 }
 
 class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
@@ -2020,6 +2867,29 @@ class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
     });
   }
 
+  SourceConfigsCompanion copyWith(
+      {Value<String>? sourceId,
+      Value<String>? type,
+      Value<bool>? enabled,
+      Value<String?>? loginState,
+      Value<String?>? voiceList,
+      Value<String?>? selectedVoiceId,
+      Value<String?>? lineList,
+      Value<String?>? selectedLineId,
+      Value<String?>? extra}) {
+    return SourceConfigsCompanion(
+      sourceId: sourceId ?? this.sourceId,
+      type: type ?? this.type,
+      enabled: enabled ?? this.enabled,
+      loginState: loginState ?? this.loginState,
+      voiceList: voiceList ?? this.voiceList,
+      selectedVoiceId: selectedVoiceId ?? this.selectedVoiceId,
+      lineList: lineList ?? this.lineList,
+      selectedLineId: selectedLineId ?? this.selectedLineId,
+      extra: extra ?? this.extra,
+    );
+  }
+
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -2052,6 +2922,22 @@ class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
     }
     return map;
   }
+
+  @override
+  String toString() {
+    return (StringBuffer('SourceConfigsCompanion(')
+          ..write('sourceId: $sourceId, ')
+          ..write('type: $type, ')
+          ..write('enabled: $enabled, ')
+          ..write('loginState: $loginState, ')
+          ..write('voiceList: $voiceList, ')
+          ..write('selectedVoiceId: $selectedVoiceId, ')
+          ..write('lineList: $lineList, ')
+          ..write('selectedLineId: $selectedLineId, ')
+          ..write('extra: $extra')
+          ..write(')'))
+        .toString();
+  }
 }
 
 class $SourceConfigsTable extends SourceConfigs
@@ -2074,16 +2960,16 @@ class $SourceConfigsTable extends SourceConfigs
   static const VerificationMeta _enabledMeta =
       const VerificationMeta('enabled');
   @override
-  late final GeneratedColumn<bool> enabled = GeneratedColumn<bool>(
-      'enabled', aliasedName, false,
-      type: DriftSqlType.bool,
-      requiredDuringInsert: false,
-      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
-        SqlDialect.sqlite: 'CHECK ("enabled" IN (0, 1))',
-        SqlDialect.mysql: '',
-        SqlDialect.postgres: '',
-      }),
-      defaultValue: const Constant(true));
+  late final GeneratedColumn<bool> enabled =
+      GeneratedColumn<bool>('enabled', aliasedName, false,
+          type: DriftSqlType.bool,
+          requiredDuringInsert: false,
+          defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+            SqlDialect.sqlite: 'CHECK ("enabled" IN (0, 1))',
+            SqlDialect.mysql: '',
+            SqlDialect.postgres: '',
+          }),
+          defaultValue: const Constant(true));
   static const VerificationMeta _loginStateMeta =
       const VerificationMeta('loginState');
   @override
@@ -2099,9 +2985,9 @@ class $SourceConfigsTable extends SourceConfigs
   static const VerificationMeta _selectedVoiceIdMeta =
       const VerificationMeta('selectedVoiceId');
   @override
-  late final GeneratedColumn<String> selectedVoiceId =
-      GeneratedColumn<String>('selected_voice_id', aliasedName, true,
-          type: DriftSqlType.string, requiredDuringInsert: false);
+  late final GeneratedColumn<String> selectedVoiceId = GeneratedColumn<String>(
+      'selected_voice_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _lineListMeta =
       const VerificationMeta('lineList');
   @override
@@ -2111,9 +2997,9 @@ class $SourceConfigsTable extends SourceConfigs
   static const VerificationMeta _selectedLineIdMeta =
       const VerificationMeta('selectedLineId');
   @override
-  late final GeneratedColumn<String> selectedLineId =
-      GeneratedColumn<String>('selected_line_id', aliasedName, true,
-          type: DriftSqlType.string, requiredDuringInsert: false);
+  late final GeneratedColumn<String> selectedLineId = GeneratedColumn<String>(
+      'selected_line_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _extraMeta = const VerificationMeta('extra');
   @override
   late final GeneratedColumn<String> extra = GeneratedColumn<String>(
@@ -2157,8 +3043,10 @@ class $SourceConfigsTable extends SourceConfigs
           enabled.isAcceptableOrUnknown(data['enabled']!, _enabledMeta));
     }
     if (data.containsKey('login_state')) {
-      context.handle(_loginStateMeta,
-          loginState.isAcceptableOrUnknown(data['login_state']!, _loginStateMeta));
+      context.handle(
+          _loginStateMeta,
+          loginState.isAcceptableOrUnknown(
+              data['login_state']!, _loginStateMeta));
     }
     if (data.containsKey('voice_list')) {
       context.handle(_voiceListMeta,
@@ -2219,10 +3107,6 @@ class $SourceConfigsTable extends SourceConfigs
     return $SourceConfigsTable(attachedDatabase, alias);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Database
-// ---------------------------------------------------------------------------
 
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);

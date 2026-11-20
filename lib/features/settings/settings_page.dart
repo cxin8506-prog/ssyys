@@ -151,6 +151,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               onChanged: (v) => saveBoolSetting(
                   ref, exactSearchProvider, 'exact_search', v),
             ),
+            _SwitchRow(
+              title: '搜索建议',
+              subtitle: ref.watch(searchSuggestionsProvider) ? '开' : '关',
+              info: '默认开：输入时停 300ms 出建议下拉（热门词 + 历史里含输入词的），少于 2 个字不显示；点一条直接搜。',
+              value: ref.watch(searchSuggestionsProvider),
+              onChanged: (v) => saveBoolSetting(
+                  ref,
+                  searchSuggestionsProvider,
+                  'search_suggestions_enabled',
+                  v),
+            ),
             _ValueRow(
               title: '聚合搜索并发数',
               subtitle: '${ref.watch(searchConcurrencyProvider)}',
@@ -302,7 +313,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _showListenStats(BuildContext context) async {
     try {
-      final stats = await fetchListenStats();
+      final stats = await ListenStats.fetchListenStats();
       final today = _asInt(stats['todaySeconds']);
       final total = _asInt(stats['totalSeconds']);
       final finished = _asInt(stats['finishedBooks']);

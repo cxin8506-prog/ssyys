@@ -65,19 +65,29 @@ final jsPluginEngineProvider = Provider<JsPluginEngine>((ref) {
   final timeoutSeconds =
       prefs.getInt(AppConstants.keySearchTimeoutSeconds) ?? 20;
   return JsPluginEngine(
-    timeout: Duration(seconds: timeoutSeconds),
-    uaResolver: ref.read(uaResolverProvider),
+    ref.read(sourceRepositoryProvider),
+    ref.read(sourceConfigRepositoryProvider),
+    ref.read(uaResolverProvider),
+    searchTimeoutSeconds: timeoutSeconds,
   );
 });
 
 /// 通用 JAR 引擎（旧格式，静态方法插件）。
 final jarPluginEngineProvider = Provider<JarPluginEngine>((ref) {
-  return JarPluginEngine();
+  return JarPluginEngine(
+    ref.read(sourceRepositoryProvider),
+    ref.read(sourceConfigRepositoryProvider),
+    ref.read(uaResolverProvider),
+  );
 });
 
 /// 我的听书 JAR 引擎（TingShu 格式）。
 final tingShuEngineProvider = Provider<TingShuPluginEngine>((ref) {
-  return TingShuPluginEngine(uaResolver: ref.read(uaResolverProvider));
+  return TingShuPluginEngine(
+    ref.read(sourceRepositoryProvider),
+    ref.read(uaResolverProvider),
+    ref.read(sourceConfigRepositoryProvider),
+  );
 });
 
 /// 按源格式取引擎：tingshu 走 TingShu 引擎，jar 走通用 JAR 引擎，

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/database/app_database.dart';
 import '../../core/database/library_repository.dart';
 import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
@@ -311,8 +312,6 @@ class _SearchEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final author = item.author ?? '';
-    final sourceName = item.sourceName ?? '';
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -533,6 +532,8 @@ class _BookRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final author = item.author ?? '';
+    final sourceName = item.sourceName;
     return InkWell(
       onTap: onTap,
       onLongPress: () async {
@@ -623,11 +624,11 @@ class _SourceCard extends ConsumerWidget {
     final active = ref.watch(activeHomeSourceProvider);
     final selected = active?.id == source.id;
     final primary = Theme.of(context).colorScheme.primary;
-    final desc = source.description ?? '';
+    final desc = source.description;
     return InkWell(
       // 点源卡片 = 切源 + 进该源页（发现页）。卡片上没有假放大镜。
       onTap: () {
-        setHomeSource(ref, source.id);
+        ref.read(activeHomeSourceProvider.notifier).state = source;
         ref.read(shellTabProvider.notifier).state = 1;
       },
       borderRadius: BorderRadius.circular(12),

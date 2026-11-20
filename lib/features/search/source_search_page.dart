@@ -8,6 +8,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/database/library_repository.dart';
+import '../../core/di/providers.dart';
 import '../../core/log/app_logger.dart';
 import '../../plugins/data/plugin_providers.dart';
 import '../../plugins/model/plugin_source.dart';
@@ -41,7 +42,7 @@ class SourceSearchPage extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<SourceSearchPage> createState() => _SourceSearchPageState();
+  ConsumerState<SourceSearchPage> createState() => _SearchPageState();
 }
 
 enum _SrcStatus {
@@ -112,6 +113,11 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
   final _scroll = ScrollController();
   Timer? _debounce;
 
+  /// 搜索建议：300ms 防抖后出的下拉（热门词 + 历史里含输入词的）。
+  Timer? _suggestDebounce;
+  List<String> _suggestions = <String>[];
+  final _focusNode = FocusNode();
+
   String _type = AppConstants.typeAudio;
   String _sourceId = _allKey;
   String _keyword = '';
@@ -143,6 +149,7 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
       _sourceId = widget.initialSourceId!;
     }
     _loadHistory();
+    _focusNode.addListener(_onFocusChanged);
     _scroll.addListener(() {
       if (_scroll.position.pixels >
           _scroll.position.maxScrollExtent - 200) {
@@ -155,9 +162,19 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _suggestDebounce?.cancel();
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
     _ctrl.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 输入框失焦就收起建议下拉（搜完自动失焦，下拉跟着收）。
+  void _onFocusChanged() {
+    if (!_focusNode.hasFocus && _suggestions.isNotEmpty) {
+      setState(() => _suggestions = <String>[]);
+    }
   }
 
   // ------------------------------------------------------------ 基础数据
@@ -198,10 +215,11 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
   }
 
   List<PluginSource> _sources() {
-    final all = ref.read(sourceListProvider);
-    return all
-        .where((s) => s.type == _type && s.enabled)
-        .toList();
+    // sourceListProvider 是 FutureProvider，读到的是 AsyncValue，
+    // 还没加载完就先按空列表算（搜索页不阻塞等源）。
+    final all =
+        ref.read(sourceListProvider).valueOrNull ?? const <PluginSource>[];
+    return all.where((s) => s.type == _type && s.enabled).toList();
   }
 
   Future<int> _settingInt(String key, int def) async {
@@ -289,6 +307,41 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
       if (kw == _keyword && _searched) return;
       _search(kw);
     });
+    // 搜索建议（学 CloudStream：300ms 防抖、少于 2 个字不显示、可关默认开）：
+    // 建议只来自热门词 + 搜索历史，不调第三方接口、不编词。
+    _suggestDebounce?.cancel();
+    final q = v.trim();
+    if (!ref.read(searchSuggestionsProvider) || q.length < 2) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = <String>[]);
+      return;
+    }
+    _suggestDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      _updateSuggestions(_ctrl.text.trim());
+    });
+  }
+
+  /// 按当前输入筛建议：热门词在前、历史在后，含输入词的才进下拉，
+  /// 去重、去空，最多 6 条；热门还没回来就只用历史。
+  void _updateSuggestions(String q) {
+    if (q.length < 2 || !ref.read(searchSuggestionsProvider)) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = <String>[]);
+      return;
+    }
+    final lower = q.toLowerCase();
+    final out = <String>[];
+    void add(String w) {
+      final t = w.trim();
+      if (t.isEmpty || t.toLowerCase() == lower) return;
+      if (!t.toLowerCase().contains(lower)) return;
+      if (out.contains(t)) return;
+      out.add(t);
+    }
+
+    for (final w in _hotWords) add(w);
+    for (final h in _history) add(h);
+    if (!mounted) return;
+    setState(() => _suggestions = out.take(6).toList());
   }
 
   void _search(String rawKeyword) {
@@ -302,6 +355,7 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
       _searched = true;
       _searching = true;
       _historySavedForKeyword = false;
+      _suggestions = <String>[];
       _merged = <_MergedBook>[];
       _states = sources.map((s) => _SrcState(s)).toList();
       _queue
@@ -567,11 +621,13 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
     // 清空作废旧搜索代次：正在跑的搜索不许回填已清空的结果
     _gen++;
     _queue.clear();
+    _suggestDebounce?.cancel();
     _ctrl.clear();
     setState(() {
       _keyword = '';
       _searched = false;
       _searching = false;
+      _suggestions = <String>[];
       _states = <_SrcState>[];
       _merged = <_MergedBook>[];
     });
@@ -689,6 +745,7 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
       appBar: AppBar(
         title: TextField(
           controller: _ctrl,
+          focusNode: _focusNode,
           autofocus: _history.isEmpty,
           textInputAction: TextInputAction.search,
           style: const TextStyle(color: Colors.white, fontSize: 16),
@@ -724,6 +781,8 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
       body: Column(
         children: [
           _sourceBar(sources),
+          if (_suggestions.isNotEmpty && _focusNode.hasFocus)
+            _suggestionsView(),
           if (_searching || _searched) _progressBar(doneCount, failedCount, okSources),
           if (_searching)
             Padding(
@@ -1113,6 +1172,35 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
       child: OutlinedButton(
         onPressed: _loadingMore ? null : _loadMore,
         child: Text(_loadingMore ? '正在加载…' : '加载更多'),
+      ),
+    );
+  }
+
+  /// 搜索建议下拉：点一条直接搜（填进搜索框并提交）。
+  Widget _suggestionsView() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Theme.of(context).dividerColor),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: _suggestions
+            .map((s) => ListTile(
+                  dense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12),
+                  leading: const Icon(Icons.search, size: 18),
+                  title: Text(s,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () {
+                    _ctrl.text = s;
+                    _search(s);
+                  },
+                ))
+            .toList(),
       ),
     );
   }

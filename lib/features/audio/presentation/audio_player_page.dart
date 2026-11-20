@@ -76,6 +76,9 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
   bool _favorite = false;
   StreamSubscription<String>? _errorSub;
 
+  /// 当前音色 id（来自 widget.currentVoiceId，切换后更新）。
+  String? _voiceId;
+
   /// 当前在播的章下标（插件书走 handler.pluginChapterIndex，
   /// 本地书走 handler.currentIndex）。
   int get _currentIndex => _handler.currentIndex;

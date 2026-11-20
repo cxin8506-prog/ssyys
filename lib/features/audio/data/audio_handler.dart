@@ -136,6 +136,14 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   /// 这里只负责取。
   Map<String, String>? Function(int index)? onResolveHeaders;
 
+  /// 只听声音（视频）模式：播完一章自动解析下一章继续播。
+  /// 页面退出后也生效（回调和解析器都留在 handler 上）；
+  /// 新书 setPluginBook / 清掉插件书时自动关掉，不带到下一本书。
+  bool autoAdvancePlugin = false;
+
+  /// 只听声音自动切章进行中：播完事件只触发一次，不重复切。
+  bool _autoAdvancing = false;
+
   /// 插件源断点回调：handler 每 5 秒 / 暂停 / 切章 / 播完时调它，
   /// 页面侧写插件断点（plugin_resume）。force=true 是最后一次保存，
   /// 页面侧不节流。
@@ -258,6 +266,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
 
     // 播完一章：播到章末停 / 播完几集停在这里收口；
     // 插件源的自动切下一章由页面（播完监听）决定，这里只把断点存了。
+    // 只有只听声音模式（autoAdvancePlugin）例外：视频页退出了，
+    // 没有页面监听播完，handler 自己按需解析下一章继续播。
     _player.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
         _flushProgress();
@@ -274,6 +284,9 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
             pause();
             return;
           }
+        }
+        if (autoAdvancePlugin && hasPluginBook) {
+          unawaited(_autoAdvancePlugin());
         }
       }
     });
@@ -498,6 +511,8 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _pluginTitle = title;
     _pluginCoverUrl = coverUrl;
     _pluginAuthor = author;
+    // 换书只听声音自动切章关掉：新书的切章由新页面自己决定。
+    autoAdvancePlugin = false;
     _pluginChapters = List<Map<String, dynamic>>.from(chapters);
     // 解析缓存只按新章节数重排长度，不清空：
     // 调用方（source_book_page）可能在 setPluginBook 之前就把
@@ -631,6 +646,28 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     _emitState();
   }
 
+  /// 只听声音自动切下一章：按需解析（不预解析，限时签名会过期），
+  /// 解析失败往后再试一章，两章都失败就停住，不抛错、不死循环。
+  Future<void> _autoAdvancePlugin() async {
+    if (_autoAdvancing) return;
+    _autoAdvancing = true;
+    try {
+      var next = _pluginChapterIndex + 1;
+      var tried = 0;
+      while (next < _pluginChapters.length && tried < 2) {
+        try {
+          await playPluginChapter(next);
+          return;
+        } catch (_) {
+          tried++;
+          next++;
+        }
+      }
+    } finally {
+      _autoAdvancing = false;
+    }
+  }
+
   /// 直接播一个地址（WebDAV 单文件用）：不建书、不写断点、不进播放列表。
   /// 调用方自己保证不把它和插件书会话混起来（单文件进页前先调
   /// clearPluginBook，别让断点写到别的书上）。
@@ -666,6 +703,7 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
     onPluginSkipPrevious = null;
     onResolveChapter = null;
     onResolveHeaders = null;
+    autoAdvancePlugin = false;
     _pluginBookKey = null;
     _pluginSourceId = null;
     _pluginBookUrl = null;
@@ -1033,15 +1071,21 @@ class MyAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   }
 
   /// 快退：步长读设置（默认 15 秒）。
-  Future<void> seekBackward() async {
+  /// 基类 audio_service 0.18 的 SeekHandler 要求带一个 bool 参数
+  /// （begin：按住快退的开始/结束）；本页是按一下跳一步，不用按住，
+  /// 所以参数忽略。写成可选参数是为了不改调用方：
+  /// audio_player_page / network_audio_page 都是无参调用。
+  @override
+  Future<void> seekBackward([bool begin = false]) async {
     final step = await _seekStep();
     final target = _player.position - Duration(seconds: step);
     await _player.seek(
         target < Duration.zero ? Duration.zero : target);
   }
 
-  /// 快进：步长读设置（默认 15 秒）。
-  Future<void> seekForward() async {
+  /// 快进：步长读设置（默认 15 秒）。begin 参数同 seekBackward，忽略。
+  @override
+  Future<void> seekForward([bool begin = false]) async {
     final step = await _seekStep();
     final dur = _player.duration;
     var target = _player.position + Duration(seconds: step);

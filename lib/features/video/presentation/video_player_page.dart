@@ -50,6 +50,14 @@ class VideoPlayerPage extends ConsumerStatefulWidget {
   /// 切线路时向源要新地址（参数：线路 id）
   final Future<String> Function(String lineId)? onSwitchLine;
 
+  /// 只听声音时按章解析回调（参数：章下标，返回可播地址；解析失败返回 null）。
+  /// 调用方（路由加载器）现调 content 解析，不预解析（限时签名会过期）。
+  /// 没传就只保证当前集，播完即停。
+  final Future<String?> Function(int index)? onResolveChapter;
+
+  /// 只听声音时某章的请求头（和 onResolveChapter 同一次解析里拿到的）。
+  final Map<String, String> Function(int index)? onResolveChapterHeaders;
+
   /// 播放这个地址要带的请求头（Referer/UA 等），没有就是空
   final Map<String, String> headers;
 
@@ -75,6 +83,8 @@ class VideoPlayerPage extends ConsumerStatefulWidget {
     this.lines = const [],
     this.currentLineId,
     this.onSwitchLine,
+    this.onResolveChapter,
+    this.onResolveChapterHeaders,
     this.headers = const {},
     this.startAtMs = 0,
     this.sourceId = '',
@@ -587,9 +597,32 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       );
       final currentIndex = _index;
       handler.cacheChapterUrl(currentIndex, url);
-      // 只听声音只保证当前集继续播：下一集要现向源解析，视频页没有
-      // 章节解析回调（只有按线解析的 onSwitchLine），播完即停。
-      handler.onResolveChapter = (i) async => i == currentIndex ? url : null;
+      final resolver = widget.onResolveChapter;
+      if (resolver != null) {
+        // 按需解析下一章：当前集用已解析好的地址，下一集播完时 handler
+        // 自动调这里现向源解析（autoAdvancePlugin），解析失败返回 null
+        // 就停住，不崩、不静默跳集；请求头走同一次解析里拿到的。
+        handler.onResolveChapter = (i) async {
+          if (i == currentIndex) return url;
+          try {
+            final next = await resolver(i);
+            return (next == null || next.isEmpty) ? null : next;
+          } catch (_) {
+            return null;
+          }
+        };
+        handler.onResolveHeaders = (i) {
+          final h = widget.onResolveChapterHeaders?.call(i);
+          if (h != null && h.isNotEmpty) return h;
+          if (i == currentIndex) return widget.headers;
+          return const <String, String>{};
+        };
+        handler.autoAdvancePlugin = true;
+      } else {
+        // 没传解析回调（本地视频等）：只保证当前集，播完即停。
+        handler.onResolveChapter =
+            (i) async => i == currentIndex ? url : null;
+      }
       await handler.playPluginChapter(currentIndex, startAt: pos);
       _toast('已切换为只听声音，退出后继续播');
       if (mounted) Navigator.of(context).pop();

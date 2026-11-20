@@ -134,7 +134,7 @@ class _MainShellState extends ConsumerState<MainShell> {
     _goingToPlayer = true;
     try {
       if (!mounted) return;
-      await context.push('/player');
+      context.push('/player');
     } finally {
       _goingToPlayer = false;
     }
@@ -142,7 +142,7 @@ class _MainShellState extends ConsumerState<MainShell> {
 
   Future<void> _showListenStats(BuildContext context) async {
     try {
-      final stats = await fetchListenStats();
+      final stats = await ListenStats.fetchListenStats();
       final today = _asInt(stats['todaySeconds']);
       final total = _asInt(stats['totalSeconds']);
       final finished = _asInt(stats['finishedBooks']);
