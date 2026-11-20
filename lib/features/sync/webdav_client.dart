@@ -33,20 +33,37 @@ class WebDavClient {
   Uri _dirUri(String dir) {
     var base = baseUrl.trim();
     if (!base.endsWith('/')) base = '$base/';
+    // dir 为空就是根目录本身：直接用 base，不能再拼一个 '/'，
+    // 否则会变成 .../dav//（双斜杠），坚果云对它返回 404
+    if (dir.isEmpty) return Uri.parse(base);
     return Uri.parse('$base${Uri.encodeComponent(dir)}/');
   }
 
-  /// 测试连接：对根目录做一次 PROPFIND
+  /// 测试连接：对用户填的地址本身发 PROPFIND（坚果云标准地址
+  /// https://dav.jianguoyun.com/dav/），带正式的 PROPFIND 请求体。
+  /// 207 Multi-Status 或 200 就是成功；401/403 是账号或应用密码错；
+  /// 404 才是地址错；连不上（Socket/超时）由调用方按网络问题报。
   Future<void> test() async {
     final req = http.Request('PROPFIND', _dirUri(''));
     req.headers.addAll(_headers);
     req.headers['Depth'] = '0';
+    req.headers['Content-Type'] = 'application/xml; charset=utf-8';
+    req.body = '''<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:">
+  <d:prop>
+    <d:displayname/>
+  </d:prop>
+</d:propfind>''';
     final streamed = await req.send().timeout(const Duration(seconds: 20));
     final resp = await http.Response.fromStream(streamed);
-    if (resp.statusCode == 401) throw Exception('账号或应用密码不对（401）');
-    if (resp.statusCode >= 300) {
-      throw Exception('连接失败：HTTP ${resp.statusCode}');
+    if (resp.statusCode == 200 || resp.statusCode == 207) return;
+    if (resp.statusCode == 401 || resp.statusCode == 403) {
+      throw Exception('账号或应用密码不对（${resp.statusCode}）');
     }
+    if (resp.statusCode == 404) {
+      throw Exception('地址错了（404）');
+    }
+    throw Exception('连接失败：HTTP ${resp.statusCode}');
   }
 
   /// 确保目录存在（MKCOL，已存在会返回 405，忽略）

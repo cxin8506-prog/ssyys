@@ -121,38 +121,20 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     _source = source;
 
     return Scaffold(
-      drawer: buildAppDrawer(context),
       appBar: AppBar(
-        leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: const Icon(Icons.menu),
-            tooltip: '菜单',
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
-          ),
-        ),
+        automaticallyImplyLeading: false,
         title: InkWell(
           borderRadius: BorderRadius.circular(12),
-          // 我的听书的方法：没有底部弹层选源，点顶部源名就回书源页（源网格）去选
+          // 点顶部源名就回书源页（源网格）去选源
           onTap: source == null
               ? null
               : () => ref.read(shellTabProvider.notifier).state = 0,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    source?.name ?? '发现',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (source != null) ...[
-                  const SizedBox(width: 2),
-                  const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
-                ],
-              ],
+            child: Text(
+              source?.name ?? '发现',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),
@@ -193,8 +175,13 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
             const SizedBox(height: 14),
             const Text('还没有可用的源', style: TextStyle(fontSize: 15)),
             const SizedBox(height: 6),
-            Text('去「我的 → 源管理」导入一个插件',
+            Text('去源管理导入一个插件',
                 style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pushNamed('/sources'),
+              child: const Text('去源管理'),
+            ),
           ],
         ),
       ),
@@ -419,10 +406,43 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
       data: (sections) {
         final books = sections.expand((e) => e.books).toList();
         if (books.isEmpty) {
+          // 推荐、分类都没有：只给一行紧凑的搜索入口，不摆空白卡片
           return Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text('这个源暂时没有内容',
-                style: Theme.of(context).textTheme.bodySmall),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: context.cardColor,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: context.palette.outline),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.search_rounded,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text('这个源只提供搜索',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13)),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                      builder: (_) => SourceSearchPage(
+                        type: source.type,
+                        initialSourceId: source.id,
+                      ),
+                    )),
+                    child: const Text('去搜索'),
+                  ),
+                ],
+              ),
+            ),
           );
         }
         return GridView.builder(
@@ -544,8 +564,9 @@ class _CategoryListState extends ConsumerState<_CategoryList> {
 
   @override
   Widget build(BuildContext context) {
-    final mode = displayModeOf(
-        ref.read(sharedPrefsProvider), widget.sourceId);
+    // 内容层列表：一行一个（封面 + 片名 + 作者/简介），往下划翻页。
+    // FeedBook 只有 title/author/intro/cover，没有年份/地区/完结状态字段，
+    // 所以副标题显示作者和简介，不编造没有的字段。
     return _items.isEmpty && _loading
           ? const Center(child: CircularProgressIndicator())
           : _items.isEmpty
@@ -558,7 +579,10 @@ class _CategoryListState extends ConsumerState<_CategoryList> {
                         Icon(Icons.inbox_outlined,
                             size: 40, color: context.subtleColor),
                         const SizedBox(height: 12),
-                        Text(_error ?? '这个分类暂时没有内容',
+                        Text(
+                            _error != null
+                                ? '这个分类暂时打不开，可以重试或去搜索。'
+                                : '这个分类暂时没有内容',
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.bodySmall),
                         const SizedBox(height: 14),
@@ -576,39 +600,7 @@ class _CategoryListState extends ConsumerState<_CategoryList> {
                     ),
                   ),
                 )
-              : mode == 'list'
-                  ? _listView()
-                  : GridView.builder(
-                      controller: _scroll,
-                      padding: pagePadding(context, top: 10, bottom: 24),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 10,
-                        childAspectRatio: 0.62,
-                      ),
-                      itemCount: _items.length + 1,
-                      itemBuilder: (ctx, i) {
-                        if (i >= _items.length) {
-                          return Center(
-                            child: _loading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2))
-                                : Text(_hasMore ? '' : '没有更多了',
-                                    style: Theme.of(ctx).textTheme.bodySmall),
-                          );
-                        }
-                        final b = _items[i];
-                        return _FeedTile(
-                          book: b,
-                          onTap: () => _openBook(b),
-                        );
-                      },
-                    );
+              : _listView();
   }
 
   /// 点标题弹详情卡（取消/添加收藏/开始播放），不整页跳详情页

@@ -3,60 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../core/utils/listen_stats.dart';
-
-/// 左侧抽屉：源管理 / 设置 / 备份 / 源搜索 / 收听统计（所有主页面共用）
-Drawer buildAppDrawer(BuildContext context) {
-  final primary = Theme.of(context).colorScheme.primary;
-  return Drawer(
-    child: SafeArea(
-      child: ListView(
-        padding: EdgeInsets.zero,
-        children: [
-          DrawerHeader(
-            decoration: BoxDecoration(color: primary),
-            margin: EdgeInsets.zero,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                const Icon(Icons.headphones, size: 40, color: Colors.white),
-                const SizedBox(height: 10),
-                Text('随意听书',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(color: Colors.white)),
-              ],
-            ),
-          ),
-          _drawerTile(context, Icons.extension_outlined, '源管理',
-              () => Navigator.of(context).pushNamed('/sources')),
-          _drawerTile(context, Icons.settings_outlined, '设置',
-              () => Navigator.of(context).pushNamed('/settings')),
-          _drawerTile(context, Icons.backup_outlined, '备份与恢复',
-              () => Navigator.of(context).pushNamed('/backup')),
-          _drawerTile(context, Icons.travel_explore, '源搜索',
-              () => Navigator.of(context).pushNamed('/source-search')),
-          _drawerTile(context, Icons.bar_chart_outlined, '收听统计',
-              () => ListenStats.showStatsDialog(context)),
-        ],
-      ),
-    ),
-  );
-}
-
-Widget _drawerTile(
-    BuildContext context, IconData icon, String title, VoidCallback onTap) {
-  return ListTile(
-    leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-    title: Text(title),
-    onTap: () {
-      Navigator.of(context).pop();
-      onTap();
-    },
-  );
-}
+/// 左侧抽屉已拆除（问题 3/4）：入口重新安置在书源页顶栏
+/// （设置→齿轮图标，源管理→源管理图标）和设置页（备份）里，
+/// 收听统计在底部中间播放键长按，源搜索走搜索页。
 
 /// 滚动页面的统一内边距。
 ///

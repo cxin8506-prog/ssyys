@@ -198,6 +198,33 @@ class AutoCache {
     }
   }
 
+  /// 问源这本书能不能缓存（我的听书 isCacheable）：
+  /// 源没实现这个方法、或调用失败，一律按“能缓存”处理（默认可缓存），
+  /// 绝不因为问不出来就把整本书的缓存都禁掉；
+  /// 源明确返回 false 才不下。失败也不抛错、不在集数上留任何标记。
+  static Future<bool> _sourceAllowsCache(
+      dynamic engine, PluginSource source, String bookUrl) async {
+    try {
+      await engine.attach(source);
+      final has = await engine.hasMethod('isCacheable');
+      if (has != true) return true;
+      final r = await engine.invoke('isCacheable', params: {'url': bookUrl});
+      if (r is bool) return r;
+      if (r is Map) {
+        for (final k in const ['isCacheable', 'cacheable', 'ok', 'value']) {
+          if (r[k] is bool) return r[k] as bool;
+        }
+      }
+      if (r is String) {
+        final t = r.trim().toLowerCase();
+        if (t == 'false' || t == '0') return false;
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   /// 播完当前一集后，后台预取后面 count 集（不阻塞播放，失败就跳过）
   static Future<void> prefetch({
     required WidgetRef ref,
@@ -212,6 +239,8 @@ class AutoCache {
     if (!(prefs.getBool(AppConstants.keyAutoCache) ?? false)) return;
     // 视频源不缓存：isCacheable() 是 false 的源一律不下，App 层不绕过
     if (source.type != AppConstants.typeAudio) return;
+    final engine = engineForSource(ref, source);
+    if (!await _sourceAllowsCache(engine, source, bookUrl)) return;
     final count = prefs.getInt(AppConstants.keyAutoCacheCount) ?? 3;
     final wifiOnly = prefs.getBool(AppConstants.keyAutoCacheWifiOnly) ?? true;
     if (wifiOnly && !await isWifi()) return;
@@ -219,7 +248,6 @@ class AutoCache {
     final cacheDir = Directory('${dir.path}/autocache');
     if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
 
-    final engine = engineForSource(ref, source);
     final map = await _loadMap();
     for (var i = currentIndex + 1;
         i <= currentIndex + count && i < chapters.length;

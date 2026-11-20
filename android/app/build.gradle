@@ -21,6 +21,14 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader('UTF-8') { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
@@ -55,14 +63,27 @@ android {
         versionName flutterVersionName
     }
 
+    signingConfigs {
+        release {
+            // 固定发布密钥：CI 上由 Secrets 解出来写进 keystore.properties，
+            // 本地没有这个文件时不配 release 签名（下面回退到 debug）。
+            if (keystoreProperties['storeFile'] != null) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig signingConfigs.debug
+            // 有固定发布密钥就用它签名，没有就仍用 debug 签名（本地开发能跑），
+            // 这样没配密钥的机器也不会编包失败。
+            signingConfig keystoreProperties['storeFile'] != null ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

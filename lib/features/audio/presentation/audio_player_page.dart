@@ -20,11 +20,24 @@ class AudioPlayerPage extends ConsumerStatefulWidget {
   final String? initialChapterId;
   final int? initialPositionMs;
 
+  /// 可切换的音色：[{id, name}]。本地预录文件没有音色可切，不传就
+  /// 不显示音色按钮（不要报错）；只有带 TTS 音色的源（比如番茄小说）
+  /// 才会传这个列表，id 由源按书查 toneinfo、按音色名匹配算出来，
+  /// App 侧绝不写死任何音色 id。
+  final List<Map<String, dynamic>> voices;
+  final String? currentVoiceId;
+
+  /// 切音色时向源要当前章节的新音频地址（参数：音色 id），返回新地址
+  final Future<String> Function(String voiceId)? onSwitchVoice;
+
   const AudioPlayerPage({
     super.key,
     required this.item,
     this.initialChapterId,
     this.initialPositionMs,
+    this.voices = const [],
+    this.currentVoiceId,
+    this.onSwitchVoice,
   });
 
   @override
@@ -36,9 +49,15 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
   int _currentIndex = 0;
   bool _ready = false;
 
+  /// 当前播放列表的音频地址（切音色时只换当前章的地址再重建播放器）
+  List<String> _paths = [];
+  String? _voiceId;
+  bool _switchingVoice = false;
+
   // 定时关闭倒计时（handler 里没有剩余时间，页面自己记）
   Timer? _sleepTick;
-  Duration? _sleepLeft;
+  // 倒计时每秒变一次：只刷倒计时这一行，不整页 setState
+  final _sleepLeft = ValueNotifier<Duration?>(null);
 
   @override
   void initState() {
@@ -49,6 +68,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
   @override
   void dispose() {
     _sleepTick?.cancel();
+    _sleepLeft.dispose();
     // 离开播放页时保存断点进度
     try {
       final pos = audioHandler.playbackState.valueOrNull?.updatePosition ??
@@ -78,6 +98,8 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
         .where((c) => c.path != null && !c.isCorrupted)
         .map((c) => c.path!)
         .toList();
+    _paths = paths;
+    _voiceId = widget.currentVoiceId;
     int startIndex = 0;
     int startPositionMs = 0;
     if (widget.initialChapterId != null) {
@@ -153,30 +175,42 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
                 Text('${_chapters.length} 章',
                     style: Theme.of(context).textTheme.bodySmall),
                 // 定时倒计时：还剩多久就停，点一下取消
-                if (_sleepLeft != null) ...[
-                  const SizedBox(height: 8),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: _cancelSleep,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: context.palette.primarySoft,
+                ValueListenableBuilder<Duration?>(
+                  valueListenable: _sleepLeft,
+                  builder: (context, left, _) {
+                    if (left == null) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: InkWell(
                         borderRadius: BorderRadius.circular(14),
+                        onTap: _cancelSleep,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: context.palette.primarySoft,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            '定时：还剩 ${PathUtils.formatDuration(left.inMilliseconds)}（点一下取消）',
+                            style: TextStyle(fontSize: 13, color: playColor),
+                          ),
+                        ),
                       ),
-                      child: Text(
-                        '定时：还剩 ${PathUtils.formatDuration(_sleepLeft!.inMilliseconds)}（点一下取消）',
-                        style: TextStyle(fontSize: 13, color: playColor),
-                      ),
-                    ),
-                  ),
-                ],
+                    );
+                  },
+                ),
                 const SizedBox(height: 16),
                 _buildProgress(),
                 _buildControls(playColor),
                 const SizedBox(height: 8),
                 _buildSpeedRow(),
+                // 音色切换：只有传了音色列表才显示（本地预录文件不显示，不报错）；
+                // 预录有声书不能切，小说（TTS）才能切，源那边只给小说返回音色列表
+                if (widget.voices.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _buildVoiceRow(),
+                ],
                 if (_chapters.any((c) => c.isCorrupted)) _buildUaHint(),
                 const SizedBox(height: 16),
                 Expanded(child: _buildChapterList()),
@@ -288,6 +322,51 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
     );
   }
 
+  /// 音色切换行：点一个音色，从当前进度接着播
+  Widget _buildVoiceRow() {
+    return Wrap(
+      spacing: 8,
+      alignment: WrapAlignment.center,
+      children: widget.voices.map((v) {
+        final id = '${v['id']}';
+        final selected = _voiceId == id;
+        return ChoiceChip(
+          label: Text('${v['name'] ?? id}'),
+          selected: selected,
+          onSelected: (_) => _switchVoice(id),
+        );
+      }).toList(),
+    );
+  }
+
+  /// 切音色：记下当前进度，拿到新音色地址后换上，从同一进度接着播
+  Future<void> _switchVoice(String id) async {
+    final resolver = widget.onSwitchVoice;
+    if (resolver == null || id == _voiceId || _switchingVoice) return;
+    _switchingVoice = true;
+    try {
+      final pos =
+          audioHandler.playbackState.valueOrNull?.updatePosition ??
+              Duration.zero;
+      final idx = audioHandler.currentIndex;
+      final newPath = await resolver(id);
+      if (newPath.isEmpty || !mounted) return;
+      if (idx < 0 || idx >= _paths.length) return;
+      _paths[idx] = newPath;
+      await audioHandler.setUris(_paths, initialIndex: idx);
+      await audioHandler.seek(pos);
+      await audioHandler.play();
+      if (mounted) setState(() => _voiceId = id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('切换音色失败：$e')));
+      }
+    } finally {
+      _switchingVoice = false;
+    }
+  }
+
   /// 有章节损坏/加载受限时，给一个温和的 UA 引导（本地场景不打扰正常播放）
   Widget _buildUaHint() {
     return Padding(
@@ -362,15 +441,15 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
 
   void _startSleepCountdown(int minutes) {
     _sleepTick?.cancel();
-    setState(() => _sleepLeft = Duration(minutes: minutes));
+    _sleepLeft.value = Duration(minutes: minutes);
     _sleepTick = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
-      final left = (_sleepLeft ?? Duration.zero) - const Duration(seconds: 1);
+      final left = (_sleepLeft.value ?? Duration.zero) - const Duration(seconds: 1);
       if (left <= Duration.zero) {
         t.cancel();
-        setState(() => _sleepLeft = null);
+        _sleepLeft.value = null;
       } else {
-        setState(() => _sleepLeft = left);
+        _sleepLeft.value = left;
       }
     });
   }
@@ -378,7 +457,7 @@ class _AudioPlayerPageState extends ConsumerState<AudioPlayerPage> {
   void _cancelSleep() {
     _sleepTick?.cancel();
     audioHandler.cancelSleepTimer();
-    setState(() => _sleepLeft = null);
+    _sleepLeft.value = null;
   }
 
   /// 书签列表：点一行跳到那章那个位置，长按删

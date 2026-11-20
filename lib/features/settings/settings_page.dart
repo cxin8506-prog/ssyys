@@ -24,40 +24,6 @@ class SettingsPage extends ConsumerWidget {
         padding: pagePadding(context, top: 8, bottom: 32),
         children: [
           _Section(
-            title: '我的内容',
-            children: [
-              ListTile(
-                leading: _iconBadge(context, Icons.favorite_outline),
-                title: const Text('收藏'),
-                subtitle: const Text('听书 / 视频分别归档'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => Navigator.of(context).pushNamed('/favorites'),
-              ),
-              ListTile(
-                leading: _iconBadge(context, Icons.history),
-                title: const Text('历史'),
-                subtitle: const Text('最近听过 / 看过'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => Navigator.of(context).pushNamed('/history'),
-              ),
-              ListTile(
-                leading: _iconBadge(context, Icons.bookmark_outline),
-                title: const Text('书签'),
-                subtitle: const Text('播放位置标记'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => Navigator.of(context).pushNamed('/bookmarks'),
-              ),
-              ListTile(
-                leading: _iconBadge(context, Icons.travel_explore),
-                title: const Text('源搜索'),
-                subtitle: const Text('在已导入的源里搜索内容'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () =>
-                    Navigator.of(context).pushNamed('/source-search'),
-              ),
-            ],
-          ),
-          _Section(
             title: '外观',
             children: [
               ListTile(
@@ -139,6 +105,17 @@ class SettingsPage extends ConsumerWidget {
                 onTap: () => Navigator.of(context).pushNamed('/sources'),
               ),
               ListTile(
+                leading: _iconBadge(context, Icons.grid_view_outlined),
+                title: const Text('源卡片列数'),
+                subtitle: Text(
+                    '当前：${ref.watch(sourceColumnsProvider)} 列'),
+                trailing: Text('${ref.watch(sourceColumnsProvider)} 列',
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.primary)),
+                onTap: () => _pickColumns(context, ref, prefs),
+              ),
+              ListTile(
                 leading: _iconBadge(context, Icons.http_outlined),
                 title: const Text('UA 设置'),
                 subtitle: const Text('按源自动切换 UA，加载受限时可修改重试'),
@@ -164,34 +141,6 @@ class SettingsPage extends ConsumerWidget {
                 trailing: const Icon(Icons.chevron_right, size: 20),
                 onTap: () => Navigator.of(context).pushNamed('/webdav-play'),
               ),
-              ListTile(
-                leading: _iconBadge(context, Icons.cloud_queue_outlined),
-                title: const Text('阿里云盘设置'),
-                subtitle: const Text('还没接入'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => Navigator.of(context).pushNamed('/cloud-ali'),
-              ),
-              ListTile(
-                leading: _iconBadge(context, Icons.cloud_queue_outlined),
-                title: const Text('百度网盘设置'),
-                subtitle: const Text('还没接入'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => Navigator.of(context).pushNamed('/cloud-baidu'),
-              ),
-              ListTile(
-                leading: _iconBadge(context, Icons.cloud_queue_outlined),
-                title: const Text('115网盘设置'),
-                subtitle: const Text('还没接入'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => Navigator.of(context).pushNamed('/cloud-115'),
-              ),
-              ListTile(
-                leading: _iconBadge(context, Icons.lan_outlined),
-                title: const Text('SMB 设置'),
-                subtitle: const Text('连接局域网共享，还没接入'),
-                trailing: const Icon(Icons.chevron_right, size: 20),
-                onTap: () => Navigator.of(context).pushNamed('/cloud-smb'),
-              ),
             ],
           ),
           _Section(
@@ -214,7 +163,7 @@ class SettingsPage extends ConsumerWidget {
               ListTile(
                 leading: _iconBadge(context, Icons.description_outlined),
                 title: const Text('运行日志'),
-                subtitle: const Text('查看 / 清空 / 导出'),
+                subtitle: const Text('查看 / 清空 / 复制'),
                 trailing: const Icon(Icons.chevron_right, size: 20),
                 onTap: () => Navigator.of(context).pushNamed('/logs'),
               ),
@@ -236,6 +185,36 @@ class SettingsPage extends ConsumerWidget {
       );
 
 
+
+  void _pickColumns(
+      BuildContext context, WidgetRef ref, SharedPreferences prefs) {
+    final current = ref.read(sourceColumnsProvider);
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('源卡片列数'),
+        children: [1, 2, 3, 4, 5].map((v) {
+          return SimpleDialogOption(
+            onPressed: () {
+              ref.read(sourceColumnsProvider.notifier).state = v;
+              prefs.setInt(AppConstants.keySourceColumns, v);
+              Navigator.pop(ctx);
+            },
+            child: Row(
+              children: [
+                Text('$v 列', style: const TextStyle(fontSize: 15)),
+                if (v == current) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check,
+                      size: 16, color: Theme.of(context).colorScheme.primary),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
 
   void _pickFontSize(
       BuildContext context, WidgetRef ref, SharedPreferences prefs) {

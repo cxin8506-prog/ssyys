@@ -11,11 +11,18 @@ import '../../core/log/app_logger.dart';
 class TingShuBridge {
   static const MethodChannel _channel = MethodChannel('suishou/tingshu');
 
+  /// 原生返回的是 JSONArray 字符串（MainActivity 里 result.success(out)，
+  /// out 是 JSONArray.toString()），不是 List——以前这里按 List<dynamic>
+  /// 接，Flutter 3.0 的 invokeMethod 遇到类型不符直接抛错，catch 后返回空，
+  /// 导致每次扫描都失败、JAR 永远装成单个旧格式源。按 String 接再解 JSON。
   static Future<List<String>> scanEntryClasses(String jarPath) async {
     try {
-      final r = await _channel
-          .invokeMethod<List<dynamic>>('scanSources', {'path': jarPath});
-      return (r ?? const []).map((e) => '$e').toList();
+      final r = await _channel.invokeMethod<String>(
+          'scanSources', {'path': jarPath});
+      if (r == null || r.isEmpty) return const [];
+      final data = jsonDecode(r);
+      if (data is! List) return const [];
+      return data.map((e) => '$e').toList();
     } catch (e) {
       appLogger.warning('扫描 JAR 源包失败', detail: '$e');
       return const [];
@@ -121,6 +128,25 @@ class TingShuBridge {
       return r == 'true';
     } catch (_) {
       return false;
+    }
+  }
+
+  /// 这个源能不能缓存（isCacheable）：默认 true，源明确返回 false 才不缓存。
+  /// 所有视频源的 isCacheable() 都是 false，自动缓存问到 false 就不下。
+  static Future<bool> isCacheable({
+    required String jarPath,
+    required String entryClass,
+    required int index,
+  }) async {
+    try {
+      final r = await _channel.invokeMethod<String>('isCacheable', {
+        'path': jarPath,
+        'entryClass': entryClass,
+        'index': index,
+      });
+      return r != 'false';
+    } catch (_) {
+      return true;
     }
   }
 }

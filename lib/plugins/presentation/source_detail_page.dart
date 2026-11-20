@@ -749,6 +749,9 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       _toast('这个源没有提供登录地址，只能在源里补 login，或手动填 Cookie');
       return;
     }
+    // 青空次元的登录态是 localStorage 里的 sorani_auth_token，旧手机 WebView
+    // 跑不动它的登录页时会黑屏，所以给一个手动粘贴 token 的入口。
+    final isSorani = f.loginUrl.toLowerCase().contains('sorani');
     final cookie = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => LoginWebPage(
@@ -756,6 +759,12 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
           url: f.loginUrl,
           successUrl: f.successUrl,
           cookieUrl: f.cookieUrl,
+          tokenKey: isSorani ? 'sorani_auth_token' : '',
+          tokenHint: isSorani
+              ? '在电脑浏览器上打开青空次元并登录，然后按 F12 打开开发者工具，'
+                  '在控制台输入 localStorage.getItem("sorani_auth_token")，'
+                  '把引号里的那串字符复制过来粘贴进来。'
+              : '',
         ),
       ),
     );
@@ -775,6 +784,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
       }
       cfg.values[f.key] = token;
       cfg.values['token'] = token;
+      if (isSorani) cfg.values['sorani_auth_token'] = token;
       cfg.syncLegacy(f.key, token);
       await ref.read(sourceConfigRepositoryProvider).save(cfg);
       if (!mounted) return;
@@ -824,8 +834,47 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
     return FutureBuilder<Map<String, dynamic>?>(
       future: _tingShuLoginFuture,
       builder: (context, snap) {
+        // 还在查登录入口：先占位，别闪一下空白
+        if (snap.connectionState != ConnectionState.done) {
+          return _card(
+            children: [
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 10),
+                  Text('正在读取登录入口…',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ],
+          );
+        }
         final info = snap.data;
-        if (info == null) return const SizedBox.shrink();
+        // 源没有提供登录入口：明确写出来，别留一块空白让人以为没加载完
+        if (info == null) {
+          return _card(
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.login, size: 16, color: context.subtleColor),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text('登录',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text('这个源没有提供登录入口，不用登录就能用。',
+                  style: Theme.of(context).textTheme.bodySmall),
+            ],
+          );
+        }
         final url = '${info['url'] ?? ''}';
         if (url.isEmpty) return const SizedBox.shrink();
         final desktop = info['desktop'] == true;
@@ -926,6 +975,20 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
         _toast('Token 已保存，播放时会用它登录');
         return;
       }
+    }
+    // 手动填 Cookie：登录页直接返回了 Cookie 字符串，同样存进源配置，
+    // 别像以前那样只弹一句提示就把 Cookie 丢掉
+    if (result != null && result.isNotEmpty) {
+      try {
+        final repo = ref.read(sourceConfigRepositoryProvider);
+        final cfg = await repo.load(s.id, s.type);
+        cfg.values['cookie'] = result;
+        cfg.loginState = result;
+        await repo.save(cfg);
+      } catch (_) {}
+      setState(() {});
+      _toast('登录成功，Cookie 已同步给这个源');
+      return;
     }
     setState(() {});
     _toast('登录页已关闭，Cookie 已同步给这个源');

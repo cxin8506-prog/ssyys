@@ -477,6 +477,16 @@ object TingShuRuntime {
         }
     }
 
+    /** 这个源能不能缓存（isCacheable）：默认 true，源明确返回 false 才不缓存 */
+    fun isCacheable(path: String, entryClass: String, index: Int): Boolean {
+        val s = sourceInstance(path, entryClass, index)
+        return try {
+            s.javaClass.getMethod("isCacheable").invoke(s) as? Boolean ?: true
+        } catch (_: Throwable) {
+            true
+        }
+    }
+
     // ------------------------------------------------------------ 调用
 
     fun call(

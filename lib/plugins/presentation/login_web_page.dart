@@ -187,6 +187,49 @@ class _LoginWebPageState extends State<LoginWebPage> {
     }
   }
 
+  /// 手动填写 Cookie：所有登录源通用的兜底（抖音等没有 token 入口的源也一样）。
+  /// 在电脑浏览器上登录后，把请求头里的 Cookie 整段复制过来，
+  /// 点确定就直接以 Cookie 字符串返回给调用方存进源配置。
+  Future<void> _showCookieDialog() async {
+    final ctrl = TextEditingController();
+    final cookie = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('手动填写 Cookie'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '在电脑浏览器上登录这个站点后，复制请求里的 Cookie 整段粘贴进来。',
+              style: TextStyle(fontSize: 12.5, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLines: 5,
+              minLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'key=value; key2=value2',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    if (cookie == null || cookie.isEmpty) return;
+    if (mounted) Navigator.of(context).pop(cookie);
+  }
+
   /// 手动输入 Token：粘贴进来后写进这个站点的 localStorage，
   /// 再以 `TOKEN:<token>` 返回给调用方存进源配置。
   Future<void> _showTokenDialog() async {
@@ -302,6 +345,15 @@ class _LoginWebPageState extends State<LoginWebPage> {
                       style: TextStyle(fontSize: 12)),
                 ),
               OutlinedButton(
+                onPressed: _showCookieDialog,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child:
+                    const Text('手动填 Cookie', style: TextStyle(fontSize: 12)),
+              ),
+              OutlinedButton(
                 onPressed: _retry,
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(0, 32),
@@ -348,6 +400,10 @@ class _LoginWebPageState extends State<LoginWebPage> {
                       child: const Text('手动输入 Token'),
                     ),
                   OutlinedButton(
+                    onPressed: _showCookieDialog,
+                    child: const Text('手动填 Cookie'),
+                  ),
+                  OutlinedButton(
                     onPressed: _retry,
                     child: const Text('重试'),
                   ),
@@ -373,6 +429,11 @@ class _LoginWebPageState extends State<LoginWebPage> {
               child: const Text('手动输入 Token',
                   style: TextStyle(fontSize: 13)),
             ),
+          TextButton(
+            onPressed: _showCookieDialog,
+            child: const Text('手动填 Cookie',
+                style: TextStyle(fontSize: 13)),
+          ),
           TextButton(
             onPressed: _finishing ? null : _finish,
             child: _finishing
@@ -429,7 +490,8 @@ class _LoginWebPageState extends State<LoginWebPage> {
             child: Text(
               '在这个页面里自己登录（账号密码、验证码都在网页里操作），'
               '登录成功后点右上角「完成」，App 会把 Cookie 同步给这个源。'
-              '${_hasTokenEntry ? '如果页面打不开，点右上角「手动输入 Token」。' : ''}',
+              '如果页面打不开，点右上角「手动填 Cookie」'
+              '${_hasTokenEntry ? '或「手动输入 Token」' : ''}，在电脑上登录后粘贴过来。',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

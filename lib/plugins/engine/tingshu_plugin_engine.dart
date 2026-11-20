@@ -73,6 +73,9 @@ class TingShuPluginEngine implements PluginEngine {
       case 'detail':
       case 'chapters':
         return true;
+      case 'isCacheable':
+        // 源有没有重写 isCacheable()，原生侧直接问源实例
+        return true;
       default:
         return false;
     }
@@ -152,6 +155,16 @@ class TingShuPluginEngine implements PluginEngine {
       case 'lines':
       case 'voices':
         return const [];
+
+      case 'isCacheable':
+        final path = _jarPath;
+        final entry = _entryClass;
+        if (path == null || entry == null) return true;
+        return TingShuBridge.isCacheable(
+          jarPath: path,
+          entryClass: entry,
+          index: _source?.sourceIndex ?? 0,
+        );
 
       default:
         throw Exception('该源不支持${PluginMethods.labels[method] ?? method}');

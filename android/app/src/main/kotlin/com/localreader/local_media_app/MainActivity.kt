@@ -124,6 +124,9 @@ class MainActivity : FlutterActivity() {
                             "isSearchValidated" -> {
                                 if (TingShuRuntime.isSearchValidated(path, entryClass, index)) "true" else "false"
                             }
+                            "isCacheable" -> {
+                                if (TingShuRuntime.isCacheable(path, entryClass, index)) "true" else "false"
+                            }
                             else -> throw IllegalArgumentException("未知方法 ${call.method}")
                         }
                         runOnUiThread { result.success(out) }

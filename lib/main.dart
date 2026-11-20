@@ -15,12 +15,10 @@ import 'features/backup/backup_page.dart';
 import 'features/backup/log_page.dart';
 import 'features/library/collection_pages.dart';
 import 'features/library/library_page.dart';
-import 'features/onboarding/onboarding_page.dart';
 import 'features/presentation/discover_page.dart';
 import 'features/presentation/home_page.dart';
 import 'features/search/search_page.dart';
 import 'features/settings/cache_settings_page.dart';
-import 'features/settings/not_available_page.dart';
 import 'features/settings/playback_settings_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/settings/theme_picker_page.dart';
@@ -77,20 +75,17 @@ Future<void> main() async {
   // 全面屏：内容延伸到状态栏/导航栏下方，由各页面自己避让
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-  final onboardDone = prefs.getBool(AppConstants.keyOnboardDone) ?? false;
-
   runApp(ProviderScope(
     overrides: [
       sharedPrefsProvider.overrideWithValue(prefs),
       databaseProvider.overrideWithValue(db),
     ],
-    child: MyApp(onboardDone: onboardDone),
+    child: const MyApp(),
   ));
 }
 
 class MyApp extends ConsumerWidget {
-  final bool onboardDone;
-  const MyApp({super.key, required this.onboardDone});
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -127,7 +122,8 @@ class MyApp extends ConsumerWidget {
         theme: AppTheme.light(themeColor),
         darkTheme: AppTheme.dark(themeColor),
         themeMode: effectiveMode,
-        home: onboardDone ? const MainShell() : const OnboardingPage(),
+        // 问题 2：教程页已去掉，打开 App 直接进书源页（MainShell）
+        home: const MainShell(),
         onGenerateRoute: _onGenerateRoute,
       ),
     );
@@ -164,22 +160,6 @@ class MyApp extends ConsumerWidget {
       case '/library':
         return MaterialPageRoute(
             builder: (_) => const LibraryPage(), settings: settings);
-      case '/cloud-ali':
-        return MaterialPageRoute(
-            builder: (_) => const NotAvailablePage(title: '阿里云盘'),
-            settings: settings);
-      case '/cloud-baidu':
-        return MaterialPageRoute(
-            builder: (_) => const NotAvailablePage(title: '百度网盘'),
-            settings: settings);
-      case '/cloud-115':
-        return MaterialPageRoute(
-            builder: (_) => const NotAvailablePage(title: '115网盘'),
-            settings: settings);
-      case '/cloud-smb':
-        return MaterialPageRoute(
-            builder: (_) => const NotAvailablePage(title: 'SMB'),
-            settings: settings);
       case '/logs':
         return MaterialPageRoute(
             builder: (_) => const LogPage(), settings: settings);
@@ -353,11 +333,13 @@ class _AppBottomBar extends StatelessWidget {
   }
 
   /// 底部栏标签字号按名字长度自适应，保证源真名完整显示
+  /// （问题 12：「听书聚合 v1.0.8」9 个字也要完整显示，最小降到 7）
   double _labelFontSize(String label) {
     final len = label.length;
     if (len <= 4) return 10;
     if (len <= 6) return 9;
-    return 8;
+    if (len <= 8) return 8;
+    return 7;
   }
 
   Widget _tab(BuildContext context, int i) {
@@ -390,7 +372,7 @@ class _AppBottomBar extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                // 源真名完整显示：4 字及以内 10，5–6 字 9，更长 8
+                // 源真名完整显示：4 字及以内 10，5–6 字 9，7–8 字 8，更长 7
                 fontSize: _labelFontSize(it['label'] as String),
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                 color: selected ? primary : context.subtleColor,

@@ -91,15 +91,8 @@ class _CollectionPageState extends ConsumerState<CollectionPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: buildAppDrawer(context),
       appBar: AppBar(
-        leading: Builder(
-          builder: (ctx) => IconButton(
-            icon: const Icon(Icons.menu),
-            tooltip: '菜单',
-            onPressed: () => Scaffold.of(ctx).openDrawer(),
-          ),
-        ),
+        automaticallyImplyLeading: false,
         title: Text(_title),
         actions: [
           if (widget.kind == CollectionKind.favorite)

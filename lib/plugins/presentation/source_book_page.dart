@@ -623,6 +623,13 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
                   _chapters.map((e) => '${e['name']}').toList(),
               lineName: lineName,
               voiceId: _voiceId ?? '',
+              // 缓存的视频也要能切线路：线路列表和切线回调跟在线分支一样传
+              lines: [
+                for (final l in _lines)
+                  {'id': '${l['id']}', 'name': '${l['name'] ?? l['id']}'}
+              ],
+              currentLineId: _lineId,
+              onSwitchLine: (lineId) => _resolveMediaUrl(index, lineId),
             ),
           ));
         }

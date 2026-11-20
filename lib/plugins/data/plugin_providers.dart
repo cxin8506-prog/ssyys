@@ -22,8 +22,12 @@ final sourceConfigRepositoryProvider = Provider<SourceConfigRepository>((ref) {
 });
 
 /// 已安装源列表（安装/删除后 ref.invalidate 刷新）
+/// 读到列表后跑一次启动自愈：以前扫描失败装坏的单个 JAR 条目
+/// （比如手机上那个「影视_」）会在这里自动拆成多个源，不用用户重导。
 final sourceListProvider = FutureProvider<List<PluginSource>>((ref) async {
-  return ref.read(sourceRepositoryProvider).loadAll();
+  final repo = ref.read(sourceRepositoryProvider);
+  final all = await repo.loadAll();
+  return repo.repairLegacyJars(all);
 });
 
 /// 当前选中的源（按 audio / video 分别记忆）

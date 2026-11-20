@@ -11,6 +11,7 @@ import '../data/plugin_providers.dart';
 import '../data/plugin_resume.dart';
 import '../model/plugin_source.dart';
 import 'network_audio_page.dart';
+import 'source_detail_page.dart';
 
 /// 点列表里的一个片名弹出来的详情卡（我的听书的样子）：
 /// 左边海报，右边片名/年份/地区/状态，下面是「取消」「添加收藏」「开始播放」，
@@ -80,6 +81,20 @@ Future<void> showSourceDetailDialog(
           ],
         ),
         actions: [
+          TextButton(
+            onPressed: busy
+                ? null
+                : () {
+                    // 先关弹窗再进源详情（登录/设置入口都在源详情页），
+                    // 关晚了会把详情页一起弹掉
+                    Navigator.pop(ctx);
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) =>
+                          SourceDetailPage(sourceId: source.id),
+                    ));
+                  },
+            child: const Text('源设置'),
+          ),
           TextButton(
             onPressed: busy ? null : () => Navigator.pop(ctx),
             child: const Text('取消'),

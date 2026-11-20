@@ -300,18 +300,28 @@ class _SyncPageState extends ConsumerState<SyncPage> {
     _toast('已保存到本机');
   }
 
-  /// 把报错翻译成人话，不直接甩英文原文
+  /// 把报错翻译成人话，不直接甩英文原文。
+  /// 401/403 = 账号或应用密码错；404 = 地址错；连不上/超时 = 网络问题。
+  /// 注意：根目录没有可列出的文件不代表地址错——test() 只认状态码，
+  /// 207/200 就是成功，不会因为目录为空报 404。
   String _friendlyError(Object e) {
     final msg = '$e';
-    if (msg.contains('404')) return '地址错了（服务器返回 404），检查服务器地址';
     if (msg.contains('401') || msg.contains('403')) {
-      return '账号或密码不对（密码填应用密码，不是登录密码）';
+      return '账号或应用密码不对（密码填应用密码，不是登录密码）';
     }
+    if (msg.contains('404')) return '地址错了，服务器找不到这个地址，检查服务器地址';
     if (msg.contains('SocketException') ||
+        msg.contains('TimeoutException') ||
         msg.contains('timed out') ||
-        msg.contains('Connection')) {
-      return '连不上服务器，检查网络和地址';
+        msg.contains('ClientException') ||
+        msg.contains('Connection closed') ||
+        msg.contains('Connection refused') ||
+        msg.contains('Network is unreachable') ||
+        msg.contains('Failed host lookup')) {
+      return '连不上服务器，检查网络后重试（也可能是地址里的域名打不开）';
     }
+    final code = RegExp(r'HTTP (\d{3})').firstMatch(msg)?.group(1);
+    if (code != null) return '服务器返回了 $code，检查地址、账号和密码';
     return '请检查地址、账号、密码和网络';
   }
 
@@ -407,7 +417,7 @@ class _SyncPageState extends ConsumerState<SyncPage> {
       setState(() => _status = '恢复完成，请重启 App');
       if (mounted) _showRestartDialog();
     } catch (e) {
-      setState(() => _status = '恢复失败：$e');
+      setState(() => _status = '恢复失败：${_friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

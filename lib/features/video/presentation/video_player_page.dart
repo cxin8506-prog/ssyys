@@ -103,7 +103,8 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   Timer? _statsTimer;
   Timer? _hintTimer;
   Timer? _resumeTimer;
-  String? _gestureHint;
+  // 手势提示（亮度/音量/快进秒数）只刷提示条本身，不整页 setState
+  final _gestureHint = ValueNotifier<String?>(null);
   String? _error;
   String? _failedUrl;
   bool _finished = false;
@@ -236,10 +237,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   }
 
   void _showGestureHint(String text) {
-    setState(() => _gestureHint = text);
+    _gestureHint.value = text;
     _hintTimer?.cancel();
     _hintTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _gestureHint = null);
+      _gestureHint.value = null;
     });
   }
 
@@ -263,7 +264,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         (_controller?.value.isInitialized == true
             ? _controller!.value.position
             : _lastPosition);
-    final ctrl = widget.network
+    // 按地址本身判断网络还是本地文件：缓存的视频切线路后拿到的是网络地址，
+    // 不能因为进页面时是缓存文件就一直按文件打开
+    final isNetwork = url.startsWith('http');
+    final ctrl = isNetwork
         ? VideoPlayerController.network(url,
             httpHeaders: widget.headers)
         : VideoPlayerController.file(File(url));
@@ -389,7 +393,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       _saveLine(id);
       _toast('已切换线路，从当前进度继续');
     } catch (e) {
-      if (mounted) _toast('切换失败：$e');
+      if (mounted) {
+        // 手动切线失败：把这条线标成失败过的，下次打开线路表能看到
+        setState(() => _failedLineId = id);
+        _toast('切换失败：$e');
+      }
     } finally {
       if (mounted) setState(() => _switching = false);
     }
@@ -517,6 +525,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   void dispose() {
     _saveResume();
     _controlsVisible.dispose();
+    _gestureHint.dispose();
     _resumeTimer?.cancel();
     _hideTimer?.cancel();
     _statsTimer?.cancel();
@@ -535,7 +544,12 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           fit: StackFit.expand,
           children: [
             _buildVideoSurface(),
-            if (_gestureHint != null) _buildGestureHint(),
+            ValueListenableBuilder<String?>(
+              valueListenable: _gestureHint,
+              builder: (_, hint, __) => hint == null
+                  ? const SizedBox.shrink()
+                  : _buildGestureHint(hint),
+            ),
             if (_finished) _buildFinishedHint(),
             if (_error != null) _buildErrorOverlay(),
             if (!_locked)
@@ -568,7 +582,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     );
   }
 
-  Widget _buildGestureHint() {
+  Widget _buildGestureHint(String hint) {
     return Center(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
@@ -577,7 +591,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
-          _gestureHint!,
+          hint,
           style: const TextStyle(color: Colors.white, fontSize: 15),
         ),
       ),
@@ -684,14 +698,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
         final left = d.localPosition.dx < width / 2;
         final delta = -d.delta.dy / 200;
         if (left) {
-          setState(() {
-            _brightness = (_brightness + delta).clamp(0.0, 1.0);
-          });
+          // 只改数值、不整页 setState，数值通过手势提示条显示
+          _brightness = (_brightness + delta).clamp(0.0, 1.0);
           _showGestureHint('亮度 ${(_brightness * 100).round()}%');
         } else {
-          setState(() {
-            _volume = (_volume + delta).clamp(0.0, 1.0);
-          });
+          _volume = (_volume + delta).clamp(0.0, 1.0);
           _controller?.setVolume(_volume);
           _showGestureHint('音量 ${(_volume * 100).round()}%');
         }

@@ -13,7 +13,9 @@ import '../../plugins/presentation/source_book_page.dart';
 import '../../plugins/presentation/source_search_page.dart';
 import '../../shared/widgets/common.dart';
 
-/// 书源页（首页）：筛选框 → 继续区 → 源组横条 → 源列表（一行多个卡片）→ 推荐
+/// 书源页（网格层）：顶栏只留搜索/设置两个图标（无标题、无播放键）→
+/// 源组横条（瘦版）→ 源卡片网格 → 推荐
+/// 点源卡片切到 tab 1（DiscoverPage，内容层），网格层随 tab 切换隐藏。
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -22,9 +24,7 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  final _filterCtrl = TextEditingController();
   final _scroll = ScrollController();
-  String _filter = '';
   /// 展开的分组（点横条展开/收起；默认展开第一个分组，其余收着）
   final Set<String> _openGroups = {};
   bool _groupsInit = false;
@@ -34,18 +34,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   void dispose() {
-    _filterCtrl.dispose();
     _scroll.dispose();
     super.dispose();
-  }
-
-  /// 回到源网格顶部：书源页本身就是源网格，顶部源名 /「换个源」点一下滚回网格
-  void _backToSourceGrid() {
-    if (_scroll.hasClients) {
-      _scroll.animateTo(0,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut);
-    }
   }
 
   @override
@@ -56,31 +46,25 @@ class _HomePageState extends ConsumerState<HomePage> {
     final isActiveTab = ref.watch(shellTabProvider) == 0;
     if (isActiveTab) _maybeRefresh(enabled);
 
-    // 分组：按源的 group 分，没写分组的归到「其他」；默认展开第一个分组
+    // 分组：按源的 group（包名，如 JAR 文件名「影视聚合」）分；
+    // group 为空（JS/ZIP 源）时用源自己的名字当分组名，绝不出现「其他」
     final groups = <String>[];
     for (final s in enabled) {
-      final g = s.group.isEmpty ? '其他' : s.group;
+      final g = _groupOf(s);
       if (!groups.contains(g)) groups.add(g);
     }
     if (!_groupsInit && groups.isNotEmpty) {
       _openGroups.add(groups.first);
       _groupsInit = true;
     }
-    final filtering = _filter.isNotEmpty;
-    bool isOpen(String g) => filtering || _openGroups.contains(g);
+    bool isOpen(String g) => _openGroups.contains(g);
     List<PluginSource> groupSources(String g) => enabled.where((s) {
-          final sg = s.group.isEmpty ? '其他' : s.group;
-          if (sg != g) return false;
-          if (filtering &&
-              !s.name.toLowerCase().contains(_filter.toLowerCase())) {
-            return false;
-          }
+          if (_groupOf(s) != g) return false;
           return true;
         }).toList(growable: false);
     final columns = ref.watch(sourceColumnsProvider);
 
     return Scaffold(
-      drawer: buildAppDrawer(context),
       body: RefreshIndicator(
         onRefresh: () => _refresh(ref),
         child: CustomScrollView(
@@ -88,18 +72,8 @@ class _HomePageState extends ConsumerState<HomePage> {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             _appBar(context, ref, source),
-            SliverToBoxAdapter(child: _filterBox(context)),
-            SliverToBoxAdapter(child: _sourceListHeader(context, columns)),
             if (enabled.isEmpty)
               SliverToBoxAdapter(child: _noSource(context, ref))
-            else if (groups.every((g) => groupSources(g).isEmpty))
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  child: Text('没有符合条件的源',
-                      style: Theme.of(context).textTheme.bodySmall),
-                ),
-              )
             else
               for (final g in groups)
                 if (groupSources(g).isNotEmpty) ...[
@@ -123,7 +97,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                           crossAxisCount: columns,
                           mainAxisSpacing: 10,
                           crossAxisSpacing: 10,
-                          mainAxisExtent: 96,
+                          mainAxisExtent: 132,
                         ),
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) => _sourceCard(groupSources(g)[i]),
@@ -144,8 +118,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  /// 分组名：group（包名）为空时用源自己的名字，绝不出现「其他」
+  String _groupOf(PluginSource s) => s.group.isEmpty ? s.name : s.group;
+
   /// 回到书源页时刷新登录标记（节流 2 秒，避免反复 setState）。
-  /// 断点续播本身还在（播放页存断点、历史里接着播），只是书源页不再显示「继续」区。
   void _maybeRefresh(List<PluginSource> enabled) {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastRefresh < 2000) return;
@@ -187,69 +163,36 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   // ------------------------------------------------------------ 顶部
-
+  // 纠正（2026-11-20）：网格层顶栏不要标题（不要「书源」也不要源名），
+  // 不要播放按钮；只留搜索放大镜（进搜索页）和设置齿轮（进设置页）。
+  // 列数切换、源管理都不放顶栏（列数由设置页提供，源管理放设置页里）。
+  // 背景用主题强调色（AppBarTheme）。
   Widget _appBar(BuildContext context, WidgetRef ref, PluginSource? source) {
     return SliverAppBar(
       pinned: true,
       elevation: 0,
       scrolledUnderElevation: 0,
       toolbarHeight: 64,
-      leading: Builder(
-        builder: (ctx) => IconButton(
-          icon: const Icon(Icons.menu),
-          tooltip: '菜单',
-          onPressed: () => Scaffold.of(ctx).openDrawer(),
-        ),
-      ),
-      titleSpacing: 0,
-      title: _SourceTitle(
-        source: source,
-        // 书源页本身就是源网格：点顶部源名滚回网格顶，不弹底部选源 sheet
-        onTap: _backToSourceGrid,
-      ),
+      automaticallyImplyLeading: false,
       actions: [
-        IconButton(
-          icon: const Icon(Icons.play_arrow_rounded),
-          tooltip: '播放',
-          onPressed: () => openMostRecentResume(context, ref),
-        ),
         IconButton(
           icon: const Icon(Icons.search_rounded),
           tooltip: '搜索',
           onPressed: () => _openSearch(context, source),
+        ),
+        IconButton(
+          icon: const Icon(Icons.settings_outlined),
+          tooltip: '设置',
+          onPressed: () => Navigator.of(context).pushNamed('/settings'),
         ),
         const SizedBox(width: 6),
       ],
     );
   }
 
-  /// 顶部一个“筛选书源”输入框，输字按名字筛选源
-  Widget _filterBox(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: TextField(
-        controller: _filterCtrl,
-        decoration: InputDecoration(
-          hintText: '筛选书源',
-          prefixIcon: const Icon(Icons.search, size: 20),
-          suffixIcon: _filter.isEmpty
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.clear, size: 18),
-                  onPressed: () {
-                    _filterCtrl.clear();
-                    setState(() => _filter = '');
-                  },
-                ),
-        ),
-        onChanged: (v) => setState(() => _filter = v.trim()),
-      ),
-    );
-  }
-
   // ------------------------------------------------------------ 源组 / 源列表
 
-  /// 分组横条（我的听书的样子）：整条主题主色淡底 + 主色组名居中，
+  /// 分组横条（瘦版）：整条主题主色淡底 + 主色组名居中，
   /// 点一下展开这个分组的源卡片，再点一下收起。默认展开第一个分组。
   /// 颜色跟主题走：底用 primarySoft、字用 primary，深色主题下也是深底亮字。
   Widget _groupBar(BuildContext context, String name, int count, bool open,
@@ -259,11 +202,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     return InkWell(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        margin: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           children: [
@@ -274,7 +217,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: fg)),
             ),
@@ -293,58 +236,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _sourceListHeader(BuildContext context, int columns) {
-    final prefs = ref.read(sharedPrefsProvider);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-      child: Row(
-        children: [
-          _bar(context),
-          const SizedBox(width: 8),
-          Text('源列表',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.grid_view_rounded, size: 20),
-            tooltip: '列数：$columns 列',
-            onPressed: () async {
-              final picked = await showMenu<int>(
-                context: context,
-                position: const RelativeRect.fromLTRB(100, 100, 16, 0),
-                items: [1, 2, 3, 4, 5]
-                    .map((n) => PopupMenuItem<int>(
-                          value: n,
-                          child: Row(
-                            children: [
-                              Text('$n 列'),
-                              if (n == columns) ...[
-                                const SizedBox(width: 8),
-                                Icon(Icons.check,
-                                    size: 16,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary),
-                              ],
-                            ],
-                          ),
-                        ))
-                    .toList(),
-              );
-              if (picked != null) {
-                ref.read(sourceColumnsProvider.notifier).state = picked;
-                prefs.setInt(AppConstants.keySourceColumns, picked);
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 源卡片：源名（加粗）+ 登录标记 + 介绍，两行省略
+  /// 源卡片：源名（加粗，可换两行，完整显示不截断）+ 登录标记 + 介绍，两行省略
   Widget _sourceCard(PluginSource s) {
     final primary = Theme.of(context).colorScheme.primary;
     final hasLogin = _loginFlags[s.id] ?? false;
@@ -368,7 +260,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               children: [
                 Expanded(
                   child: Text(s.name,
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontSize: 14, fontWeight: FontWeight.w700)),
@@ -577,27 +469,38 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  /// 只有搜索能力的源：不摆「暂时没有推荐」大空白卡片，
+  /// 改成一行紧凑的搜索入口（「这个源只提供搜索」+「去搜索」按钮）。
+  /// 推荐按源实际能力走：推荐 → 分类（点源卡片进内容层看分类）→ 搜索入口。
   Widget _feedEmpty(BuildContext context, WidgetRef ref, PluginSource source) {
-    // 推荐位是空的，不代表源坏了：直接给搜索和分类入口，别让用户觉得源不能用。
-    return _Notice(
-      icon: Icons.widgets_outlined,
-      title: '「${source.name}」暂时没有推荐',
-      message: '这个源没有首页推荐，但可以直接搜、也可以看看它的分类。',
-      hint: '也可以在左上角换一个带推荐位的源。',
-      actions: [
-        ElevatedButton(
-          onPressed: () => _openSearch(context, source),
-          child: const Text('去搜索'),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: context.cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: context.palette.outline),
         ),
-        OutlinedButton(
-          onPressed: () => ref.read(shellTabProvider.notifier).state = 1,
-          child: const Text('看看分类'),
+        child: Row(
+          children: [
+            Icon(Icons.search_rounded,
+                size: 18, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('这个源只提供搜索',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13)),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _openSearch(context, source),
+              child: const Text('去搜索'),
+            ),
+          ],
         ),
-        TextButton(
-          onPressed: _backToSourceGrid,
-          child: const Text('换个源'),
-        ),
-      ],
+      ),
     );
   }
 
@@ -640,54 +543,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     } catch (_) {
       // 错误交给页面展示
     }
-  }
-}
-
-// ---------------------------------------------------------------- 顶部标题
-
-class _SourceTitle extends StatelessWidget {
-  final PluginSource? source;
-  final VoidCallback onTap;
-
-  const _SourceTitle({required this.source, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    source?.name ?? '我的听书',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const SizedBox(width: 2),
-                Icon(Icons.keyboard_arrow_down_rounded,
-                    size: 22, color: Colors.white70),
-              ],
-            ),
-            const SizedBox(height: 1),
-            Text(
-              source == null ? '点这里导入源' : '点一下切换源',
-              style: const TextStyle(fontSize: 10.5, color: Colors.white70),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

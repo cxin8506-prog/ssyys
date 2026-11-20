@@ -167,6 +167,9 @@ class SourceRepository {
       description: _pickString(manifest, ['description', 'desc', '简介']) ?? '',
       entry: entry,
       icon: _pickString(manifest, ['icon', 'cover']),
+      // 分组名用包名（manifest 声明的分组，没有就用 ZIP 文件名），
+      // 书源页按这个分组，不要再出现「其他」。
+      group: _pickString(manifest, ['group', '分组']) ?? baseName,
       installedAt: DateTime.now().millisecondsSinceEpoch,
       sizeBytes: size,
     );
@@ -212,14 +215,30 @@ class SourceRepository {
       final totalSize = await _dirSize(groupDir);
       final each = (totalSize / found.length).round();
       final all = await loadAll();
-      // 重装同一个包：先清掉这个包的旧条目，以及旧版把它当成单文件 JAR 的那条
-      all.removeWhere((e) => e.isTingShu && e.group == baseName);
-      final legacy = all
-          .where((e) => e.isJar && e.name == baseName)
-          .map((e) => e.id)
-          .toList();
-      all.removeWhere((e) => legacy.contains(e.id));
-      for (final id in legacy) {
+      // 重装同一个包：先清掉这个包的旧条目，以及旧版把它当成单文件 JAR 的那条。
+      // 清理条件要宽一点：旧条目可能是扫描失败时落到旧格式分支的那条，
+      // 名字可能是包名，也可能是残缺的名字（比如「影视_」），还可能已经是
+      // 上次自愈拆出来的多源条目——按包名、残缺名、同一个共享目录三种条件清。
+      final groupDirName = '_jar_$sig';
+      bool samePackage(PluginSource e) {
+        if (e.group == baseName) return true;
+        final dirName = p.basename(p.dirname(e.jarPath ?? ''));
+        if (dirName == groupDirName) return true;
+        return false;
+      }
+
+      final legacyIds = <String>[];
+      for (final e in all) {
+        if (e.isTingShu && samePackage(e)) {
+          legacyIds.add(e.id);
+          continue;
+        }
+        if (e.isJar && (e.name == baseName || _isTruncatedName(e.name, baseName) || samePackage(e))) {
+          legacyIds.add(e.id);
+        }
+      }
+      all.removeWhere((e) => legacyIds.contains(e.id));
+      for (final id in legacyIds) {
         final d = Directory(await sourceDirPath(id));
         if (await d.exists()) await d.delete(recursive: true);
       }
@@ -248,6 +267,14 @@ class SourceRepository {
           sizeBytes: each,
         ));
       }
+      // 再按（入口类，下标，源名）去重：启动自愈拆出来的旧条目，
+      // 包名可能不准（比如 group 是「影视」），重导时靠这个三元组认出同一批源。
+      all.removeWhere((e) =>
+          e.isTingShu &&
+          list.any((n) =>
+              n.entryClass == e.entryClass &&
+              n.sourceIndex == e.sourceIndex &&
+              n.name == e.name));
       all.addAll(list);
       await _saveIndex(all);
       appLogger.info('安装我的听书源包成功',
@@ -287,6 +314,16 @@ class SourceRepository {
       appLogger.warning('JAR 内容探测失败', detail: '$e');
     }
 
+    // 扫描不到入口类，但 dex 里有 SourceEntry / getSources 的痕迹：
+    // 这就是「我的听书」格式的源包，只是原生桥没读出来。
+    // 不许悄悄装成一个用不了的单源，直接报人话错误，让用户删掉重导。
+    if (hasDex &&
+        (probe.toString().contains('SourceEntry') ||
+            probe.toString().contains('getSources'))) {
+      throw Exception('这个 JAR 是「我的听书」格式的源包，但 App 没能读出里面的源。'
+          '请先在源管理里删掉它，再重新导入一次；如果还是不行，可能是这个包有问题。');
+    }
+
     String? type = typeOverride;
     if (type == null || type.isEmpty) {
       type = _detectType(probe.toString());
@@ -310,9 +347,15 @@ class SourceRepository {
     );
 
     final all = await loadAll();
-    // 重装同一个包：先清掉同名旧单文件 JAR，避免索引里留重复的坏条目
+    // 重装同一个包：先清掉同名旧单文件 JAR，避免索引里留重复的坏条目。
+    // 同样按残缺名（比如「影视_」）和共享目录一起清，见 TingShu 分支的说明。
+    final groupDirName = '_jar_$sig';
     final dup = all
-        .where((e) => e.isJar && e.name == baseName)
+        .where((e) =>
+            e.isJar &&
+            (e.name == baseName ||
+                _isTruncatedName(e.name, baseName) ||
+                p.basename(p.dirname(e.jarPath ?? '')) == groupDirName))
         .map((e) => e.id)
         .toList();
     all.removeWhere((e) => dup.contains(e.id));
@@ -324,6 +367,84 @@ class SourceRepository {
     await _saveIndex(all);
     appLogger.info('安装 JAR 源成功', detail: '${source.name} dex=$hasDex entry=$entry');
     return [source];
+  }
+
+  /// 残缺名判断：旧条目的名字去掉尾巴的下划线后，是不是包名的前半截。
+  /// 比如「影视_」→「影视」，是「影视聚合」的前半截，就是同一个包的坏条目。
+  bool _isTruncatedName(String name, String baseName) {
+    final stripped = name.replaceAll(RegExp(r'_+$'), '');
+    if (stripped.isEmpty || stripped.length < 2) return false;
+    if (stripped == baseName) return false;
+    return baseName.startsWith(stripped);
+  }
+
+  bool _repairAttempted = false;
+
+  /// 启动自愈：把以前装坏的单个 JAR 条目（扫描失败时落到旧格式分支，
+  /// 比如手机上那个「影视_」）重新按「我的听书」格式拆成多个源。
+  /// 每个会话只跑一次；扫不到入口类的原样保留，不动用户的数据。
+  /// 调用方：sourceListProvider 读到列表后调一次。
+  Future<List<PluginSource>> repairLegacyJars(List<PluginSource> all) async {
+    if (_repairAttempted) return all;
+    _repairAttempted = true;
+    final legacy =
+        all.where((e) => e.isJar && (e.jarPath ?? '').isNotEmpty).toList();
+    if (legacy.isEmpty) return all;
+    var changed = false;
+    for (final bad in legacy) {
+      final jarPath = bad.jarPath!;
+      if (!await File(jarPath).exists()) continue;
+      List<String> entries;
+      try {
+        entries = await TingShuBridge.scanEntryClasses(jarPath);
+      } catch (_) {
+        continue;
+      }
+      if (entries.isEmpty) continue;
+      List<Map<String, dynamic>> found;
+      try {
+        found = await TingShuBridge.listSources(jarPath, entries.first);
+      } catch (_) {
+        continue;
+      }
+      if (found.isEmpty) continue;
+      // 旧条目的名字就是包名（文件主名），尾巴的下划线是残缺名，去掉；
+      // 拆出来的源共用这份 JAR，group 用这个名字，重导时会按共享目录清掉。
+      final baseName = bad.name.replaceAll(RegExp(r'_+$'), '');
+      final sig = baseName.hashCode.abs().toRadixString(36);
+      final totalSize = await _dirSize(Directory(p.dirname(jarPath)));
+      final each = (totalSize / found.length).round();
+      final list = <PluginSource>[];
+      for (final m in found) {
+        final index = int.tryParse('${m['index']}') ?? 0;
+        var name = '${m['name'] ?? ''}'.trim();
+        if (name.isEmpty) name = '$baseName ${index + 1}';
+        final desc = '${m['desc'] ?? ''}'.trim();
+        final url = '${m['url'] ?? ''}';
+        list.add(PluginSource(
+          id: 'ts_${sig}_$index',
+          name: name,
+          type: _detectType('$name\n$desc\n$url'),
+          format: 'tingShu',
+          version: '1.0.0',
+          description: desc,
+          entry: entries.first,
+          entryClass: entries.first,
+          jarPath: jarPath,
+          sourceIndex: index,
+          group: baseName,
+          installedAt: DateTime.now().millisecondsSinceEpoch,
+          sizeBytes: each,
+        ));
+      }
+      all.removeWhere((e) => e.id == bad.id);
+      all.addAll(list);
+      changed = true;
+      appLogger.info('自愈：坏的单源 JAR 已拆成多源',
+          detail: '${bad.name} -> ${list.length} 个源');
+    }
+    if (changed) await _saveIndex(all);
+    return all;
   }
 
   // ---------------------------------------------------------------- 其他操作
