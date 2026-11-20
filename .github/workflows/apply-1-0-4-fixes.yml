@@ -1,0 +1,73 @@
+name: apply-1-0-4-fixes
+
+# 一次性工作流：把 1.0.4 的修复提交进仓库，并把已编译好的 APK 挂到 Release。
+# 修复包与 APK 都在云端（抖音 CDN），这里下载 → 解包 → 提交推送 → 发 Release。
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-1-0-4-fixes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载修复包
+        run: curl -fsSL --retry 3 --retry-delay 2 -o /tmp/fix.tar.gz 'https://aka.doubaocdn.com/s/AhuFl1xPGK'
+
+      - name: 校验并解包
+        run: |
+          ls -l /tmp/fix.tar.gz
+          tar tzf /tmp/fix.tar.gz
+          tar xzf /tmp/fix.tar.gz -C .
+
+      - name: 提交并推送
+        run: |
+          git config user.name 'doubao-agent'
+          git config user.email agent@users.noreply.github.com
+          git add -A
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo '没有改动，跳过提交'
+          else
+            git commit -m '修复导入插件识别不了 / 装上不能用 / 播放失败，视频多线路回退，主题与卡片重做 (1.0.4)'
+            git push
+          fi
+
+  release:
+    needs: apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载已编译的 APK
+        run: curl -fsSL --retry 3 --retry-delay 2 -o app-release.apk 'https://aka.doubaocdn.com/s/7yaV9x1QVn'
+
+      - name: 校验 APK
+        run: |
+          ls -l app-release.apk
+          file app-release.apk
+
+      - name: 发布 1.0.4 Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v1.0.4
+          name: 随意听书 1.0.4（插件导入 / 播放修复版）
+          body: |
+            1.0.4 修复内容
+
+            - 导入插件识别不了：JS 引导补 host/CONFIG 别名与 console/setTimeout/btoa/atob/TextEncoder/window 垫片，registerSource 幂等
+            - 装上不能用：安装期不再把 __hostSync 覆盖成 throw，改「挂起 + 重放」，元数据抽取失败会把错误透出到界面
+            - manifest 多层目录：查找改为 BFS 三层，插件根取 manifest 所在目录，脚本路径基准不再错位
+            - 新导入的源不再被统一停用
+            - 视频多线路：起播 10s 超时、运行期错误自动切线、切线失败不再被当成功
+            - 主题默认樱花粉；卡片 18 圆角 + 细描边
+            - 版本 1.0.3+6 → 1.0.4+7
+
+            APK 使用 debug 签名，可直接安装（覆盖安装前请先卸载旧版）。
+          files: app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
