@@ -203,26 +203,92 @@ class InfoRow extends StatelessWidget {
     this.onTap,
   });
 
+  /// 设置项左侧小图标：按标题关键词挑，挑不到给个通用点。
+  IconData _iconFor(String title) {
+    const map = <String, IconData>{
+      '主题': Icons.palette_outlined,
+      '字体': Icons.format_size_rounded,
+      '封面': Icons.image_outlined,
+      '壁纸': Icons.wallpaper_rounded,
+      '播放': Icons.graphic_eq_rounded,
+      '视频': Icons.smart_display_outlined,
+      'UA': Icons.public_rounded,
+      '聚合': Icons.hub_outlined,
+      '精确': Icons.filter_alt_outlined,
+      '建议': Icons.tips_and_updates_outlined,
+      '并发': Icons.speed_rounded,
+      '超时': Icons.timer_outlined,
+      '缓存': Icons.download_rounded,
+      '备份': Icons.cloud_sync_outlined,
+      '源管理': Icons.extension_outlined,
+      '云同步': Icons.cloud_outlined,
+      'WebDAV': Icons.folder_shared_outlined,
+      '日志': Icons.article_outlined,
+      '统计': Icons.insights_rounded,
+      '通知': Icons.notifications_none_rounded,
+      '账号': Icons.person_outline_rounded,
+      '关于': Icons.info_outline_rounded,
+      '下载': Icons.download_rounded,
+      '评论': Icons.forum_outlined,
+      '帮助': Icons.help_outline_rounded,
+'夜间': Icons.dark_mode_outlined,
+    };
+    for (final e in map.entries) {
+      if (title.contains(e.key)) return e.value;
+    }
+    return Icons.chevron_right;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Theme.of(context).textTheme.bodyMedium?.color,
-                    ),
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: primary.withOpacity(0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: primary.withOpacity(0.13),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  alignment: Alignment.center,
+                  child: Icon(_iconFor(title), size: 19, color: primary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
+                      ),
                   if (subtitle != null) ...[
                     const SizedBox(height: 2),
                     Text(
@@ -257,7 +323,9 @@ class InfoRow extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ),
+  ),
+);
   }
 }
 

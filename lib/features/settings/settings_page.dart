@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_providers.dart';
 import '../../core/utils/listen_stats.dart';
 import '../../shared/widgets/common.dart';
+import '../../shared/widgets/soft_ui.dart';
 
 /// 设置页：按五组——外观 / 播放 / 网络 / 存储 / 关于。
 ///
@@ -54,10 +55,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         '${scheme.name} · ${modeLabels[modeIndex]}${coverEnabled ? ' · 封面取色' : ''}';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
-        children: [
+      body: GradientBackdrop(
+        child: SafeArea(
+          bottom: false,
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 24),
+            children: [
+              _SettingsHeader(onBack: () => Navigator.of(context).maybePop()),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: TextField(
@@ -240,7 +244,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
             const _AboutRow(),
           ],
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -442,6 +448,42 @@ class _AboutRow extends StatelessWidget {
       title: '随意听书',
       subtitle: '版本 1.0.3+6 · 本地音频 / 视频播放器',
       info: '本地音频 / 视频播放器。内容只从导入的插件来。',
+    );
+  }
+}
+
+/// 设置页头：圆形返回钮 + 大标题「设置」。
+class _SettingsHeader extends StatelessWidget {
+  final VoidCallback onBack;
+
+  const _SettingsHeader({required this.onBack});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 8, 18, 6),
+      child: Row(
+        children: [
+          CircleIconButton(
+            icon: Icons.arrow_back_ios_new_rounded,
+            onTap: onBack,
+            size: 34,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              '设置',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
+              ),
+            ),
+          ),
+          Icon(Icons.headphones_rounded, size: 24, color: primary.withOpacity(0.55)),
+        ],
+      ),
     );
   }
 }

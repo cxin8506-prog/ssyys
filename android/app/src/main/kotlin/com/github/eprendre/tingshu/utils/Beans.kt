@@ -1,15 +1,11 @@
 package com.github.eprendre.tingshu.utils
 
-/**
- * 与「我的听书」SDK 对齐的数据类。
- * 字段顺序会影响 JAR 里的构造调用，不要改。
- */
 data class Book(
-    var coverUrl: String,
-    val bookUrl: String,
-    val title: String,
-    var author: String,
-    var artist: String
+    var coverUrl: String,//封面链接
+    val bookUrl: String,//书籍链接
+    var title: String,//标题
+    var author: String,//作者
+    var artist: String//演播
 ) {
     var id: Int? = null
     var intro: String = ""
@@ -24,33 +20,33 @@ data class Book(
     var isFree: Boolean = true
     var isEpisodesReversed: Boolean = false
     var episodeList: List<Episode>? = null
-    var hasFullEpisodes: Boolean = false
+    var hasFullEpisodes: Boolean = false//只有 source 的 isMultipleEpisodePages 为 true 时，这个属性才起作用。
     var isShowBriefChapterTitle: Boolean = false
     var sourceId: String? = null
     var status: String = ""
-    // 原版 SDK 里还有这三个字段（宿主播放状态），源本身不用，
-    // 但补齐可免得以后有源调用时链接失败。
     var episodesUpdateTime: Long = 0
-    var isTransientEpisodes: Boolean = false
-    var isCompleted: Boolean = false
+    var isTransientEpisodes: Boolean = false //如果章节列表是动态变化的，把这个参数设置为true。在每次进入播放页时会自动刷新。将在1.8.6后加入
+    var isCompleted: Boolean = false//是否已完结，如果是，app里面将不再触发章节列表的自动刷新。
+
+    override fun equals(other: Any?): Boolean {
+        throw RuntimeException("Stub!")
+    }
+
+    override fun hashCode(): Int {
+        throw RuntimeException("Stub!")
+    }
 
     fun copyFrom(book: Book) {
-        coverUrl = book.coverUrl
-        author = book.author
-        artist = book.artist
-        intro = book.intro
-        episodeList = book.episodeList
-        status = book.status
+        throw RuntimeException("Stub!")
     }
 }
 
 data class Episode(val title: String, val url: String) {
     var isFree: Boolean = true
-    var isCached: Boolean = false
+    @Transient var isCached: Boolean = false
     var progress: Int = 0
-    // 原版 SDK 里还有这两个字段，补齐免得以后有源调用时链接失败。
-    var coverUrl: String = ""
-    var transcript: String = ""
+    var coverUrl: String = ""//章节封面
+    var transcript: String = ""//文稿，可以传网址，将打开网页。也可以传文本，则打开一个文本框，文本可以用html标签格式。
 }
 
 interface IMenu {
@@ -61,7 +57,10 @@ data class CategoryTab(
     val title: String,
     val url: String
 ) : IMenu {
-    override fun getType(): Int = 0
+
+    override fun getType(): Int {
+        throw RuntimeException("Stub!")
+    }
 }
 
 data class BookDetail(
@@ -71,13 +70,30 @@ data class BookDetail(
     val author: String = "",
     val episodesCount: Int = 0,
     val coverUrl: String = ""
-)
+) {
+    val title: String = ""
+}
 
+
+/**
+ * 大分类
+ */
 data class CategoryMenu(
-    val title: String,
-    val tabs: List<CategoryTab>
+    val title: String, //大分类标题
+    val tabs: List<CategoryTab>//子分类
 ) : IMenu {
-    override fun getType(): Int = 1
+
+    override fun getType(): Int {
+        throw RuntimeException("Stub!")
+    }
+
+    override fun equals(other: Any?): Boolean {
+        throw RuntimeException("Stub!")
+    }
+
+    override fun hashCode(): Int {
+        throw RuntimeException("Stub!")
+    }
 }
 
 data class Category(
@@ -89,18 +105,17 @@ data class Category(
 )
 
 /**
- * 源向宿主声明的配置项（源实现 ConfigurableSource.getCustomConfigItems() 时用）。
- * [type] 五种控件：text（文本框）/ select（下拉）/ switch（开关）/
- * multiselect（多选）/ button（按钮）。
- * [options] 是 select / multiselect 的可选项（"值=显示名" 或纯值）；
- * multiselect 的值按逗号分隔存。
- * [defaultValue] 是默认值；switch 用 "true"/"false"。
+ * 2.5.9 加入，供自定义源配置文件使用, 可通过ExternalSourcePrefs.getString("${getSourceId()}.${configItem.key}")读取对应的值
+ * Switch 读取值为 "true" 或者 "false"
+ * MultiSelect 读取值为 "," 分隔的字符串，比如"1,2,3"
  */
-data class ConfigItem(
-    val type: String,
+sealed class ConfigItem(
     val key: String,
-    val title: String,
-    val defaultValue: String = "",
-    val options: List<String> = emptyList(),
-    val hint: String = ""
-)
+    val label: String
+) {
+    class Button(label: String, val click: () -> Unit) : ConfigItem("", label)//2.6.0加入
+    class Text(key: String, label: String, var default: String = "") : ConfigItem(key, label)
+    class Select(key: String, label: String, val options: List<String>, var default: String) : ConfigItem(key, label)
+    class Switch(key: String, label: String, var default: Boolean) : ConfigItem(key, label)
+    class MultiSelect(key: String, label: String, val options: List<String>, var default: List<String> = listOf()) : ConfigItem(key, label)
+}
