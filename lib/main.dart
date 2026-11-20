@@ -1,59 +1,102 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/constants/app_constants.dart';
 import 'core/database/app_database.dart';
+import 'core/database/library_repository.dart';
 import 'core/di/providers.dart';
-import 'core/log/app_logger.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/cover_color.dart';
+import 'core/theme/theme_providers.dart';
 import 'core/utils/listen_stats.dart';
 import 'features/audio/data/audio_handler.dart';
+import 'features/audio/presentation/audio_player_page.dart';
 import 'features/backup/backup_page.dart';
+import 'features/backup/backup_service.dart';
 import 'features/backup/log_page.dart';
-import 'features/library/collection_pages.dart';
-import 'features/library/library_page.dart';
-import 'features/presentation/discover_page.dart';
-import 'features/presentation/home_page.dart';
-import 'features/search/search_page.dart';
+import 'features/presentation/main_shell.dart';
 import 'features/settings/cache_settings_page.dart';
 import 'features/settings/playback_settings_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/settings/theme_picker_page.dart';
 import 'features/settings/webdav_play_page.dart';
-import 'features/settings/widget_lock_page.dart';
+import 'features/sync/progress_sync.dart';
 import 'features/sync/sync_page.dart';
+import 'features/sync/webdav_client.dart';
 import 'features/ua/presentation/ua_settings_page.dart';
-import 'plugins/data/home_feed.dart';
+import 'features/video/presentation/video_player_page.dart';
+import 'plugins/data/plugin_providers.dart';
 import 'plugins/data/plugin_resume.dart';
+import 'plugins/engine/plugin_engine.dart';
+import 'plugins/model/plugin_source.dart';
+import 'plugins/presentation/source_book_page.dart';
 import 'plugins/presentation/source_center_page.dart';
-import 'shared/widgets/common.dart';
-import 'plugins/presentation/source_search_page.dart';
+import 'features/search/source_search_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final prefs = await SharedPreferences.getInstance();
+  await migrateLegacyTheme(prefs);
 
-  // 老版本默认深色，这里统一迁到暖色浅色（只做一次，之后用户手动改的尊重）
-  if (!(prefs.getBool('theme_migrated_warm') ?? false)) {
-    await prefs.setInt(AppConstants.keyThemeMode, 1);
-    await prefs.setInt(AppConstants.keyThemeColor, 0);
-    await prefs.setBool('theme_migrated_warm', true);
-  }
+  // 封面取色种子先恢复（内存 + 磁盘），进播放页不闪回主题色。
+  await CoverColorCache.restore(prefs);
 
   final db = AppDatabase();
-  appLogger.attachDatabase(db);
+  final repo = LibraryRepository(db);
 
-  // 初始化音频后台服务（通知栏 / 后台播放）。
-  // 加超时与降级：部分设备（尤其旧安卓）绑定前台服务可能失败或卡住，
-  // 这里保证无论如何都能进入主界面，避免启动一直白屏。
-  // 2026-11-20 手机实测：init 常在 main() 里失败，报错 Activity 没提供
-  // FlutterEngine 或直接超时——平台侧 Activity 贴上引擎有先后，失败就等
-  // 800ms 再试一次，还不行才降级为无通知栏模式。
-  audioHandler = await _initAudioHandler();
+  // 音频后台服务：不要在 main() 最开头就 init（Activity 贴上引擎有
+  // 先后，太早 init 会报 Activity 没提供 FlutterEngine）。
+  // 这里先把 binding / prefs / 数据库准备好再 init；init 失败等
+  // 800ms 再试一次，还不行才降级为无通知栏模式直连播放。
+  // 配置用播放器组的 audioServiceConfig，不自己拼一份。
+  final audioHandler = await _initAudioHandler(repo);
+
+  // 「我的听书」JAR 源调 MyExt.playerControl / todayPlaybackTime 时，
+  // 原生侧经过 suishou/player 通道调进来，转给 audioHandler / 收听统计。
+  MethodChannel('suishou/player').setMethodCallHandler((call) async {
+    switch (call.method) {
+      case 'play':
+        await audioHandler.play();
+        break;
+      case 'pause':
+        await audioHandler.pause();
+        break;
+      case 'skipToNext':
+        await audioHandler.skipToNext();
+        break;
+      case 'skipToPrevious':
+        await audioHandler.skipToPrevious();
+        break;
+      case 'rewind':
+        await audioHandler.rewind();
+        break;
+      case 'fastForward':
+        await audioHandler.fastForward();
+        break;
+      case 'stop':
+        await audioHandler.stop();
+        break;
+      case 'todayPlaybackTime':
+        final stats = await fetchListenStats();
+        final today = stats['todaySeconds'];
+        final seconds = today is int
+            ? today
+            : int.tryParse('$today') ?? 0;
+        return seconds * 1000;
+      default:
+        throw PlatformException(
+            code: 'NOT_IMPLEMENTED', message: '未知方法 ${call.method}');
+    }
+    return null;
+  });
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -62,66 +105,683 @@ Future<void> main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
-  // 全面屏：内容延伸到状态栏/导航栏下方，由各页面自己避让
+  // 沉浸状态栏/导航栏默认开：全面屏，内容延伸到状态栏/导航栏下方，
+  // 透明栏 + 图标亮度跟深浅走（MyApp 里按 isDark 算）。
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   runApp(ProviderScope(
     overrides: [
       sharedPrefsProvider.overrideWithValue(prefs),
       databaseProvider.overrideWithValue(db),
+      audioHandlerProvider.overrideWithValue(audioHandler),
     ],
     child: const MyApp(),
   ));
 }
 
-/// 初始化音频后台服务：失败等 800ms 再试一次（Activity 贴上引擎有先后），
-/// 两次都不行才降级为直连播放（无通知栏）。总是最坏多等约 11 秒，只发生在
-/// 后台服务本身就起不来的设备上；正常设备第一次就成功，不多等。
-Future<MyAudioHandler> _initAudioHandler() async {
-  const config = AudioServiceConfig(
-    androidNotificationChannelId: 'com.localreader.channel.audio',
-    androidNotificationChannelName: '随意听书播放',
-    androidNotificationOngoing: true,
-  );
+/// 初始化音频后台服务：失败等 800ms 再试一次，两次都不行才降级
+/// 为直连播放（无通知栏）。正常设备第一次就成功，不多等。
+Future<MyAudioHandler> _initAudioHandler(LibraryRepository repo) async {
   for (var attempt = 0; attempt < 2; attempt++) {
     try {
       return await AudioService.init(
-        builder: () => MyAudioHandler(),
-        config: config,
+        builder: () => MyAudioHandler(libraryRepository: repo),
+        config: MyAudioHandler.audioServiceConfig,
       ).timeout(Duration(seconds: attempt == 0 ? 6 : 4));
-    } catch (e, st) {
-      appLogger.error('音频后台服务初始化失败（第 ${attempt + 1} 次）',
-          error: e, stack: st);
+    } catch (e) {
+      debugPrint('音频后台服务初始化失败（第 ${attempt + 1} 次）：$e');
       if (attempt == 0) {
         await Future.delayed(const Duration(milliseconds: 800));
       }
     }
   }
-  appLogger.error('音频后台服务初始化失败，已降级为无通知栏模式');
-  return MyAudioHandler();
+  debugPrint('音频后台服务初始化失败，已降级为无通知栏模式');
+  return MyAudioHandler(libraryRepository: repo);
 }
 
-class MyApp extends ConsumerWidget {
+final GoRouter _router = GoRouter(
+  initialLocation: '/',
+  routes: [
+    GoRoute(
+      path: '/',
+      builder: (context, state) => const MainShell(),
+    ),
+    GoRoute(
+      path: '/sources',
+      builder: (context, state) => const SourceCenterPage(),
+    ),
+    GoRoute(
+      path: '/source/:id',
+      builder: (context, state) {
+        final id = state.params['id'] ?? '';
+        final bookUrl = state.queryParameters['bookUrl'] ?? '';
+        final title = state.queryParameters['title'] ?? '';
+        return SourceBookPage(
+          sourceId: id,
+          bookUrl: bookUrl,
+          title: title.isEmpty ? '' : title,
+        );
+      },
+    ),
+    GoRoute(
+      path: '/search',
+      builder: (context, state) => SourceSearchPage(
+        type: state.queryParameters['type'] ?? 'audio',
+        initialSourceId: state.queryParameters['sourceId'],
+      ),
+    ),
+    GoRoute(
+      path: '/settings',
+      builder: (context, state) => const SettingsPage(),
+    ),
+    GoRoute(
+      path: '/theme',
+      builder: (context, state) => const ThemePickerPage(),
+    ),
+    GoRoute(
+      path: '/playback-settings',
+      builder: (context, state) => const PlaybackSettingsPage(),
+    ),
+    GoRoute(
+      path: '/cache-settings',
+      builder: (context, state) => const CacheSettingsPage(),
+    ),
+    GoRoute(
+      path: '/ua-settings',
+      builder: (context, state) => const UaSettingsPage(),
+    ),
+    GoRoute(
+      path: '/backup',
+      builder: (context, state) => const BackupPage(),
+    ),
+    GoRoute(
+      path: '/sync',
+      builder: (context, state) => const SyncPage(),
+    ),
+    GoRoute(
+      path: '/logs',
+      builder: (context, state) => const LogPage(),
+    ),
+    GoRoute(
+      path: '/webdav-play',
+      builder: (context, state) => const WebDavPlayPage(),
+    ),
+    GoRoute(
+      path: '/player',
+      builder: (context, state) => const _NotificationPermissionGate(
+        child: AudioPlayerPage(),
+      ),
+    ),
+    GoRoute(
+      path: '/video-player',
+      builder: (context, state) {
+        final bookKey = state.queryParameters['book'] ?? '';
+        final chapter =
+            int.tryParse(state.queryParameters['chapter'] ?? '') ?? 0;
+        final lineId = state.queryParameters['lineId'] ?? '';
+        return _VideoPlayerRouteLoader(
+          bookKey: bookKey,
+          chapterIndex: chapter,
+          lineId: lineId,
+        );
+      },
+    ),
+  ],
+  errorBuilder: (context, state) => Scaffold(
+    appBar: AppBar(title: const Text('随意听书')),
+    body: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('这个页面不存在'),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: () => context.go('/'),
+            child: const Text('回首页'),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+
+/// 首次进播放页申请通知权限（Android 13+ 的 POST_NOTIFICATIONS，
+/// 通知栏播放控制要它；Android 13 以下本来就不用申请）。
+///
+/// 只问一次：问过就把 `notif_permission_asked_v1` 置 true，用户拒绝
+/// 也不再追问（去系统设置里能再开）；不挡页面，申请失败只记日志。
+/// 播放器组不负责申请，放 main 的路由层。
+class _NotificationPermissionGate extends StatefulWidget {
+  const _NotificationPermissionGate({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_NotificationPermissionGate> createState() =>
+      _NotificationPermissionGateState();
+}
+
+class _NotificationPermissionGateState
+    extends State<_NotificationPermissionGate> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _askOnce());
+  }
+
+  Future<void> _askOnce() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('notif_permission_asked_v1') ?? false) return;
+      await prefs.setBool('notif_permission_asked_v1', true);
+      final status = await Permission.notification.status;
+      if (!status.isGranted) {
+        await Permission.notification.request();
+      }
+    } catch (e) {
+      debugPrint('通知权限申请失败（只记日志）：$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// 视频路由加载器：source_book_page 只推
+/// `/video-player?book=<sourceId|bookUrl>&chapter=<index>&lineId=...`，
+/// 真正的解析在这里做（P 的 VideoPlayerPage 构造器沿用旧签名，
+/// 没有 bookKey 自解析分支，所以 main 的路由层先解析好再构造）。
+///
+/// 步骤：bookKey 拆 sourceId/bookUrl → 源 → getPluginResume 拿断点
+/// （同一集才从 positionMs 续播）和上次线路/音色 → bookDetail 拿章节
+/// （先取第一页，要点集不在第一页时再取全量）→ lines 拿线路 →
+/// content 解析当前集地址 → 构造 VideoPlayerPage。
+///
+/// playlist 不传：视频页把 playlist[i] 当现成的可播地址直接播，
+/// 章节源地址（书页链接）填进去只会播失败；全量预解析也不行——
+/// 解析地址常带限时签名（播一次就要重新取），提前解析好等播到
+/// 时早过期了。所以视频页一次只播当前这一集，播完显示“已播完”，
+/// 想看下一集回书页点下一集（和旧版行为一致）。
+/// 切线路走 onSwitchLine：现调 content 解析同一集的新线地址。
+class _VideoPlayerRouteLoader extends ConsumerStatefulWidget {
+  const _VideoPlayerRouteLoader({
+    required this.bookKey,
+    required this.chapterIndex,
+    required this.lineId,
+  });
+
+  final String bookKey;
+  final int chapterIndex;
+  final String lineId;
+
+  @override
+  ConsumerState<_VideoPlayerRouteLoader> createState() =>
+      _VideoPlayerRouteLoaderState();
+}
+
+class _VideoPlayerRouteLoaderState
+    extends ConsumerState<_VideoPlayerRouteLoader> {
+  late final Future<_VideoTarget> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _resolve();
+  }
+
+  Future<_VideoTarget> _resolve() async {
+    final sep = widget.bookKey.indexOf('|');
+    if (sep < 0) throw Exception('播放地址不对');
+    final sourceId = widget.bookKey.substring(0, sep);
+    final bookUrl = widget.bookKey.substring(sep + 1);
+    if (sourceId.isEmpty || bookUrl.isEmpty) {
+      throw Exception('播放地址不对');
+    }
+    final source = await ref.read(sourceRepositoryProvider).byId(sourceId);
+    if (source == null) throw Exception('找不到这个源，可能已被删除');
+
+    // 断点：同一集才续播；线路/音色沿用上次的。
+    final resume = await getPluginResume(widget.bookKey);
+    final resumeIndex = _asInt(resume?['chapterIndex']);
+    final startAtMs = resumeIndex == widget.chapterIndex
+        ? _asInt(resume?['positionMs'])
+        : 0;
+    final voiceId = '${resume?['voiceId'] ?? ''}';
+
+    final engine = engineForSource(ref, source);
+    await engine.attach(source);
+
+    var detail = await _bookDetail(engine, bookUrl, fullPages: false);
+    var chapters = _parseChapters(detail);
+    if (chapters.isEmpty) throw Exception('这个源没有返回章节');
+    if (widget.chapterIndex >= chapters.length) {
+      detail = await _bookDetail(engine, bookUrl, fullPages: true);
+      chapters = _parseChapters(detail);
+      if (chapters.isEmpty) throw Exception('这个源没有返回章节');
+    }
+    var index = widget.chapterIndex;
+    if (index < 0) index = 0;
+    if (index >= chapters.length) index = chapters.length - 1;
+    final chapterNames = chapters.map(_chapterTitle).toList();
+    final bookTitle = '${detail['title'] ?? detail['name'] ?? ''}';
+
+    var lines = _parseList(detail['lines']);
+    if (lines.isEmpty) {
+      try {
+        lines = _parseList(
+            await engine.invoke('lines', params: {'url': bookUrl}));
+      } catch (_) {}
+    }
+    final resumeLineId = '${resume?['lineId'] ?? ''}';
+    final lineId = widget.lineId.isNotEmpty
+        ? widget.lineId
+        : (resumeLineId.isNotEmpty
+            ? resumeLineId
+            : (lines.isNotEmpty ? '${lines.first['id'] ?? ''}' : ''));
+    var lineName = '${resume?['lineName'] ?? ''}';
+    for (final l in lines) {
+      if ('${l['id']}' == lineId) {
+        lineName = '${l['name'] ?? l['id']}';
+        break;
+      }
+    }
+
+    final chapterUrl = _chapterUrl(chapters[index]);
+    if (chapterUrl.isEmpty) throw Exception('这一集没有播放地址');
+    final resolved = await _resolveContent(engine, chapterUrl, voiceId, lineId);
+    if (resolved.url.isEmpty) throw Exception('源没有返回可播放地址');
+
+    return _VideoTarget(
+      source: source,
+      engine: engine,
+      bookUrl: bookUrl,
+      bookTitle: bookTitle,
+      chapterUrl: chapterUrl,
+      chapterName: chapterNames[index],
+      chapterNames: chapterNames,
+      voiceId: voiceId,
+      lines: lines,
+      lineId: lineId,
+      lineName: lineName,
+      startAtMs: startAtMs,
+      path: resolved.url,
+      headers: resolved.headers,
+    );
+  }
+
+  Future<Map<String, dynamic>> _bookDetail(
+    PluginEngine engine,
+    String bookUrl, {
+    required bool fullPages,
+  }) async {
+    final raw = await engine.invoke(
+      'bookDetail',
+      params: {
+        'url': bookUrl,
+        'loadEpisodes': true,
+        'loadFullPages': fullPages,
+      },
+    );
+    if (raw is! Map) throw Exception('详情加载失败');
+    return Map<String, dynamic>.from(raw);
+  }
+
+  /// 现调 content 解析一章的地址（切线路也走这里：同一集换线解析）。
+  Future<_ResolvedMedia> _resolveContent(
+    PluginEngine engine,
+    String chapterUrl,
+    String voiceId,
+    String lineId,
+  ) async {
+    final raw = await engine.invoke(
+      'content',
+      params: {
+        'url': chapterUrl,
+        'voiceId': voiceId,
+        'lineId': lineId,
+      },
+    );
+    var headers = const <String, String>{};
+    if (raw is Map) {
+      final h = raw['headers'];
+      if (h is Map) {
+        headers = h.map((k, v) => MapEntry('$k', '$v'));
+      }
+    }
+    return _ResolvedMedia(url: _mediaUrlOf(raw), headers: headers);
+  }
+
+  List<Map<String, dynamic>> _parseChapters(Map<String, dynamic> detail) {
+    final raw = detail['episodes'] ?? detail['chapters'] ?? detail['list'];
+    return _parseList(raw);
+  }
+
+  List<Map<String, dynamic>> _parseList(dynamic raw) {
+    final list = raw is List
+        ? raw
+        : (raw is Map ? (raw['list'] ?? raw['data']) : null);
+    if (list is! List) return const [];
+    final out = <Map<String, dynamic>>[];
+    for (final e in list) {
+      if (e is Map) out.add(Map<String, dynamic>.from(e));
+      if (e is String) out.add(<String, dynamic>{'title': e, 'url': e});
+    }
+    return out;
+  }
+
+  String _chapterUrl(Map<String, dynamic> c) =>
+      '${c['url'] ?? c['audioUrl'] ?? c['href'] ?? ''}';
+
+  String _chapterTitle(Map<String, dynamic> c) =>
+      '${c['title'] ?? c['name'] ?? ''}';
+
+  String _mediaUrlOf(dynamic raw) {
+    if (raw is String) return raw;
+    if (raw is Map) {
+      final u = raw['url'] ?? raw['audioUrl'] ?? raw['src'] ?? raw['playUrl'];
+      return u == null ? '' : '$u';
+    }
+    return '';
+  }
+
+  int _asInt(dynamic v) {
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    return int.tryParse('$v') ?? 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_VideoTarget>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('正在解析播放地址…'),
+                ],
+              ),
+            ),
+          );
+        }
+        if (snapshot.hasError || !snapshot.hasData) {
+          final message = snapshot.error == null
+              ? '拿播放地址失败'
+              : '拿播放地址失败：${snapshot.error}';
+          return Scaffold(
+            appBar: AppBar(title: const Text('随意听书')),
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(message, textAlign: TextAlign.center),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => context.pop(),
+                    child: const Text('返回'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        final t = snapshot.data!;
+        return VideoPlayerPage(
+          path: t.path,
+          network: true,
+          headers: t.headers,
+          title: t.bookTitle.isEmpty
+              ? t.chapterName
+              : '${t.bookTitle} · ${t.chapterName}',
+          startAtMs: t.startAtMs,
+          sourceId: t.source.id,
+          sourceName: t.source.name,
+          bookUrl: t.bookUrl,
+          bookTitle: t.bookTitle,
+          chapterNames: t.chapterNames,
+          lineName: t.lineName,
+          voiceId: t.voiceId,
+          lines: t.lines,
+          currentLineId: t.lineId,
+          onSwitchLine: (newLineId) async {
+            final resolved = await t.resolveLine(newLineId);
+            if (resolved.isEmpty) throw Exception('这条线路没有返回地址');
+            return resolved;
+          },
+        );
+      },
+    );
+  }
+}
+
+/// content 解析结果：地址 + 播放要带的头（Referer/UA 等）。
+class _ResolvedMedia {
+  const _ResolvedMedia({required this.url, required this.headers});
+
+  final String url;
+  final Map<String, String> headers;
+}
+
+/// 路由加载器解析好的视频目标：当前集地址 + 构造 VideoPlayerPage
+/// 要的全部参数 + 切线路时现解析同一集的回调。
+class _VideoTarget {
+  _VideoTarget({
+    required this.source,
+    required this.engine,
+    required this.bookUrl,
+    required this.bookTitle,
+    required this.chapterUrl,
+    required this.chapterName,
+    required this.chapterNames,
+    required this.voiceId,
+    required this.lines,
+    required this.lineId,
+    required this.lineName,
+    required this.startAtMs,
+    required this.path,
+    required this.headers,
+  });
+
+  final PluginSource source;
+  final PluginEngine engine;
+  final String bookUrl;
+  final String bookTitle;
+  final String chapterUrl;
+  final String chapterName;
+  final List<String> chapterNames;
+  final String voiceId;
+  final List<Map<String, dynamic>> lines;
+  final String lineId;
+  final String lineName;
+  final int startAtMs;
+  final String path;
+  final Map<String, String> headers;
+
+  /// 切线路：现调 content 解析同一集的新线地址。
+  Future<String> resolveLine(String newLineId) async {
+    final raw = await engine.invoke(
+      'content',
+      params: {
+        'url': chapterUrl,
+        'voiceId': voiceId,
+        'lineId': newLineId,
+      },
+    );
+    if (raw is String) return raw;
+    if (raw is Map) {
+      final u = raw['url'] ?? raw['audioUrl'] ?? raw['src'] ?? raw['playUrl'];
+      return u == null ? '' : '$u';
+    }
+    return '';
+  }
+}
+
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
+  bool _bootChecked = false;
+
+  late final SharedPreferences _prefs;
+  late final AppDatabase _db;
+  late final LibraryRepository _repo;
+
+  /// 播放状态订阅：播着才起 15 秒进度同步定时器，停了就停掉。
+  StreamSubscription<PlaybackState>? _playbackSub;
+  Timer? _syncTimer;
+  bool _syncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _prefs = ref.read(sharedPrefsProvider);
+    _db = ref.read(databaseProvider);
+    _repo = ref.read(libraryRepositoryProvider);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootCheck());
+    final handler = ref.read(audioHandlerProvider);
+    _playbackSub = handler.playbackState.listen(_onPlaybackState);
+    _onPlaybackState(handler.playbackState.value);
+  }
+
+  @override
+  void dispose() {
+    _playbackSub?.cancel();
+    _syncTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// 关 App 时（detached）自动备份：S 的 runAutoBackupIfDue，
+  /// 默认开、间隔默认 1 天，只在间隔到了才备；失败只记日志。
+  /// 注意：系统杀进程时 detached 不一定跑得到，备不上是已知缺口，
+  /// 不是每次关 App 都一定备。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      _runAutoBackupOnClose();
+    }
+  }
+
+  Future<void> _runAutoBackupOnClose() async {
+    try {
+      await BackupService(db: _db).runAutoBackupIfDue();
+    } catch (e) {
+      debugPrint('关 App 自动备份失败（只记日志）：$e');
+    }
+  }
+
+  /// 播放状态变化 → 15 秒进度同步定时器的起停。
+  void _onPlaybackState(PlaybackState state) {
+    if (state.playing) {
+      _syncTimer ??= Timer.periodic(
+        const Duration(seconds: 15),
+        (_) => _syncProgressOnce(),
+      );
+    } else {
+      _syncTimer?.cancel();
+      _syncTimer = null;
+    }
+  }
+
+  /// 15 秒定时进度同步（S 的 ProgressSync.syncAll：先下载云端更新的，
+  /// 再上传在听的书）。只在播放期间跑；重叠的一次跳过；失败只记日志
+  /// 不打扰用户。门禁：同步总开关 + 进度同步开关 + WebDAV 配置齐全，
+  /// 缺一个就不跑（默认进度同步是关的，要在同步页里打开才同步）。
+  Future<void> _syncProgressOnce() async {
+    if (!mounted || _syncing) return;
+    _syncing = true;
+    try {
+      if (!(_prefs.getBool(AppConstants.keySyncEnabled) ??
+          AppConstants.defaultSyncEnabled)) {
+        return;
+      }
+      if (!(_prefs.getBool(AppConstants.keySyncProgress) ??
+          AppConstants.defaultSyncProgress)) {
+        return;
+      }
+      final url = _prefs.getString(AppConstants.keySyncUrl) ?? '';
+      final user = _prefs.getString(AppConstants.keySyncUser) ?? '';
+      final pass = _prefs.getString(AppConstants.keySyncPass) ?? '';
+      if (url.isEmpty || user.isEmpty || pass.isEmpty) return;
+      final client = WebDavClient(
+        baseUrl: url,
+        username: user,
+        password: pass,
+      );
+      await ProgressSync.syncAll(repo: _repo, client: client);
+    } catch (e) {
+      debugPrint('进度同步失败（只记日志）：$e');
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  /// 启动后一次：云端备份检查（有更新的就弹框问要不要恢复）。
+  /// 自动备份不在启动时做，关 App 时才做（见 didChangeAppLifecycleState）。
+  Future<void> _bootCheck() async {
+    if (_bootChecked) return;
+    _bootChecked = true;
+    try {
+      final info = await checkCloudBackup();
+      if (!mounted || info == null) return;
+      final name = '${info['name'] ?? '云端备份'}';
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('发现云端新备份'),
+          content: Text('云端有一份更新的备份「$name」，要恢复吗？'),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                // 点取消：把本地 lastBackup 置为二者较大值，
+                // 下次不再问这一份（S 的 markCloudBackupSeen）。
+                await markCloudBackupSeen(info);
+                Navigator.pop(ctx);
+              },
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                context.push('/sync');
+              },
+              child: const Text('去恢复'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      debugPrint('云端备份检查失败（只记日志）：$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
     final themeColor = ref.watch(themeColorProvider);
-    final followSystemDark = ref.watch(followSystemDarkProvider);
-    final systemDark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-        Brightness.dark;
-    // 墨夜是独立一套，一直保持黑色，不跟随系统也不看明暗模式
+    final pureBlack = ref.watch(pureBlackProvider);
+    final fontScale = ref.watch(fontScaleProvider);
+    final systemDark =
+        MediaQuery.of(context).platformBrightness == Brightness.dark;
+    // 墨夜（下标 4）不开放，themeColor 已钳制在 0..3；这里只做兜底。
     final isNight = themeColor == AppTheme.nightSchemeIndex;
-    final effectiveMode = isNight
-        ? ThemeMode.dark
-        : (followSystemDark
-            ? ThemeMode.system
-            : resolveThemeMode(themeMode));
-    final isDark = isNight ||
-        (followSystemDark
-            ? systemDark
-            : (themeMode == 2 || (themeMode == 0 && systemDark)));
+    final effectiveMode =
+        isNight ? ThemeMode.dark : resolveThemeMode(themeMode);
+    final isDark =
+        isNight || isDarkMode(themeMode, systemDark);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
@@ -133,358 +793,23 @@ class MyApp extends ConsumerWidget {
             isDark ? Brightness.light : Brightness.dark,
         statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
       ),
-      child: MaterialApp(
-        title: AppConstants.appName,
+      child: MaterialApp.router(
+        title: '随意听书',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(themeColor),
-        darkTheme: AppTheme.dark(themeColor),
+        darkTheme: AppTheme.dark(themeColor, pureBlack),
         themeMode: effectiveMode,
-        // 问题 2：教程页已去掉，打开 App 直接进书源页（MainShell）
-        home: const MainShell(),
-        onGenerateRoute: _onGenerateRoute,
-      ),
-    );
-  }
-
-  Route<dynamic>? _onGenerateRoute(RouteSettings settings) {
-    switch (settings.name) {
-      case '/audio-search':
-        return MaterialPageRoute(
-            builder: (_) => const SearchPage(type: AppConstants.typeAudio),
-            settings: settings);
-      case '/video-search':
-        return MaterialPageRoute(
-            builder: (_) => const SearchPage(type: AppConstants.typeVideo),
-            settings: settings);
-      case '/backup':
-        return MaterialPageRoute(
-            builder: (_) => const BackupPage(), settings: settings);
-      case '/settings':
-        return MaterialPageRoute(
-            builder: (_) => const SettingsPage(), settings: settings);
-      case '/playback-settings':
-        return MaterialPageRoute(
-            builder: (_) => const PlaybackSettingsPage(), settings: settings);
-      case '/cache-settings':
-        return MaterialPageRoute(
-            builder: (_) => const CacheSettingsPage(), settings: settings);
-      case '/widget-lock':
-        return MaterialPageRoute(
-            builder: (_) => const WidgetLockPage(), settings: settings);
-      case '/webdav-play':
-        return MaterialPageRoute(
-            builder: (_) => const WebDavPlayPage(), settings: settings);
-      case '/library':
-        return MaterialPageRoute(
-            builder: (_) => const LibraryPage(), settings: settings);
-      case '/logs':
-        return MaterialPageRoute(
-            builder: (_) => const LogPage(), settings: settings);
-      case '/ua-settings':
-        return MaterialPageRoute(
-            builder: (_) => const UaSettingsPage(), settings: settings);
-      case '/theme':
-        return MaterialPageRoute(
-            builder: (_) => const ThemePickerPage(), settings: settings);
-      case '/sources':
-        return MaterialPageRoute(
-            builder: (_) => const SourceCenterPage(), settings: settings);
-      case '/sync':
-        return MaterialPageRoute(
-            builder: (_) => const SyncPage(), settings: settings);
-      case '/source-search':
-        return MaterialPageRoute(
-            builder: (_) => const SourceSearchPage(
-                type: AppConstants.typeAudio),
-            settings: settings);
-      case '/source-search-video':
-        return MaterialPageRoute(
-            builder: (_) => const SourceSearchPage(
-                type: AppConstants.typeVideo),
-            settings: settings);
-      case '/favorite-audio':
-        return MaterialPageRoute(
-            builder: (_) => const CollectionPage(
-                kind: CollectionKind.favorite, initialType: AppConstants.typeAudio),
-            settings: settings);
-      case '/favorite-video':
-        return MaterialPageRoute(
-            builder: (_) => const CollectionPage(
-                kind: CollectionKind.favorite, initialType: AppConstants.typeVideo),
-            settings: settings);
-      case '/history-audio':
-        return MaterialPageRoute(
-            builder: (_) => const CollectionPage(
-                kind: CollectionKind.history, initialType: AppConstants.typeAudio),
-            settings: settings);
-      case '/history-video':
-        return MaterialPageRoute(
-            builder: (_) => const CollectionPage(
-                kind: CollectionKind.history, initialType: AppConstants.typeVideo),
-            settings: settings);
-      case '/favorites':
-        return MaterialPageRoute(
-            builder: (_) => const CollectionPage(
-                kind: CollectionKind.favorite),
-            settings: settings);
-      case '/history':
-        return MaterialPageRoute(
-            builder: (_) => const CollectionPage(kind: CollectionKind.history),
-            settings: settings);
-      case '/bookmarks':
-        return MaterialPageRoute(
-            builder: (_) => const BookmarkListPage(), settings: settings);
-    }
-    return null;
-  }
-}
-
-/// 主壳：底部导航固定五项：书源 / 当前源真名 / 中间大播放键 / 收藏 / 历史
-class MainShell extends ConsumerStatefulWidget {
-  const MainShell({super.key});
-
-  @override
-  ConsumerState<MainShell> createState() => _MainShellState();
-}
-
-class _MainShellState extends ConsumerState<MainShell> {
-  @override
-  Widget build(BuildContext context) {
-    final source = ref.watch(activeHomeSourceProvider);
-    final index = ref.watch(shellTabProvider);
-    final pages = <Widget>[
-      const HomePage(),
-      const DiscoverPage(),
-      const CollectionPage(kind: CollectionKind.favorite),
-      const CollectionPage(kind: CollectionKind.history),
-    ];
-    final safeIndex = index >= pages.length ? 0 : index;
-    return Scaffold(
-      body: IndexedStack(index: safeIndex, children: pages),
-      bottomNavigationBar: StreamBuilder<PlaybackState>(
-        stream: audioHandler.playbackState,
-        initialData: audioHandler.playbackState.valueOrNull,
-        builder: (context, snap) {
-          final state = snap.data;
-          return _AppBottomBar(
-            index: safeIndex,
-            playing: state?.playing ?? false,
-            sourceName: source?.name ?? '发现',
-            onPlayTap: () => openMostRecentResume(context, ref),
-            onPlayLongPress: () => ListenStats.showStatsDialog(context),
-            onTap: (i) => ref.read(shellTabProvider.notifier).state = i,
+        routerConfig: _router,
+        // 字体大小全站生效（Flutter 3.0 用 textScaleFactor；
+        // textScaler 是 Flutter 3.13+ 的 API，3.0 编不过）。
+        builder: (context, child) {
+          final media = MediaQuery.of(context);
+          return MediaQuery(
+            data: media.copyWith(textScaleFactor: fontScale),
+            child: child ?? const SizedBox.shrink(),
           );
         },
       ),
     );
   }
-}
-
-/// 悬浮式底部导航：书源 / 当前源名 / 大播放键 / 收藏 / 历史
-class _AppBottomBar extends StatelessWidget {
-  final int index;
-  final bool playing;
-  final String sourceName;
-  final ValueChanged<int> onTap;
-  final VoidCallback onPlayTap;
-  final VoidCallback onPlayLongPress;
-
-  const _AppBottomBar({
-    required this.index,
-    required this.playing,
-    required this.sourceName,
-    required this.onTap,
-    required this.onPlayTap,
-    required this.onPlayLongPress,
-  });
-
-  List<Map<String, dynamic>> get _items => [
-        {'label': '书源', 'icon': Icons.home_outlined, 'active': Icons.home},
-        {'label': sourceName, 'icon': Icons.explore_outlined, 'active': Icons.explore},
-        {'label': '收藏', 'icon': Icons.favorite_outline, 'active': Icons.favorite},
-        {'label': '历史', 'icon': Icons.history_outlined, 'active': Icons.history},
-      ];
-
-  @override
-  Widget build(BuildContext context) {
-    final bar = Container(
-      height: 62,
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: context.palette.outline),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.18),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(child: _tab(context, 0)),
-          Expanded(child: _tab(context, 1)),
-          const SizedBox(width: 66),
-          Expanded(child: _tab(context, 2)),
-          Expanded(child: _tab(context, 3)),
-        ],
-      ),
-    );
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 20, 14, 10),
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.topCenter,
-          children: [
-            Padding(padding: const EdgeInsets.only(top: 16), child: bar),
-            Positioned(top: 0, child: _playButton(context)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 底部栏标签字号按名字长度自适应，保证源真名完整显示
-  /// （问题 12：「听书聚合 v1.0.8」9 个字也要完整显示，最小降到 7）
-  double _labelFontSize(String label) {
-    final len = label.length;
-    if (len <= 4) return 10;
-    if (len <= 6) return 9;
-    if (len <= 8) return 8;
-    return 7;
-  }
-
-  Widget _tab(BuildContext context, int i) {
-    final selected = i == index;
-    final primary = Theme.of(context).colorScheme.primary;
-    final it = _items[i];
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () => onTap(i),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        decoration: BoxDecoration(
-          color: selected ? context.palette.primarySoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              (selected ? it['active'] : it['icon']) as IconData,
-              size: 20,
-              color: selected ? primary : context.subtleColor,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              it['label'] as String,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                // 源真名完整显示：4 字及以内 10，5–6 字 9，7–8 字 8，更长 7
-                fontSize: _labelFontSize(it['label'] as String),
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                color: selected ? primary : context.subtleColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 中间凸起的大圆钮：在播显示暂停，暂停/空闲显示播放。
-  /// 点一下打开播放器接着播；长按弹出收听统计。
-  Widget _playButton(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return SizedBox(
-      width: 56,
-      height: 56,
-      child: Material(
-        color: primary,
-        shape: const CircleBorder(),
-        elevation: 8,
-        shadowColor: primary.withOpacity(0.45),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onPlayTap,
-          onLongPress: onPlayLongPress,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(
-                playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                size: 30,
-                color: Colors.white,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 管理页：收藏 / 历史 / 书签 / 搜索（听书视频分开）
-class LibraryHubPage extends StatelessWidget {
-  const LibraryHubPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('管理')),
-      body: ListView(
-        padding: pagePadding(context, top: 16, bottom: 16),
-        children: [
-          _section(context, '收藏', [
-            _tile(context, Icons.favorite_outline, '听书收藏', '/favorite-audio'),
-            _tile(context, Icons.favorite_outline, '视频收藏', '/favorite-video'),
-          ]),
-          _section(context, '历史', [
-            _tile(context, Icons.history, '最近听书', '/history-audio'),
-            _tile(context, Icons.history, '最近视频', '/history-video'),
-          ]),
-          _section(context, '书签', [
-            _tile(context, Icons.bookmark_outline, '书签管理', '/bookmarks'),
-          ]),
-          _section(context, '搜索', [
-            _tile(context, Icons.search, '听书搜索', '/audio-search'),
-            _tile(context, Icons.search, '视频搜索', '/video-search'),
-          ]),
-        ],
-      ),
-    );
-  }
-
-  Widget _section(BuildContext context, String title, List<Widget> children) =>
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 12, bottom: 4),
-            child: Text(title, style: Theme.of(context).textTheme.bodySmall),
-          ),
-          ...children,
-        ],
-      );
-
-  Widget _tile(
-          BuildContext context, IconData icon, String title, String route) =>
-      Card(
-        color: Theme.of(context).cardColor,
-        child: ListTile(
-          leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-          title: Text(title),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.of(context).pushNamed(route),
-        ),
-      );
 }

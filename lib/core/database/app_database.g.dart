@@ -1,377 +1,187 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
+//
+// 注意：沙箱无 build_runner，本文件是按 drift 2.4.0 生成代码结构手写的等价实现，
+// 对应 lib/core/database/tables.dart 的 9 张表。CI 有 build_runner 时应以
+// `flutter pub run build_runner build` 重新生成并核对；手写版省略了
+// fromJson/toJson/copyWith/hashCode/==/toString 这些纯便利方法（不影响 drift 运行）。
 
 part of 'app_database.dart';
 
 // ignore_for_file: type=lint
+
+// ---------------------------------------------------------------------------
+// MediaItems
+// ---------------------------------------------------------------------------
+
 class MediaItem extends DataClass implements Insertable<MediaItem> {
   final String id;
-  final String type;
   final String title;
   final String? author;
-  final String path;
-  final String? coverPath;
-  final String sourceType;
-  final int chapterCount;
-  final int? durationMs;
-  final int sizeBytes;
-  final String? description;
-  final String status;
-  final double progress;
-  final DateTime addedAt;
-  final DateTime? lastReadAt;
-  final int sortOrder;
+  final String? coverUrl;
+  final String sourceId;
+  final String sourceName;
+  final String type;
+  final String? lastChapterUrl;
+  final int lastPositionMs;
+  final int lastDurationMs;
+  final bool isFinished;
+  final bool isFavorite;
+  final DateTime? lastPlayedAt;
+  final DateTime createdAt;
   const MediaItem(
       {required this.id,
-      required this.type,
       required this.title,
       this.author,
-      required this.path,
-      this.coverPath,
-      required this.sourceType,
-      required this.chapterCount,
-      this.durationMs,
-      required this.sizeBytes,
-      this.description,
-      required this.status,
-      required this.progress,
-      required this.addedAt,
-      this.lastReadAt,
-      required this.sortOrder});
+      this.coverUrl,
+      required this.sourceId,
+      required this.sourceName,
+      required this.type,
+      this.lastChapterUrl,
+      required this.lastPositionMs,
+      required this.lastDurationMs,
+      required this.isFinished,
+      required this.isFavorite,
+      this.lastPlayedAt,
+      required this.createdAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
-    map['type'] = Variable<String>(type);
     map['title'] = Variable<String>(title);
     if (!nullToAbsent || author != null) {
       map['author'] = Variable<String>(author);
     }
-    map['path'] = Variable<String>(path);
-    if (!nullToAbsent || coverPath != null) {
-      map['cover_path'] = Variable<String>(coverPath);
+    if (!nullToAbsent || coverUrl != null) {
+      map['cover_url'] = Variable<String>(coverUrl);
     }
-    map['source_type'] = Variable<String>(sourceType);
-    map['chapter_count'] = Variable<int>(chapterCount);
-    if (!nullToAbsent || durationMs != null) {
-      map['duration_ms'] = Variable<int>(durationMs);
+    map['source_id'] = Variable<String>(sourceId);
+    map['source_name'] = Variable<String>(sourceName);
+    map['type'] = Variable<String>(type);
+    if (!nullToAbsent || lastChapterUrl != null) {
+      map['last_chapter_url'] = Variable<String>(lastChapterUrl);
     }
-    map['size_bytes'] = Variable<int>(sizeBytes);
-    if (!nullToAbsent || description != null) {
-      map['description'] = Variable<String>(description);
+    map['last_position_ms'] = Variable<int>(lastPositionMs);
+    map['last_duration_ms'] = Variable<int>(lastDurationMs);
+    map['is_finished'] = Variable<bool>(isFinished);
+    map['is_favorite'] = Variable<bool>(isFavorite);
+    if (!nullToAbsent || lastPlayedAt != null) {
+      map['last_played_at'] = Variable<DateTime>(lastPlayedAt);
     }
-    map['status'] = Variable<String>(status);
-    map['progress'] = Variable<double>(progress);
-    map['added_at'] = Variable<DateTime>(addedAt);
-    if (!nullToAbsent || lastReadAt != null) {
-      map['last_read_at'] = Variable<DateTime>(lastReadAt);
-    }
-    map['sort_order'] = Variable<int>(sortOrder);
+    map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
 
   MediaItemsCompanion toCompanion(bool nullToAbsent) {
     return MediaItemsCompanion(
       id: Value(id),
-      type: Value(type),
       title: Value(title),
       author:
           author == null && nullToAbsent ? const Value.absent() : Value(author),
-      path: Value(path),
-      coverPath: coverPath == null && nullToAbsent
+      coverUrl: coverUrl == null && nullToAbsent
           ? const Value.absent()
-          : Value(coverPath),
-      sourceType: Value(sourceType),
-      chapterCount: Value(chapterCount),
-      durationMs: durationMs == null && nullToAbsent
+          : Value(coverUrl),
+      sourceId: Value(sourceId),
+      sourceName: Value(sourceName),
+      type: Value(type),
+      lastChapterUrl: lastChapterUrl == null && nullToAbsent
           ? const Value.absent()
-          : Value(durationMs),
-      sizeBytes: Value(sizeBytes),
-      description: description == null && nullToAbsent
+          : Value(lastChapterUrl),
+      lastPositionMs: Value(lastPositionMs),
+      lastDurationMs: Value(lastDurationMs),
+      isFinished: Value(isFinished),
+      isFavorite: Value(isFavorite),
+      lastPlayedAt: lastPlayedAt == null && nullToAbsent
           ? const Value.absent()
-          : Value(description),
-      status: Value(status),
-      progress: Value(progress),
-      addedAt: Value(addedAt),
-      lastReadAt: lastReadAt == null && nullToAbsent
-          ? const Value.absent()
-          : Value(lastReadAt),
-      sortOrder: Value(sortOrder),
+          : Value(lastPlayedAt),
+      createdAt: Value(createdAt),
     );
   }
-
-  factory MediaItem.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return MediaItem(
-      id: serializer.fromJson<String>(json['id']),
-      type: serializer.fromJson<String>(json['type']),
-      title: serializer.fromJson<String>(json['title']),
-      author: serializer.fromJson<String?>(json['author']),
-      path: serializer.fromJson<String>(json['path']),
-      coverPath: serializer.fromJson<String?>(json['coverPath']),
-      sourceType: serializer.fromJson<String>(json['sourceType']),
-      chapterCount: serializer.fromJson<int>(json['chapterCount']),
-      durationMs: serializer.fromJson<int?>(json['durationMs']),
-      sizeBytes: serializer.fromJson<int>(json['sizeBytes']),
-      description: serializer.fromJson<String?>(json['description']),
-      status: serializer.fromJson<String>(json['status']),
-      progress: serializer.fromJson<double>(json['progress']),
-      addedAt: serializer.fromJson<DateTime>(json['addedAt']),
-      lastReadAt: serializer.fromJson<DateTime?>(json['lastReadAt']),
-      sortOrder: serializer.fromJson<int>(json['sortOrder']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<String>(id),
-      'type': serializer.toJson<String>(type),
-      'title': serializer.toJson<String>(title),
-      'author': serializer.toJson<String?>(author),
-      'path': serializer.toJson<String>(path),
-      'coverPath': serializer.toJson<String?>(coverPath),
-      'sourceType': serializer.toJson<String>(sourceType),
-      'chapterCount': serializer.toJson<int>(chapterCount),
-      'durationMs': serializer.toJson<int?>(durationMs),
-      'sizeBytes': serializer.toJson<int>(sizeBytes),
-      'description': serializer.toJson<String?>(description),
-      'status': serializer.toJson<String>(status),
-      'progress': serializer.toJson<double>(progress),
-      'addedAt': serializer.toJson<DateTime>(addedAt),
-      'lastReadAt': serializer.toJson<DateTime?>(lastReadAt),
-      'sortOrder': serializer.toJson<int>(sortOrder),
-    };
-  }
-
-  MediaItem copyWith(
-          {String? id,
-          String? type,
-          String? title,
-          Value<String?> author = const Value.absent(),
-          String? path,
-          Value<String?> coverPath = const Value.absent(),
-          String? sourceType,
-          int? chapterCount,
-          Value<int?> durationMs = const Value.absent(),
-          int? sizeBytes,
-          Value<String?> description = const Value.absent(),
-          String? status,
-          double? progress,
-          DateTime? addedAt,
-          Value<DateTime?> lastReadAt = const Value.absent(),
-          int? sortOrder}) =>
-      MediaItem(
-        id: id ?? this.id,
-        type: type ?? this.type,
-        title: title ?? this.title,
-        author: author.present ? author.value : this.author,
-        path: path ?? this.path,
-        coverPath: coverPath.present ? coverPath.value : this.coverPath,
-        sourceType: sourceType ?? this.sourceType,
-        chapterCount: chapterCount ?? this.chapterCount,
-        durationMs: durationMs.present ? durationMs.value : this.durationMs,
-        sizeBytes: sizeBytes ?? this.sizeBytes,
-        description: description.present ? description.value : this.description,
-        status: status ?? this.status,
-        progress: progress ?? this.progress,
-        addedAt: addedAt ?? this.addedAt,
-        lastReadAt: lastReadAt.present ? lastReadAt.value : this.lastReadAt,
-        sortOrder: sortOrder ?? this.sortOrder,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('MediaItem(')
-          ..write('id: $id, ')
-          ..write('type: $type, ')
-          ..write('title: $title, ')
-          ..write('author: $author, ')
-          ..write('path: $path, ')
-          ..write('coverPath: $coverPath, ')
-          ..write('sourceType: $sourceType, ')
-          ..write('chapterCount: $chapterCount, ')
-          ..write('durationMs: $durationMs, ')
-          ..write('sizeBytes: $sizeBytes, ')
-          ..write('description: $description, ')
-          ..write('status: $status, ')
-          ..write('progress: $progress, ')
-          ..write('addedAt: $addedAt, ')
-          ..write('lastReadAt: $lastReadAt, ')
-          ..write('sortOrder: $sortOrder')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(
-      id,
-      type,
-      title,
-      author,
-      path,
-      coverPath,
-      sourceType,
-      chapterCount,
-      durationMs,
-      sizeBytes,
-      description,
-      status,
-      progress,
-      addedAt,
-      lastReadAt,
-      sortOrder);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is MediaItem &&
-          other.id == this.id &&
-          other.type == this.type &&
-          other.title == this.title &&
-          other.author == this.author &&
-          other.path == this.path &&
-          other.coverPath == this.coverPath &&
-          other.sourceType == this.sourceType &&
-          other.chapterCount == this.chapterCount &&
-          other.durationMs == this.durationMs &&
-          other.sizeBytes == this.sizeBytes &&
-          other.description == this.description &&
-          other.status == this.status &&
-          other.progress == this.progress &&
-          other.addedAt == this.addedAt &&
-          other.lastReadAt == this.lastReadAt &&
-          other.sortOrder == this.sortOrder);
 }
 
 class MediaItemsCompanion extends UpdateCompanion<MediaItem> {
   final Value<String> id;
-  final Value<String> type;
   final Value<String> title;
   final Value<String?> author;
-  final Value<String> path;
-  final Value<String?> coverPath;
-  final Value<String> sourceType;
-  final Value<int> chapterCount;
-  final Value<int?> durationMs;
-  final Value<int> sizeBytes;
-  final Value<String?> description;
-  final Value<String> status;
-  final Value<double> progress;
-  final Value<DateTime> addedAt;
-  final Value<DateTime?> lastReadAt;
-  final Value<int> sortOrder;
+  final Value<String?> coverUrl;
+  final Value<String> sourceId;
+  final Value<String> sourceName;
+  final Value<String> type;
+  final Value<String?> lastChapterUrl;
+  final Value<int> lastPositionMs;
+  final Value<int> lastDurationMs;
+  final Value<bool> isFinished;
+  final Value<bool> isFavorite;
+  final Value<DateTime?> lastPlayedAt;
+  final Value<DateTime> createdAt;
   const MediaItemsCompanion({
     this.id = const Value.absent(),
-    this.type = const Value.absent(),
     this.title = const Value.absent(),
     this.author = const Value.absent(),
-    this.path = const Value.absent(),
-    this.coverPath = const Value.absent(),
-    this.sourceType = const Value.absent(),
-    this.chapterCount = const Value.absent(),
-    this.durationMs = const Value.absent(),
-    this.sizeBytes = const Value.absent(),
-    this.description = const Value.absent(),
-    this.status = const Value.absent(),
-    this.progress = const Value.absent(),
-    this.addedAt = const Value.absent(),
-    this.lastReadAt = const Value.absent(),
-    this.sortOrder = const Value.absent(),
+    this.coverUrl = const Value.absent(),
+    this.sourceId = const Value.absent(),
+    this.sourceName = const Value.absent(),
+    this.type = const Value.absent(),
+    this.lastChapterUrl = const Value.absent(),
+    this.lastPositionMs = const Value.absent(),
+    this.lastDurationMs = const Value.absent(),
+    this.isFinished = const Value.absent(),
+    this.isFavorite = const Value.absent(),
+    this.lastPlayedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
   });
   MediaItemsCompanion.insert({
     required String id,
-    required String type,
     required String title,
     this.author = const Value.absent(),
-    required String path,
-    this.coverPath = const Value.absent(),
-    this.sourceType = const Value.absent(),
-    this.chapterCount = const Value.absent(),
-    this.durationMs = const Value.absent(),
-    this.sizeBytes = const Value.absent(),
-    this.description = const Value.absent(),
-    this.status = const Value.absent(),
-    this.progress = const Value.absent(),
-    required DateTime addedAt,
-    this.lastReadAt = const Value.absent(),
-    this.sortOrder = const Value.absent(),
+    this.coverUrl = const Value.absent(),
+    required String sourceId,
+    required String sourceName,
+    required String type,
+    this.lastChapterUrl = const Value.absent(),
+    this.lastPositionMs = const Value.absent(),
+    this.lastDurationMs = const Value.absent(),
+    this.isFinished = const Value.absent(),
+    this.isFavorite = const Value.absent(),
+    this.lastPlayedAt = const Value.absent(),
+    required DateTime createdAt,
   })  : id = Value(id),
-        type = Value(type),
         title = Value(title),
-        path = Value(path),
-        addedAt = Value(addedAt);
+        sourceId = Value(sourceId),
+        sourceName = Value(sourceName),
+        type = Value(type),
+        createdAt = Value(createdAt);
   static Insertable<MediaItem> custom({
     Expression<String>? id,
-    Expression<String>? type,
     Expression<String>? title,
     Expression<String>? author,
-    Expression<String>? path,
-    Expression<String>? coverPath,
-    Expression<String>? sourceType,
-    Expression<int>? chapterCount,
-    Expression<int>? durationMs,
-    Expression<int>? sizeBytes,
-    Expression<String>? description,
-    Expression<String>? status,
-    Expression<double>? progress,
-    Expression<DateTime>? addedAt,
-    Expression<DateTime>? lastReadAt,
-    Expression<int>? sortOrder,
+    Expression<String>? coverUrl,
+    Expression<String>? sourceId,
+    Expression<String>? sourceName,
+    Expression<String>? type,
+    Expression<String>? lastChapterUrl,
+    Expression<int>? lastPositionMs,
+    Expression<int>? lastDurationMs,
+    Expression<bool>? isFinished,
+    Expression<bool>? isFavorite,
+    Expression<DateTime>? lastPlayedAt,
+    Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
-      if (type != null) 'type': type,
       if (title != null) 'title': title,
       if (author != null) 'author': author,
-      if (path != null) 'path': path,
-      if (coverPath != null) 'cover_path': coverPath,
-      if (sourceType != null) 'source_type': sourceType,
-      if (chapterCount != null) 'chapter_count': chapterCount,
-      if (durationMs != null) 'duration_ms': durationMs,
-      if (sizeBytes != null) 'size_bytes': sizeBytes,
-      if (description != null) 'description': description,
-      if (status != null) 'status': status,
-      if (progress != null) 'progress': progress,
-      if (addedAt != null) 'added_at': addedAt,
-      if (lastReadAt != null) 'last_read_at': lastReadAt,
-      if (sortOrder != null) 'sort_order': sortOrder,
+      if (coverUrl != null) 'cover_url': coverUrl,
+      if (sourceId != null) 'source_id': sourceId,
+      if (sourceName != null) 'source_name': sourceName,
+      if (type != null) 'type': type,
+      if (lastChapterUrl != null) 'last_chapter_url': lastChapterUrl,
+      if (lastPositionMs != null) 'last_position_ms': lastPositionMs,
+      if (lastDurationMs != null) 'last_duration_ms': lastDurationMs,
+      if (isFinished != null) 'is_finished': isFinished,
+      if (isFavorite != null) 'is_favorite': isFavorite,
+      if (lastPlayedAt != null) 'last_played_at': lastPlayedAt,
+      if (createdAt != null) 'created_at': createdAt,
     });
-  }
-
-  MediaItemsCompanion copyWith(
-      {Value<String>? id,
-      Value<String>? type,
-      Value<String>? title,
-      Value<String?>? author,
-      Value<String>? path,
-      Value<String?>? coverPath,
-      Value<String>? sourceType,
-      Value<int>? chapterCount,
-      Value<int?>? durationMs,
-      Value<int>? sizeBytes,
-      Value<String?>? description,
-      Value<String>? status,
-      Value<double>? progress,
-      Value<DateTime>? addedAt,
-      Value<DateTime?>? lastReadAt,
-      Value<int>? sortOrder}) {
-    return MediaItemsCompanion(
-      id: id ?? this.id,
-      type: type ?? this.type,
-      title: title ?? this.title,
-      author: author ?? this.author,
-      path: path ?? this.path,
-      coverPath: coverPath ?? this.coverPath,
-      sourceType: sourceType ?? this.sourceType,
-      chapterCount: chapterCount ?? this.chapterCount,
-      durationMs: durationMs ?? this.durationMs,
-      sizeBytes: sizeBytes ?? this.sizeBytes,
-      description: description ?? this.description,
-      status: status ?? this.status,
-      progress: progress ?? this.progress,
-      addedAt: addedAt ?? this.addedAt,
-      lastReadAt: lastReadAt ?? this.lastReadAt,
-      sortOrder: sortOrder ?? this.sortOrder,
-    );
   }
 
   @override
@@ -380,75 +190,46 @@ class MediaItemsCompanion extends UpdateCompanion<MediaItem> {
     if (id.present) {
       map['id'] = Variable<String>(id.value);
     }
-    if (type.present) {
-      map['type'] = Variable<String>(type.value);
-    }
     if (title.present) {
       map['title'] = Variable<String>(title.value);
     }
     if (author.present) {
       map['author'] = Variable<String>(author.value);
     }
-    if (path.present) {
-      map['path'] = Variable<String>(path.value);
+    if (coverUrl.present) {
+      map['cover_url'] = Variable<String>(coverUrl.value);
     }
-    if (coverPath.present) {
-      map['cover_path'] = Variable<String>(coverPath.value);
+    if (sourceId.present) {
+      map['source_id'] = Variable<String>(sourceId.value);
     }
-    if (sourceType.present) {
-      map['source_type'] = Variable<String>(sourceType.value);
+    if (sourceName.present) {
+      map['source_name'] = Variable<String>(sourceName.value);
     }
-    if (chapterCount.present) {
-      map['chapter_count'] = Variable<int>(chapterCount.value);
+    if (type.present) {
+      map['type'] = Variable<String>(type.value);
     }
-    if (durationMs.present) {
-      map['duration_ms'] = Variable<int>(durationMs.value);
+    if (lastChapterUrl.present) {
+      map['last_chapter_url'] = Variable<String>(lastChapterUrl.value);
     }
-    if (sizeBytes.present) {
-      map['size_bytes'] = Variable<int>(sizeBytes.value);
+    if (lastPositionMs.present) {
+      map['last_position_ms'] = Variable<int>(lastPositionMs.value);
     }
-    if (description.present) {
-      map['description'] = Variable<String>(description.value);
+    if (lastDurationMs.present) {
+      map['last_duration_ms'] = Variable<int>(lastDurationMs.value);
     }
-    if (status.present) {
-      map['status'] = Variable<String>(status.value);
+    if (isFinished.present) {
+      map['is_finished'] = Variable<bool>(isFinished.value);
     }
-    if (progress.present) {
-      map['progress'] = Variable<double>(progress.value);
+    if (isFavorite.present) {
+      map['is_favorite'] = Variable<bool>(isFavorite.value);
     }
-    if (addedAt.present) {
-      map['added_at'] = Variable<DateTime>(addedAt.value);
+    if (lastPlayedAt.present) {
+      map['last_played_at'] = Variable<DateTime>(lastPlayedAt.value);
     }
-    if (lastReadAt.present) {
-      map['last_read_at'] = Variable<DateTime>(lastReadAt.value);
-    }
-    if (sortOrder.present) {
-      map['sort_order'] = Variable<int>(sortOrder.value);
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('MediaItemsCompanion(')
-          ..write('id: $id, ')
-          ..write('type: $type, ')
-          ..write('title: $title, ')
-          ..write('author: $author, ')
-          ..write('path: $path, ')
-          ..write('coverPath: $coverPath, ')
-          ..write('sourceType: $sourceType, ')
-          ..write('chapterCount: $chapterCount, ')
-          ..write('durationMs: $durationMs, ')
-          ..write('sizeBytes: $sizeBytes, ')
-          ..write('description: $description, ')
-          ..write('status: $status, ')
-          ..write('progress: $progress, ')
-          ..write('addedAt: $addedAt, ')
-          ..write('lastReadAt: $lastReadAt, ')
-          ..write('sortOrder: $sortOrder')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -463,121 +244,116 @@ class $MediaItemsTable extends MediaItems
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
       'id', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _typeMeta = const VerificationMeta('type');
-  @override
-  late final GeneratedColumn<String> type = GeneratedColumn<String>(
-      'type', aliasedName, false,
-      type: DriftSqlType.string, requiredDuringInsert: true);
   static const VerificationMeta _titleMeta = const VerificationMeta('title');
   @override
   late final GeneratedColumn<String> title = GeneratedColumn<String>(
       'title', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _authorMeta = const VerificationMeta('author');
+  static const VerificationMeta _authorMeta =
+      const VerificationMeta('author');
   @override
   late final GeneratedColumn<String> author = GeneratedColumn<String>(
       'author', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
-  static const VerificationMeta _pathMeta = const VerificationMeta('path');
+  static const VerificationMeta _coverUrlMeta =
+      const VerificationMeta('coverUrl');
   @override
-  late final GeneratedColumn<String> path = GeneratedColumn<String>(
-      'path', aliasedName, false,
+  late final GeneratedColumn<String> coverUrl = GeneratedColumn<String>(
+      'cover_url', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _sourceIdMeta =
+      const VerificationMeta('sourceId');
+  @override
+  late final GeneratedColumn<String> sourceId = GeneratedColumn<String>(
+      'source_id', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _coverPathMeta =
-      const VerificationMeta('coverPath');
+  static const VerificationMeta _sourceNameMeta =
+      const VerificationMeta('sourceName');
   @override
-  late final GeneratedColumn<String> coverPath = GeneratedColumn<String>(
-      'cover_path', aliasedName, true,
+  late final GeneratedColumn<String> sourceName = GeneratedColumn<String>(
+      'source_name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
+  @override
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+      'type', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _lastChapterUrlMeta =
+      const VerificationMeta('lastChapterUrl');
+  @override
+  late final GeneratedColumn<String> lastChapterUrl = GeneratedColumn<String>(
+      'last_chapter_url', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
-  static const VerificationMeta _sourceTypeMeta =
-      const VerificationMeta('sourceType');
+  static const VerificationMeta _lastPositionMsMeta =
+      const VerificationMeta('lastPositionMs');
   @override
-  late final GeneratedColumn<String> sourceType = GeneratedColumn<String>(
-      'source_type', aliasedName, false,
-      type: DriftSqlType.string,
-      requiredDuringInsert: false,
-      defaultValue: const Constant('folder'));
-  static const VerificationMeta _chapterCountMeta =
-      const VerificationMeta('chapterCount');
-  @override
-  late final GeneratedColumn<int> chapterCount = GeneratedColumn<int>(
-      'chapter_count', aliasedName, false,
+  late final GeneratedColumn<int> lastPositionMs = GeneratedColumn<int>(
+      'last_position_ms', aliasedName, false,
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
-  static const VerificationMeta _durationMsMeta =
-      const VerificationMeta('durationMs');
+  static const VerificationMeta _lastDurationMsMeta =
+      const VerificationMeta('lastDurationMs');
   @override
-  late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
-      'duration_ms', aliasedName, true,
-      type: DriftSqlType.int, requiredDuringInsert: false);
-  static const VerificationMeta _sizeBytesMeta =
-      const VerificationMeta('sizeBytes');
-  @override
-  late final GeneratedColumn<int> sizeBytes = GeneratedColumn<int>(
-      'size_bytes', aliasedName, false,
+  late final GeneratedColumn<int> lastDurationMs = GeneratedColumn<int>(
+      'last_duration_ms', aliasedName, false,
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
-  static const VerificationMeta _descriptionMeta =
-      const VerificationMeta('description');
+  static const VerificationMeta _isFinishedMeta =
+      const VerificationMeta('isFinished');
   @override
-  late final GeneratedColumn<String> description = GeneratedColumn<String>(
-      'description', aliasedName, true,
-      type: DriftSqlType.string, requiredDuringInsert: false);
-  static const VerificationMeta _statusMeta = const VerificationMeta('status');
-  @override
-  late final GeneratedColumn<String> status = GeneratedColumn<String>(
-      'status', aliasedName, false,
-      type: DriftSqlType.string,
+  late final GeneratedColumn<bool> isFinished = GeneratedColumn<bool>(
+      'is_finished', aliasedName, false,
+      type: DriftSqlType.bool,
       requiredDuringInsert: false,
-      defaultValue: const Constant('unread'));
-  static const VerificationMeta _progressMeta =
-      const VerificationMeta('progress');
+      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+        SqlDialect.sqlite: 'CHECK ("is_finished" IN (0, 1))',
+        SqlDialect.mysql: '',
+        SqlDialect.postgres: '',
+      }),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _isFavoriteMeta =
+      const VerificationMeta('isFavorite');
   @override
-  late final GeneratedColumn<double> progress = GeneratedColumn<double>(
-      'progress', aliasedName, false,
-      type: DriftSqlType.double,
+  late final GeneratedColumn<bool> isFavorite = GeneratedColumn<bool>(
+      'is_favorite', aliasedName, false,
+      type: DriftSqlType.bool,
       requiredDuringInsert: false,
-      defaultValue: const Constant(0));
-  static const VerificationMeta _addedAtMeta =
-      const VerificationMeta('addedAt');
+      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+        SqlDialect.sqlite: 'CHECK ("is_favorite" IN (0, 1))',
+        SqlDialect.mysql: '',
+        SqlDialect.postgres: '',
+      }),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _lastPlayedAtMeta =
+      const VerificationMeta('lastPlayedAt');
   @override
-  late final GeneratedColumn<DateTime> addedAt = GeneratedColumn<DateTime>(
-      'added_at', aliasedName, false,
+  late final GeneratedColumn<DateTime> lastPlayedAt =
+      GeneratedColumn<DateTime>('last_played_at', aliasedName, true,
+          type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
-  static const VerificationMeta _lastReadAtMeta =
-      const VerificationMeta('lastReadAt');
-  @override
-  late final GeneratedColumn<DateTime> lastReadAt = GeneratedColumn<DateTime>(
-      'last_read_at', aliasedName, true,
-      type: DriftSqlType.dateTime, requiredDuringInsert: false);
-  static const VerificationMeta _sortOrderMeta =
-      const VerificationMeta('sortOrder');
-  @override
-  late final GeneratedColumn<int> sortOrder = GeneratedColumn<int>(
-      'sort_order', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultValue: const Constant(0));
   @override
   List<GeneratedColumn> get $columns => [
         id,
-        type,
         title,
         author,
-        path,
-        coverPath,
-        sourceType,
-        chapterCount,
-        durationMs,
-        sizeBytes,
-        description,
-        status,
-        progress,
-        addedAt,
-        lastReadAt,
-        sortOrder
+        coverUrl,
+        sourceId,
+        sourceName,
+        type,
+        lastChapterUrl,
+        lastPositionMs,
+        lastDurationMs,
+        isFinished,
+        isFavorite,
+        lastPlayedAt,
+        createdAt
       ];
   @override
   String get aliasedName => _alias ?? 'media_items';
@@ -593,12 +369,6 @@ class $MediaItemsTable extends MediaItems
     } else if (isInserting) {
       context.missing(_idMeta);
     }
-    if (data.containsKey('type')) {
-      context.handle(
-          _typeMeta, type.isAcceptableOrUnknown(data['type']!, _typeMeta));
-    } else if (isInserting) {
-      context.missing(_typeMeta);
-    }
     if (data.containsKey('title')) {
       context.handle(
           _titleMeta, title.isAcceptableOrUnknown(data['title']!, _titleMeta));
@@ -609,67 +379,67 @@ class $MediaItemsTable extends MediaItems
       context.handle(_authorMeta,
           author.isAcceptableOrUnknown(data['author']!, _authorMeta));
     }
-    if (data.containsKey('path')) {
-      context.handle(
-          _pathMeta, path.isAcceptableOrUnknown(data['path']!, _pathMeta));
+    if (data.containsKey('cover_url')) {
+      context.handle(_coverUrlMeta,
+          coverUrl.isAcceptableOrUnknown(data['cover_url']!, _coverUrlMeta));
+    }
+    if (data.containsKey('source_id')) {
+      context.handle(_sourceIdMeta,
+          sourceId.isAcceptableOrUnknown(data['source_id']!, _sourceIdMeta));
     } else if (isInserting) {
-      context.missing(_pathMeta);
+      context.missing(_sourceIdMeta);
     }
-    if (data.containsKey('cover_path')) {
-      context.handle(_coverPathMeta,
-          coverPath.isAcceptableOrUnknown(data['cover_path']!, _coverPathMeta));
-    }
-    if (data.containsKey('source_type')) {
+    if (data.containsKey('source_name')) {
       context.handle(
-          _sourceTypeMeta,
-          sourceType.isAcceptableOrUnknown(
-              data['source_type']!, _sourceTypeMeta));
-    }
-    if (data.containsKey('chapter_count')) {
-      context.handle(
-          _chapterCountMeta,
-          chapterCount.isAcceptableOrUnknown(
-              data['chapter_count']!, _chapterCountMeta));
-    }
-    if (data.containsKey('duration_ms')) {
-      context.handle(
-          _durationMsMeta,
-          durationMs.isAcceptableOrUnknown(
-              data['duration_ms']!, _durationMsMeta));
-    }
-    if (data.containsKey('size_bytes')) {
-      context.handle(_sizeBytesMeta,
-          sizeBytes.isAcceptableOrUnknown(data['size_bytes']!, _sizeBytesMeta));
-    }
-    if (data.containsKey('description')) {
-      context.handle(
-          _descriptionMeta,
-          description.isAcceptableOrUnknown(
-              data['description']!, _descriptionMeta));
-    }
-    if (data.containsKey('status')) {
-      context.handle(_statusMeta,
-          status.isAcceptableOrUnknown(data['status']!, _statusMeta));
-    }
-    if (data.containsKey('progress')) {
-      context.handle(_progressMeta,
-          progress.isAcceptableOrUnknown(data['progress']!, _progressMeta));
-    }
-    if (data.containsKey('added_at')) {
-      context.handle(_addedAtMeta,
-          addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta));
+          _sourceNameMeta,
+          sourceName.isAcceptableOrUnknown(
+              data['source_name']!, _sourceNameMeta));
     } else if (isInserting) {
-      context.missing(_addedAtMeta);
+      context.missing(_sourceNameMeta);
     }
-    if (data.containsKey('last_read_at')) {
+    if (data.containsKey('type')) {
       context.handle(
-          _lastReadAtMeta,
-          lastReadAt.isAcceptableOrUnknown(
-              data['last_read_at']!, _lastReadAtMeta));
+          _typeMeta, type.isAcceptableOrUnknown(data['type']!, _typeMeta));
+    } else if (isInserting) {
+      context.missing(_typeMeta);
     }
-    if (data.containsKey('sort_order')) {
-      context.handle(_sortOrderMeta,
-          sortOrder.isAcceptableOrUnknown(data['sort_order']!, _sortOrderMeta));
+    if (data.containsKey('last_chapter_url')) {
+      context.handle(
+          _lastChapterUrlMeta,
+          lastChapterUrl.isAcceptableOrUnknown(
+              data['last_chapter_url']!, _lastChapterUrlMeta));
+    }
+    if (data.containsKey('last_position_ms')) {
+      context.handle(
+          _lastPositionMsMeta,
+          lastPositionMs.isAcceptableOrUnknown(
+              data['last_position_ms']!, _lastPositionMsMeta));
+    }
+    if (data.containsKey('last_duration_ms')) {
+      context.handle(
+          _lastDurationMsMeta,
+          lastDurationMs.isAcceptableOrUnknown(
+              data['last_duration_ms']!, _lastDurationMsMeta));
+    }
+    if (data.containsKey('is_finished')) {
+      context.handle(_isFinishedMeta,
+          isFinished.isAcceptableOrUnknown(data['is_finished']!, _isFinishedMeta));
+    }
+    if (data.containsKey('is_favorite')) {
+      context.handle(_isFavoriteMeta,
+          isFavorite.isAcceptableOrUnknown(data['is_favorite']!, _isFavoriteMeta));
+    }
+    if (data.containsKey('last_played_at')) {
+      context.handle(
+          _lastPlayedAtMeta,
+          lastPlayedAt.isAcceptableOrUnknown(
+              data['last_played_at']!, _lastPlayedAtMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
     }
     return context;
   }
@@ -682,36 +452,32 @@ class $MediaItemsTable extends MediaItems
     return MediaItem(
       id: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
-      type: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
       title: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}title'])!,
       author: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}author']),
-      path: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}path'])!,
-      coverPath: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}cover_path']),
-      sourceType: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}source_type'])!,
-      chapterCount: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}chapter_count'])!,
-      durationMs: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}duration_ms']),
-      sizeBytes: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}size_bytes'])!,
-      description: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}description']),
-      status: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}status'])!,
-      progress: attachedDatabase.typeMapping
-          .read(DriftSqlType.double, data['${effectivePrefix}progress'])!,
-      addedAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}added_at'])!,
-      lastReadAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}last_read_at']),
-      sortOrder: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}sort_order'])!,
+      coverUrl: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}cover_url']),
+      sourceId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}source_id'])!,
+      sourceName: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}source_name'])!,
+      type: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
+      lastChapterUrl: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}last_chapter_url']),
+      lastPositionMs: attachedDatabase.typeMapping.read(
+          DriftSqlType.int, data['${effectivePrefix}last_position_ms'])!,
+      lastDurationMs: attachedDatabase.typeMapping.read(
+          DriftSqlType.int, data['${effectivePrefix}last_duration_ms'])!,
+      isFinished: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool, data['${effectivePrefix}is_finished'])!,
+      isFavorite: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool, data['${effectivePrefix}is_favorite'])!,
+      lastPlayedAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}last_played_at']),
+      createdAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -721,36 +487,37 @@ class $MediaItemsTable extends MediaItems
   }
 }
 
+// ---------------------------------------------------------------------------
+// Chapters
+// ---------------------------------------------------------------------------
+
 class Chapter extends DataClass implements Insertable<Chapter> {
   final String id;
   final String itemId;
   final String title;
-  final String? path;
+  final String? url;
   final int orderIndex;
   final int? durationMs;
-  final bool isCorrupted;
   const Chapter(
       {required this.id,
       required this.itemId,
       required this.title,
-      this.path,
+      this.url,
       required this.orderIndex,
-      this.durationMs,
-      required this.isCorrupted});
+      this.durationMs});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
     map['item_id'] = Variable<String>(itemId);
     map['title'] = Variable<String>(title);
-    if (!nullToAbsent || path != null) {
-      map['path'] = Variable<String>(path);
+    if (!nullToAbsent || url != null) {
+      map['url'] = Variable<String>(url);
     }
     map['order_index'] = Variable<int>(orderIndex);
     if (!nullToAbsent || durationMs != null) {
       map['duration_ms'] = Variable<int>(durationMs);
     }
-    map['is_corrupted'] = Variable<bool>(isCorrupted);
     return map;
   }
 
@@ -759,114 +526,37 @@ class Chapter extends DataClass implements Insertable<Chapter> {
       id: Value(id),
       itemId: Value(itemId),
       title: Value(title),
-      path: path == null && nullToAbsent ? const Value.absent() : Value(path),
+      url: url == null && nullToAbsent ? const Value.absent() : Value(url),
       orderIndex: Value(orderIndex),
       durationMs: durationMs == null && nullToAbsent
           ? const Value.absent()
           : Value(durationMs),
-      isCorrupted: Value(isCorrupted),
     );
   }
-
-  factory Chapter.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return Chapter(
-      id: serializer.fromJson<String>(json['id']),
-      itemId: serializer.fromJson<String>(json['itemId']),
-      title: serializer.fromJson<String>(json['title']),
-      path: serializer.fromJson<String?>(json['path']),
-      orderIndex: serializer.fromJson<int>(json['orderIndex']),
-      durationMs: serializer.fromJson<int?>(json['durationMs']),
-      isCorrupted: serializer.fromJson<bool>(json['isCorrupted']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<String>(id),
-      'itemId': serializer.toJson<String>(itemId),
-      'title': serializer.toJson<String>(title),
-      'path': serializer.toJson<String?>(path),
-      'orderIndex': serializer.toJson<int>(orderIndex),
-      'durationMs': serializer.toJson<int?>(durationMs),
-      'isCorrupted': serializer.toJson<bool>(isCorrupted),
-    };
-  }
-
-  Chapter copyWith(
-          {String? id,
-          String? itemId,
-          String? title,
-          Value<String?> path = const Value.absent(),
-          int? orderIndex,
-          Value<int?> durationMs = const Value.absent(),
-          bool? isCorrupted}) =>
-      Chapter(
-        id: id ?? this.id,
-        itemId: itemId ?? this.itemId,
-        title: title ?? this.title,
-        path: path.present ? path.value : this.path,
-        orderIndex: orderIndex ?? this.orderIndex,
-        durationMs: durationMs.present ? durationMs.value : this.durationMs,
-        isCorrupted: isCorrupted ?? this.isCorrupted,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('Chapter(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('title: $title, ')
-          ..write('path: $path, ')
-          ..write('orderIndex: $orderIndex, ')
-          ..write('durationMs: $durationMs, ')
-          ..write('isCorrupted: $isCorrupted')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode =>
-      Object.hash(id, itemId, title, path, orderIndex, durationMs, isCorrupted);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is Chapter &&
-          other.id == this.id &&
-          other.itemId == this.itemId &&
-          other.title == this.title &&
-          other.path == this.path &&
-          other.orderIndex == this.orderIndex &&
-          other.durationMs == this.durationMs &&
-          other.isCorrupted == this.isCorrupted);
 }
 
 class ChaptersCompanion extends UpdateCompanion<Chapter> {
   final Value<String> id;
   final Value<String> itemId;
   final Value<String> title;
-  final Value<String?> path;
+  final Value<String?> url;
   final Value<int> orderIndex;
   final Value<int?> durationMs;
-  final Value<bool> isCorrupted;
   const ChaptersCompanion({
     this.id = const Value.absent(),
     this.itemId = const Value.absent(),
     this.title = const Value.absent(),
-    this.path = const Value.absent(),
+    this.url = const Value.absent(),
     this.orderIndex = const Value.absent(),
     this.durationMs = const Value.absent(),
-    this.isCorrupted = const Value.absent(),
   });
   ChaptersCompanion.insert({
     required String id,
     required String itemId,
     required String title,
-    this.path = const Value.absent(),
+    this.url = const Value.absent(),
     required int orderIndex,
     this.durationMs = const Value.absent(),
-    this.isCorrupted = const Value.absent(),
   })  : id = Value(id),
         itemId = Value(itemId),
         title = Value(title),
@@ -875,39 +565,18 @@ class ChaptersCompanion extends UpdateCompanion<Chapter> {
     Expression<String>? id,
     Expression<String>? itemId,
     Expression<String>? title,
-    Expression<String>? path,
+    Expression<String>? url,
     Expression<int>? orderIndex,
     Expression<int>? durationMs,
-    Expression<bool>? isCorrupted,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (itemId != null) 'item_id': itemId,
       if (title != null) 'title': title,
-      if (path != null) 'path': path,
+      if (url != null) 'url': url,
       if (orderIndex != null) 'order_index': orderIndex,
       if (durationMs != null) 'duration_ms': durationMs,
-      if (isCorrupted != null) 'is_corrupted': isCorrupted,
     });
-  }
-
-  ChaptersCompanion copyWith(
-      {Value<String>? id,
-      Value<String>? itemId,
-      Value<String>? title,
-      Value<String?>? path,
-      Value<int>? orderIndex,
-      Value<int?>? durationMs,
-      Value<bool>? isCorrupted}) {
-    return ChaptersCompanion(
-      id: id ?? this.id,
-      itemId: itemId ?? this.itemId,
-      title: title ?? this.title,
-      path: path ?? this.path,
-      orderIndex: orderIndex ?? this.orderIndex,
-      durationMs: durationMs ?? this.durationMs,
-      isCorrupted: isCorrupted ?? this.isCorrupted,
-    );
   }
 
   @override
@@ -922,8 +591,8 @@ class ChaptersCompanion extends UpdateCompanion<Chapter> {
     if (title.present) {
       map['title'] = Variable<String>(title.value);
     }
-    if (path.present) {
-      map['path'] = Variable<String>(path.value);
+    if (url.present) {
+      map['url'] = Variable<String>(url.value);
     }
     if (orderIndex.present) {
       map['order_index'] = Variable<int>(orderIndex.value);
@@ -931,24 +600,7 @@ class ChaptersCompanion extends UpdateCompanion<Chapter> {
     if (durationMs.present) {
       map['duration_ms'] = Variable<int>(durationMs.value);
     }
-    if (isCorrupted.present) {
-      map['is_corrupted'] = Variable<bool>(isCorrupted.value);
-    }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('ChaptersCompanion(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('title: $title, ')
-          ..write('path: $path, ')
-          ..write('orderIndex: $orderIndex, ')
-          ..write('durationMs: $durationMs, ')
-          ..write('isCorrupted: $isCorrupted')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -975,10 +627,10 @@ class $ChaptersTable extends Chapters with TableInfo<$ChaptersTable, Chapter> {
   late final GeneratedColumn<String> title = GeneratedColumn<String>(
       'title', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _pathMeta = const VerificationMeta('path');
+  static const VerificationMeta _urlMeta = const VerificationMeta('url');
   @override
-  late final GeneratedColumn<String> path = GeneratedColumn<String>(
-      'path', aliasedName, true,
+  late final GeneratedColumn<String> url = GeneratedColumn<String>(
+      'url', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _orderIndexMeta =
       const VerificationMeta('orderIndex');
@@ -992,22 +644,9 @@ class $ChaptersTable extends Chapters with TableInfo<$ChaptersTable, Chapter> {
   late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
       'duration_ms', aliasedName, true,
       type: DriftSqlType.int, requiredDuringInsert: false);
-  static const VerificationMeta _isCorruptedMeta =
-      const VerificationMeta('isCorrupted');
-  @override
-  late final GeneratedColumn<bool> isCorrupted =
-      GeneratedColumn<bool>('is_corrupted', aliasedName, false,
-          type: DriftSqlType.bool,
-          requiredDuringInsert: false,
-          defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
-            SqlDialect.sqlite: 'CHECK ("is_corrupted" IN (0, 1))',
-            SqlDialect.mysql: '',
-            SqlDialect.postgres: '',
-          }),
-          defaultValue: const Constant(false));
   @override
   List<GeneratedColumn> get $columns =>
-      [id, itemId, title, path, orderIndex, durationMs, isCorrupted];
+      [id, itemId, title, url, orderIndex, durationMs];
   @override
   String get aliasedName => _alias ?? 'chapters';
   @override
@@ -1034,29 +673,18 @@ class $ChaptersTable extends Chapters with TableInfo<$ChaptersTable, Chapter> {
     } else if (isInserting) {
       context.missing(_titleMeta);
     }
-    if (data.containsKey('path')) {
-      context.handle(
-          _pathMeta, path.isAcceptableOrUnknown(data['path']!, _pathMeta));
+    if (data.containsKey('url')) {
+      context.handle(_urlMeta, url.isAcceptableOrUnknown(data['url']!, _urlMeta));
     }
     if (data.containsKey('order_index')) {
-      context.handle(
-          _orderIndexMeta,
-          orderIndex.isAcceptableOrUnknown(
-              data['order_index']!, _orderIndexMeta));
+      context.handle(_orderIndexMeta,
+          orderIndex.isAcceptableOrUnknown(data['order_index']!, _orderIndexMeta));
     } else if (isInserting) {
       context.missing(_orderIndexMeta);
     }
     if (data.containsKey('duration_ms')) {
-      context.handle(
-          _durationMsMeta,
-          durationMs.isAcceptableOrUnknown(
-              data['duration_ms']!, _durationMsMeta));
-    }
-    if (data.containsKey('is_corrupted')) {
-      context.handle(
-          _isCorruptedMeta,
-          isCorrupted.isAcceptableOrUnknown(
-              data['is_corrupted']!, _isCorruptedMeta));
+      context.handle(_durationMsMeta,
+          durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta));
     }
     return context;
   }
@@ -1073,14 +701,12 @@ class $ChaptersTable extends Chapters with TableInfo<$ChaptersTable, Chapter> {
           .read(DriftSqlType.string, data['${effectivePrefix}item_id'])!,
       title: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}title'])!,
-      path: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}path']),
+      url: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}url']),
       orderIndex: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}order_index'])!,
       durationMs: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}duration_ms']),
-      isCorrupted: attachedDatabase.typeMapping
-          .read(DriftSqlType.bool, data['${effectivePrefix}is_corrupted'])!,
     );
   }
 
@@ -1090,27 +716,32 @@ class $ChaptersTable extends Chapters with TableInfo<$ChaptersTable, Chapter> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+
 class Progres extends DataClass implements Insertable<Progres> {
   final String itemId;
-  final String? chapterId;
+  final String chapterUrl;
   final int positionMs;
-  final double speed;
+  final int durationMs;
+  final bool isFinished;
   final DateTime updatedAt;
   const Progres(
       {required this.itemId,
-      this.chapterId,
+      required this.chapterUrl,
       required this.positionMs,
-      required this.speed,
+      required this.durationMs,
+      required this.isFinished,
       required this.updatedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['item_id'] = Variable<String>(itemId);
-    if (!nullToAbsent || chapterId != null) {
-      map['chapter_id'] = Variable<String>(chapterId);
-    }
+    map['chapter_url'] = Variable<String>(chapterUrl);
     map['position_ms'] = Variable<int>(positionMs);
-    map['speed'] = Variable<double>(speed);
+    map['duration_ms'] = Variable<int>(durationMs);
+    map['is_finished'] = Variable<bool>(isFinished);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
@@ -1118,127 +749,56 @@ class Progres extends DataClass implements Insertable<Progres> {
   ProgressCompanion toCompanion(bool nullToAbsent) {
     return ProgressCompanion(
       itemId: Value(itemId),
-      chapterId: chapterId == null && nullToAbsent
-          ? const Value.absent()
-          : Value(chapterId),
+      chapterUrl: Value(chapterUrl),
       positionMs: Value(positionMs),
-      speed: Value(speed),
+      durationMs: Value(durationMs),
+      isFinished: Value(isFinished),
       updatedAt: Value(updatedAt),
     );
   }
-
-  factory Progres.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return Progres(
-      itemId: serializer.fromJson<String>(json['itemId']),
-      chapterId: serializer.fromJson<String?>(json['chapterId']),
-      positionMs: serializer.fromJson<int>(json['positionMs']),
-      speed: serializer.fromJson<double>(json['speed']),
-      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'itemId': serializer.toJson<String>(itemId),
-      'chapterId': serializer.toJson<String?>(chapterId),
-      'positionMs': serializer.toJson<int>(positionMs),
-      'speed': serializer.toJson<double>(speed),
-      'updatedAt': serializer.toJson<DateTime>(updatedAt),
-    };
-  }
-
-  Progres copyWith(
-          {String? itemId,
-          Value<String?> chapterId = const Value.absent(),
-          int? positionMs,
-          double? speed,
-          DateTime? updatedAt}) =>
-      Progres(
-        itemId: itemId ?? this.itemId,
-        chapterId: chapterId.present ? chapterId.value : this.chapterId,
-        positionMs: positionMs ?? this.positionMs,
-        speed: speed ?? this.speed,
-        updatedAt: updatedAt ?? this.updatedAt,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('Progres(')
-          ..write('itemId: $itemId, ')
-          ..write('chapterId: $chapterId, ')
-          ..write('positionMs: $positionMs, ')
-          ..write('speed: $speed, ')
-          ..write('updatedAt: $updatedAt')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode =>
-      Object.hash(itemId, chapterId, positionMs, speed, updatedAt);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is Progres &&
-          other.itemId == this.itemId &&
-          other.chapterId == this.chapterId &&
-          other.positionMs == this.positionMs &&
-          other.speed == this.speed &&
-          other.updatedAt == this.updatedAt);
 }
 
 class ProgressCompanion extends UpdateCompanion<Progres> {
   final Value<String> itemId;
-  final Value<String?> chapterId;
+  final Value<String> chapterUrl;
   final Value<int> positionMs;
-  final Value<double> speed;
+  final Value<int> durationMs;
+  final Value<bool> isFinished;
   final Value<DateTime> updatedAt;
   const ProgressCompanion({
     this.itemId = const Value.absent(),
-    this.chapterId = const Value.absent(),
+    this.chapterUrl = const Value.absent(),
     this.positionMs = const Value.absent(),
-    this.speed = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.isFinished = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
   ProgressCompanion.insert({
     required String itemId,
-    this.chapterId = const Value.absent(),
+    required String chapterUrl,
     this.positionMs = const Value.absent(),
-    this.speed = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.isFinished = const Value.absent(),
     required DateTime updatedAt,
   })  : itemId = Value(itemId),
+        chapterUrl = Value(chapterUrl),
         updatedAt = Value(updatedAt);
   static Insertable<Progres> custom({
     Expression<String>? itemId,
-    Expression<String>? chapterId,
+    Expression<String>? chapterUrl,
     Expression<int>? positionMs,
-    Expression<double>? speed,
+    Expression<int>? durationMs,
+    Expression<bool>? isFinished,
     Expression<DateTime>? updatedAt,
   }) {
     return RawValuesInsertable({
       if (itemId != null) 'item_id': itemId,
-      if (chapterId != null) 'chapter_id': chapterId,
+      if (chapterUrl != null) 'chapter_url': chapterUrl,
       if (positionMs != null) 'position_ms': positionMs,
-      if (speed != null) 'speed': speed,
+      if (durationMs != null) 'duration_ms': durationMs,
+      if (isFinished != null) 'is_finished': isFinished,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
-  }
-
-  ProgressCompanion copyWith(
-      {Value<String>? itemId,
-      Value<String?>? chapterId,
-      Value<int>? positionMs,
-      Value<double>? speed,
-      Value<DateTime>? updatedAt}) {
-    return ProgressCompanion(
-      itemId: itemId ?? this.itemId,
-      chapterId: chapterId ?? this.chapterId,
-      positionMs: positionMs ?? this.positionMs,
-      speed: speed ?? this.speed,
-      updatedAt: updatedAt ?? this.updatedAt,
-    );
   }
 
   @override
@@ -1247,31 +807,22 @@ class ProgressCompanion extends UpdateCompanion<Progres> {
     if (itemId.present) {
       map['item_id'] = Variable<String>(itemId.value);
     }
-    if (chapterId.present) {
-      map['chapter_id'] = Variable<String>(chapterId.value);
+    if (chapterUrl.present) {
+      map['chapter_url'] = Variable<String>(chapterUrl.value);
     }
     if (positionMs.present) {
       map['position_ms'] = Variable<int>(positionMs.value);
     }
-    if (speed.present) {
-      map['speed'] = Variable<double>(speed.value);
+    if (durationMs.present) {
+      map['duration_ms'] = Variable<int>(durationMs.value);
+    }
+    if (isFinished.present) {
+      map['is_finished'] = Variable<bool>(isFinished.value);
     }
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('ProgressCompanion(')
-          ..write('itemId: $itemId, ')
-          ..write('chapterId: $chapterId, ')
-          ..write('positionMs: $positionMs, ')
-          ..write('speed: $speed, ')
-          ..write('updatedAt: $updatedAt')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -1288,12 +839,12 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
       requiredDuringInsert: true,
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'REFERENCES media_items (id) ON DELETE CASCADE'));
-  static const VerificationMeta _chapterIdMeta =
-      const VerificationMeta('chapterId');
+  static const VerificationMeta _chapterUrlMeta =
+      const VerificationMeta('chapterUrl');
   @override
-  late final GeneratedColumn<String> chapterId = GeneratedColumn<String>(
-      'chapter_id', aliasedName, true,
-      type: DriftSqlType.string, requiredDuringInsert: false);
+  late final GeneratedColumn<String> chapterUrl = GeneratedColumn<String>(
+      'chapter_url', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
   static const VerificationMeta _positionMsMeta =
       const VerificationMeta('positionMs');
   @override
@@ -1302,13 +853,27 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
-  static const VerificationMeta _speedMeta = const VerificationMeta('speed');
+  static const VerificationMeta _durationMsMeta =
+      const VerificationMeta('durationMs');
   @override
-  late final GeneratedColumn<double> speed = GeneratedColumn<double>(
-      'speed', aliasedName, false,
-      type: DriftSqlType.double,
+  late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
+      'duration_ms', aliasedName, false,
+      type: DriftSqlType.int,
       requiredDuringInsert: false,
-      defaultValue: const Constant(1.0));
+      defaultValue: const Constant(0));
+  static const VerificationMeta _isFinishedMeta =
+      const VerificationMeta('isFinished');
+  @override
+  late final GeneratedColumn<bool> isFinished = GeneratedColumn<bool>(
+      'is_finished', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+        SqlDialect.sqlite: 'CHECK ("is_finished" IN (0, 1))',
+        SqlDialect.mysql: '',
+        SqlDialect.postgres: '',
+      }),
+      defaultValue: const Constant(false));
   static const VerificationMeta _updatedAtMeta =
       const VerificationMeta('updatedAt');
   @override
@@ -1317,7 +882,7 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
   @override
   List<GeneratedColumn> get $columns =>
-      [itemId, chapterId, positionMs, speed, updatedAt];
+      [itemId, chapterUrl, positionMs, durationMs, isFinished, updatedAt];
   @override
   String get aliasedName => _alias ?? 'progress';
   @override
@@ -1333,19 +898,23 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
     } else if (isInserting) {
       context.missing(_itemIdMeta);
     }
-    if (data.containsKey('chapter_id')) {
-      context.handle(_chapterIdMeta,
-          chapterId.isAcceptableOrUnknown(data['chapter_id']!, _chapterIdMeta));
+    if (data.containsKey('chapter_url')) {
+      context.handle(_chapterUrlMeta,
+          chapterUrl.isAcceptableOrUnknown(data['chapter_url']!, _chapterUrlMeta));
+    } else if (isInserting) {
+      context.missing(_chapterUrlMeta);
     }
     if (data.containsKey('position_ms')) {
-      context.handle(
-          _positionMsMeta,
-          positionMs.isAcceptableOrUnknown(
-              data['position_ms']!, _positionMsMeta));
+      context.handle(_positionMsMeta,
+          positionMs.isAcceptableOrUnknown(data['position_ms']!, _positionMsMeta));
     }
-    if (data.containsKey('speed')) {
-      context.handle(
-          _speedMeta, speed.isAcceptableOrUnknown(data['speed']!, _speedMeta));
+    if (data.containsKey('duration_ms')) {
+      context.handle(_durationMsMeta,
+          durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta));
+    }
+    if (data.containsKey('is_finished')) {
+      context.handle(_isFinishedMeta,
+          isFinished.isAcceptableOrUnknown(data['is_finished']!, _isFinishedMeta));
     }
     if (data.containsKey('updated_at')) {
       context.handle(_updatedAtMeta,
@@ -1357,19 +926,21 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {itemId};
+  Set<GeneratedColumn> get $primaryKey => {itemId, chapterUrl};
   @override
   Progres map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return Progres(
       itemId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}item_id'])!,
-      chapterId: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}chapter_id']),
+      chapterUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}chapter_url'])!,
       positionMs: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}position_ms'])!,
-      speed: attachedDatabase.typeMapping
-          .read(DriftSqlType.double, data['${effectivePrefix}speed'])!,
+      durationMs: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}duration_ms'])!,
+      isFinished: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_finished'])!,
       updatedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
     );
@@ -1381,20 +952,22 @@ class $ProgressTable extends Progress with TableInfo<$ProgressTable, Progres> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Bookmarks
+// ---------------------------------------------------------------------------
+
 class Bookmark extends DataClass implements Insertable<Bookmark> {
   final String id;
   final String itemId;
-  final String? chapterId;
+  final String? chapterUrl;
   final int positionMs;
-  final int? page;
   final String? note;
   final DateTime createdAt;
   const Bookmark(
       {required this.id,
       required this.itemId,
-      this.chapterId,
+      this.chapterUrl,
       required this.positionMs,
-      this.page,
       this.note,
       required this.createdAt});
   @override
@@ -1402,13 +975,10 @@ class Bookmark extends DataClass implements Insertable<Bookmark> {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
     map['item_id'] = Variable<String>(itemId);
-    if (!nullToAbsent || chapterId != null) {
-      map['chapter_id'] = Variable<String>(chapterId);
+    if (!nullToAbsent || chapterUrl != null) {
+      map['chapter_url'] = Variable<String>(chapterUrl);
     }
     map['position_ms'] = Variable<int>(positionMs);
-    if (!nullToAbsent || page != null) {
-      map['page'] = Variable<int>(page);
-    }
     if (!nullToAbsent || note != null) {
       map['note'] = Variable<String>(note);
     }
@@ -1420,113 +990,36 @@ class Bookmark extends DataClass implements Insertable<Bookmark> {
     return BookmarksCompanion(
       id: Value(id),
       itemId: Value(itemId),
-      chapterId: chapterId == null && nullToAbsent
+      chapterUrl: chapterUrl == null && nullToAbsent
           ? const Value.absent()
-          : Value(chapterId),
+          : Value(chapterUrl),
       positionMs: Value(positionMs),
-      page: page == null && nullToAbsent ? const Value.absent() : Value(page),
       note: note == null && nullToAbsent ? const Value.absent() : Value(note),
       createdAt: Value(createdAt),
     );
   }
-
-  factory Bookmark.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return Bookmark(
-      id: serializer.fromJson<String>(json['id']),
-      itemId: serializer.fromJson<String>(json['itemId']),
-      chapterId: serializer.fromJson<String?>(json['chapterId']),
-      positionMs: serializer.fromJson<int>(json['positionMs']),
-      page: serializer.fromJson<int?>(json['page']),
-      note: serializer.fromJson<String?>(json['note']),
-      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<String>(id),
-      'itemId': serializer.toJson<String>(itemId),
-      'chapterId': serializer.toJson<String?>(chapterId),
-      'positionMs': serializer.toJson<int>(positionMs),
-      'page': serializer.toJson<int?>(page),
-      'note': serializer.toJson<String?>(note),
-      'createdAt': serializer.toJson<DateTime>(createdAt),
-    };
-  }
-
-  Bookmark copyWith(
-          {String? id,
-          String? itemId,
-          Value<String?> chapterId = const Value.absent(),
-          int? positionMs,
-          Value<int?> page = const Value.absent(),
-          Value<String?> note = const Value.absent(),
-          DateTime? createdAt}) =>
-      Bookmark(
-        id: id ?? this.id,
-        itemId: itemId ?? this.itemId,
-        chapterId: chapterId.present ? chapterId.value : this.chapterId,
-        positionMs: positionMs ?? this.positionMs,
-        page: page.present ? page.value : this.page,
-        note: note.present ? note.value : this.note,
-        createdAt: createdAt ?? this.createdAt,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('Bookmark(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('chapterId: $chapterId, ')
-          ..write('positionMs: $positionMs, ')
-          ..write('page: $page, ')
-          ..write('note: $note, ')
-          ..write('createdAt: $createdAt')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode =>
-      Object.hash(id, itemId, chapterId, positionMs, page, note, createdAt);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is Bookmark &&
-          other.id == this.id &&
-          other.itemId == this.itemId &&
-          other.chapterId == this.chapterId &&
-          other.positionMs == this.positionMs &&
-          other.page == this.page &&
-          other.note == this.note &&
-          other.createdAt == this.createdAt);
 }
 
 class BookmarksCompanion extends UpdateCompanion<Bookmark> {
   final Value<String> id;
   final Value<String> itemId;
-  final Value<String?> chapterId;
+  final Value<String?> chapterUrl;
   final Value<int> positionMs;
-  final Value<int?> page;
   final Value<String?> note;
   final Value<DateTime> createdAt;
   const BookmarksCompanion({
     this.id = const Value.absent(),
     this.itemId = const Value.absent(),
-    this.chapterId = const Value.absent(),
+    this.chapterUrl = const Value.absent(),
     this.positionMs = const Value.absent(),
-    this.page = const Value.absent(),
     this.note = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   BookmarksCompanion.insert({
     required String id,
     required String itemId,
-    this.chapterId = const Value.absent(),
+    this.chapterUrl = const Value.absent(),
     this.positionMs = const Value.absent(),
-    this.page = const Value.absent(),
     this.note = const Value.absent(),
     required DateTime createdAt,
   })  : id = Value(id),
@@ -1535,40 +1028,19 @@ class BookmarksCompanion extends UpdateCompanion<Bookmark> {
   static Insertable<Bookmark> custom({
     Expression<String>? id,
     Expression<String>? itemId,
-    Expression<String>? chapterId,
+    Expression<String>? chapterUrl,
     Expression<int>? positionMs,
-    Expression<int>? page,
     Expression<String>? note,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (itemId != null) 'item_id': itemId,
-      if (chapterId != null) 'chapter_id': chapterId,
+      if (chapterUrl != null) 'chapter_url': chapterUrl,
       if (positionMs != null) 'position_ms': positionMs,
-      if (page != null) 'page': page,
       if (note != null) 'note': note,
       if (createdAt != null) 'created_at': createdAt,
     });
-  }
-
-  BookmarksCompanion copyWith(
-      {Value<String>? id,
-      Value<String>? itemId,
-      Value<String?>? chapterId,
-      Value<int>? positionMs,
-      Value<int?>? page,
-      Value<String?>? note,
-      Value<DateTime>? createdAt}) {
-    return BookmarksCompanion(
-      id: id ?? this.id,
-      itemId: itemId ?? this.itemId,
-      chapterId: chapterId ?? this.chapterId,
-      positionMs: positionMs ?? this.positionMs,
-      page: page ?? this.page,
-      note: note ?? this.note,
-      createdAt: createdAt ?? this.createdAt,
-    );
   }
 
   @override
@@ -1580,14 +1052,11 @@ class BookmarksCompanion extends UpdateCompanion<Bookmark> {
     if (itemId.present) {
       map['item_id'] = Variable<String>(itemId.value);
     }
-    if (chapterId.present) {
-      map['chapter_id'] = Variable<String>(chapterId.value);
+    if (chapterUrl.present) {
+      map['chapter_url'] = Variable<String>(chapterUrl.value);
     }
     if (positionMs.present) {
       map['position_ms'] = Variable<int>(positionMs.value);
-    }
-    if (page.present) {
-      map['page'] = Variable<int>(page.value);
     }
     if (note.present) {
       map['note'] = Variable<String>(note.value);
@@ -1596,20 +1065,6 @@ class BookmarksCompanion extends UpdateCompanion<Bookmark> {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('BookmarksCompanion(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('chapterId: $chapterId, ')
-          ..write('positionMs: $positionMs, ')
-          ..write('page: $page, ')
-          ..write('note: $note, ')
-          ..write('createdAt: $createdAt')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -1632,11 +1087,11 @@ class $BookmarksTable extends Bookmarks
       requiredDuringInsert: true,
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'REFERENCES media_items (id) ON DELETE CASCADE'));
-  static const VerificationMeta _chapterIdMeta =
-      const VerificationMeta('chapterId');
+  static const VerificationMeta _chapterUrlMeta =
+      const VerificationMeta('chapterUrl');
   @override
-  late final GeneratedColumn<String> chapterId = GeneratedColumn<String>(
-      'chapter_id', aliasedName, true,
+  late final GeneratedColumn<String> chapterUrl = GeneratedColumn<String>(
+      'chapter_url', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _positionMsMeta =
       const VerificationMeta('positionMs');
@@ -1646,11 +1101,6 @@ class $BookmarksTable extends Bookmarks
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
-  static const VerificationMeta _pageMeta = const VerificationMeta('page');
-  @override
-  late final GeneratedColumn<int> page = GeneratedColumn<int>(
-      'page', aliasedName, true,
-      type: DriftSqlType.int, requiredDuringInsert: false);
   static const VerificationMeta _noteMeta = const VerificationMeta('note');
   @override
   late final GeneratedColumn<String> note = GeneratedColumn<String>(
@@ -1664,7 +1114,7 @@ class $BookmarksTable extends Bookmarks
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
   @override
   List<GeneratedColumn> get $columns =>
-      [id, itemId, chapterId, positionMs, page, note, createdAt];
+      [id, itemId, chapterUrl, positionMs, note, createdAt];
   @override
   String get aliasedName => _alias ?? 'bookmarks';
   @override
@@ -1685,19 +1135,13 @@ class $BookmarksTable extends Bookmarks
     } else if (isInserting) {
       context.missing(_itemIdMeta);
     }
-    if (data.containsKey('chapter_id')) {
-      context.handle(_chapterIdMeta,
-          chapterId.isAcceptableOrUnknown(data['chapter_id']!, _chapterIdMeta));
+    if (data.containsKey('chapter_url')) {
+      context.handle(_chapterUrlMeta,
+          chapterUrl.isAcceptableOrUnknown(data['chapter_url']!, _chapterUrlMeta));
     }
     if (data.containsKey('position_ms')) {
-      context.handle(
-          _positionMsMeta,
-          positionMs.isAcceptableOrUnknown(
-              data['position_ms']!, _positionMsMeta));
-    }
-    if (data.containsKey('page')) {
-      context.handle(
-          _pageMeta, page.isAcceptableOrUnknown(data['page']!, _pageMeta));
+      context.handle(_positionMsMeta,
+          positionMs.isAcceptableOrUnknown(data['position_ms']!, _positionMsMeta));
     }
     if (data.containsKey('note')) {
       context.handle(
@@ -1722,16 +1166,14 @@ class $BookmarksTable extends Bookmarks
           .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
       itemId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}item_id'])!,
-      chapterId: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}chapter_id']),
+      chapterUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}chapter_url']),
       positionMs: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}position_ms'])!,
-      page: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}page']),
       note: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}note']),
-      createdAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      createdAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -1741,17 +1183,19 @@ class $BookmarksTable extends Bookmarks
   }
 }
 
+// ---------------------------------------------------------------------------
+// Favorites
+// ---------------------------------------------------------------------------
+
 class Favorite extends DataClass implements Insertable<Favorite> {
   final String id;
   final String itemId;
   final String type;
-  final String groupName;
   final DateTime createdAt;
   const Favorite(
       {required this.id,
       required this.itemId,
       required this.type,
-      required this.groupName,
       required this.createdAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1759,7 +1203,6 @@ class Favorite extends DataClass implements Insertable<Favorite> {
     map['id'] = Variable<String>(id);
     map['item_id'] = Variable<String>(itemId);
     map['type'] = Variable<String>(type);
-    map['group_name'] = Variable<String>(groupName);
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -1769,90 +1212,26 @@ class Favorite extends DataClass implements Insertable<Favorite> {
       id: Value(id),
       itemId: Value(itemId),
       type: Value(type),
-      groupName: Value(groupName),
       createdAt: Value(createdAt),
     );
   }
-
-  factory Favorite.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return Favorite(
-      id: serializer.fromJson<String>(json['id']),
-      itemId: serializer.fromJson<String>(json['itemId']),
-      type: serializer.fromJson<String>(json['type']),
-      groupName: serializer.fromJson<String>(json['groupName']),
-      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<String>(id),
-      'itemId': serializer.toJson<String>(itemId),
-      'type': serializer.toJson<String>(type),
-      'groupName': serializer.toJson<String>(groupName),
-      'createdAt': serializer.toJson<DateTime>(createdAt),
-    };
-  }
-
-  Favorite copyWith(
-          {String? id,
-          String? itemId,
-          String? type,
-          String? groupName,
-          DateTime? createdAt}) =>
-      Favorite(
-        id: id ?? this.id,
-        itemId: itemId ?? this.itemId,
-        type: type ?? this.type,
-        groupName: groupName ?? this.groupName,
-        createdAt: createdAt ?? this.createdAt,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('Favorite(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('type: $type, ')
-          ..write('groupName: $groupName, ')
-          ..write('createdAt: $createdAt')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(id, itemId, type, groupName, createdAt);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is Favorite &&
-          other.id == this.id &&
-          other.itemId == this.itemId &&
-          other.type == this.type &&
-          other.groupName == this.groupName &&
-          other.createdAt == this.createdAt);
 }
 
 class FavoritesCompanion extends UpdateCompanion<Favorite> {
   final Value<String> id;
   final Value<String> itemId;
   final Value<String> type;
-  final Value<String> groupName;
   final Value<DateTime> createdAt;
   const FavoritesCompanion({
     this.id = const Value.absent(),
     this.itemId = const Value.absent(),
     this.type = const Value.absent(),
-    this.groupName = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   FavoritesCompanion.insert({
     required String id,
     required String itemId,
     required String type,
-    this.groupName = const Value.absent(),
     required DateTime createdAt,
   })  : id = Value(id),
         itemId = Value(itemId),
@@ -1862,31 +1241,14 @@ class FavoritesCompanion extends UpdateCompanion<Favorite> {
     Expression<String>? id,
     Expression<String>? itemId,
     Expression<String>? type,
-    Expression<String>? groupName,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (itemId != null) 'item_id': itemId,
       if (type != null) 'type': type,
-      if (groupName != null) 'group_name': groupName,
       if (createdAt != null) 'created_at': createdAt,
     });
-  }
-
-  FavoritesCompanion copyWith(
-      {Value<String>? id,
-      Value<String>? itemId,
-      Value<String>? type,
-      Value<String>? groupName,
-      Value<DateTime>? createdAt}) {
-    return FavoritesCompanion(
-      id: id ?? this.id,
-      itemId: itemId ?? this.itemId,
-      type: type ?? this.type,
-      groupName: groupName ?? this.groupName,
-      createdAt: createdAt ?? this.createdAt,
-    );
   }
 
   @override
@@ -1901,25 +1263,10 @@ class FavoritesCompanion extends UpdateCompanion<Favorite> {
     if (type.present) {
       map['type'] = Variable<String>(type.value);
     }
-    if (groupName.present) {
-      map['group_name'] = Variable<String>(groupName.value);
-    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('FavoritesCompanion(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('type: $type, ')
-          ..write('groupName: $groupName, ')
-          ..write('createdAt: $createdAt')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -1947,14 +1294,6 @@ class $FavoritesTable extends Favorites
   late final GeneratedColumn<String> type = GeneratedColumn<String>(
       'type', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _groupNameMeta =
-      const VerificationMeta('groupName');
-  @override
-  late final GeneratedColumn<String> groupName = GeneratedColumn<String>(
-      'group_name', aliasedName, false,
-      type: DriftSqlType.string,
-      requiredDuringInsert: false,
-      defaultValue: const Constant('默认'));
   static const VerificationMeta _createdAtMeta =
       const VerificationMeta('createdAt');
   @override
@@ -1962,8 +1301,7 @@ class $FavoritesTable extends Favorites
       'created_at', aliasedName, false,
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
   @override
-  List<GeneratedColumn> get $columns =>
-      [id, itemId, type, groupName, createdAt];
+  List<GeneratedColumn> get $columns => [id, itemId, type, createdAt];
   @override
   String get aliasedName => _alias ?? 'favorites';
   @override
@@ -1990,10 +1328,6 @@ class $FavoritesTable extends Favorites
     } else if (isInserting) {
       context.missing(_typeMeta);
     }
-    if (data.containsKey('group_name')) {
-      context.handle(_groupNameMeta,
-          groupName.isAcceptableOrUnknown(data['group_name']!, _groupNameMeta));
-    }
     if (data.containsKey('created_at')) {
       context.handle(_createdAtMeta,
           createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
@@ -2015,10 +1349,8 @@ class $FavoritesTable extends Favorites
           .read(DriftSqlType.string, data['${effectivePrefix}item_id'])!,
       type: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
-      groupName: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}group_name'])!,
-      createdAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      createdAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -2028,15 +1360,21 @@ class $FavoritesTable extends Favorites
   }
 }
 
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
 class HistoryData extends DataClass implements Insertable<HistoryData> {
   final String id;
   final String itemId;
   final String type;
+  final String? chapterUrl;
   final DateTime visitedAt;
   const HistoryData(
       {required this.id,
       required this.itemId,
       required this.type,
+      this.chapterUrl,
       required this.visitedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2044,6 +1382,9 @@ class HistoryData extends DataClass implements Insertable<HistoryData> {
     map['id'] = Variable<String>(id);
     map['item_id'] = Variable<String>(itemId);
     map['type'] = Variable<String>(type);
+    if (!nullToAbsent || chapterUrl != null) {
+      map['chapter_url'] = Variable<String>(chapterUrl);
+    }
     map['visited_at'] = Variable<DateTime>(visitedAt);
     return map;
   }
@@ -2053,77 +1394,32 @@ class HistoryData extends DataClass implements Insertable<HistoryData> {
       id: Value(id),
       itemId: Value(itemId),
       type: Value(type),
+      chapterUrl: chapterUrl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(chapterUrl),
       visitedAt: Value(visitedAt),
     );
   }
-
-  factory HistoryData.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return HistoryData(
-      id: serializer.fromJson<String>(json['id']),
-      itemId: serializer.fromJson<String>(json['itemId']),
-      type: serializer.fromJson<String>(json['type']),
-      visitedAt: serializer.fromJson<DateTime>(json['visitedAt']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<String>(id),
-      'itemId': serializer.toJson<String>(itemId),
-      'type': serializer.toJson<String>(type),
-      'visitedAt': serializer.toJson<DateTime>(visitedAt),
-    };
-  }
-
-  HistoryData copyWith(
-          {String? id, String? itemId, String? type, DateTime? visitedAt}) =>
-      HistoryData(
-        id: id ?? this.id,
-        itemId: itemId ?? this.itemId,
-        type: type ?? this.type,
-        visitedAt: visitedAt ?? this.visitedAt,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('HistoryData(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('type: $type, ')
-          ..write('visitedAt: $visitedAt')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(id, itemId, type, visitedAt);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is HistoryData &&
-          other.id == this.id &&
-          other.itemId == this.itemId &&
-          other.type == this.type &&
-          other.visitedAt == this.visitedAt);
 }
 
 class HistoryCompanion extends UpdateCompanion<HistoryData> {
   final Value<String> id;
   final Value<String> itemId;
   final Value<String> type;
+  final Value<String?> chapterUrl;
   final Value<DateTime> visitedAt;
   const HistoryCompanion({
     this.id = const Value.absent(),
     this.itemId = const Value.absent(),
     this.type = const Value.absent(),
+    this.chapterUrl = const Value.absent(),
     this.visitedAt = const Value.absent(),
   });
   HistoryCompanion.insert({
     required String id,
     required String itemId,
     required String type,
+    this.chapterUrl = const Value.absent(),
     required DateTime visitedAt,
   })  : id = Value(id),
         itemId = Value(itemId),
@@ -2133,27 +1429,16 @@ class HistoryCompanion extends UpdateCompanion<HistoryData> {
     Expression<String>? id,
     Expression<String>? itemId,
     Expression<String>? type,
+    Expression<String>? chapterUrl,
     Expression<DateTime>? visitedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (itemId != null) 'item_id': itemId,
       if (type != null) 'type': type,
+      if (chapterUrl != null) 'chapter_url': chapterUrl,
       if (visitedAt != null) 'visited_at': visitedAt,
     });
-  }
-
-  HistoryCompanion copyWith(
-      {Value<String>? id,
-      Value<String>? itemId,
-      Value<String>? type,
-      Value<DateTime>? visitedAt}) {
-    return HistoryCompanion(
-      id: id ?? this.id,
-      itemId: itemId ?? this.itemId,
-      type: type ?? this.type,
-      visitedAt: visitedAt ?? this.visitedAt,
-    );
   }
 
   @override
@@ -2168,21 +1453,13 @@ class HistoryCompanion extends UpdateCompanion<HistoryData> {
     if (type.present) {
       map['type'] = Variable<String>(type.value);
     }
+    if (chapterUrl.present) {
+      map['chapter_url'] = Variable<String>(chapterUrl.value);
+    }
     if (visitedAt.present) {
       map['visited_at'] = Variable<DateTime>(visitedAt.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('HistoryCompanion(')
-          ..write('id: $id, ')
-          ..write('itemId: $itemId, ')
-          ..write('type: $type, ')
-          ..write('visitedAt: $visitedAt')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -2209,6 +1486,12 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
   late final GeneratedColumn<String> type = GeneratedColumn<String>(
       'type', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _chapterUrlMeta =
+      const VerificationMeta('chapterUrl');
+  @override
+  late final GeneratedColumn<String> chapterUrl = GeneratedColumn<String>(
+      'chapter_url', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _visitedAtMeta =
       const VerificationMeta('visitedAt');
   @override
@@ -2216,7 +1499,8 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
       'visited_at', aliasedName, false,
       type: DriftSqlType.dateTime, requiredDuringInsert: true);
   @override
-  List<GeneratedColumn> get $columns => [id, itemId, type, visitedAt];
+  List<GeneratedColumn> get $columns =>
+      [id, itemId, type, chapterUrl, visitedAt];
   @override
   String get aliasedName => _alias ?? 'history';
   @override
@@ -2243,6 +1527,10 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
     } else if (isInserting) {
       context.missing(_typeMeta);
     }
+    if (data.containsKey('chapter_url')) {
+      context.handle(_chapterUrlMeta,
+          chapterUrl.isAcceptableOrUnknown(data['chapter_url']!, _chapterUrlMeta));
+    }
     if (data.containsKey('visited_at')) {
       context.handle(_visitedAtMeta,
           visitedAt.isAcceptableOrUnknown(data['visited_at']!, _visitedAtMeta));
@@ -2264,8 +1552,10 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
           .read(DriftSqlType.string, data['${effectivePrefix}item_id'])!,
       type: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
-      visitedAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}visited_at'])!,
+      chapterUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}chapter_url']),
+      visitedAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}visited_at'])!,
     );
   }
 
@@ -2274,6 +1564,10 @@ class $HistoryTable extends History with TableInfo<$HistoryTable, HistoryData> {
     return $HistoryTable(attachedDatabase, alias);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Logs
+// ---------------------------------------------------------------------------
 
 class Log extends DataClass implements Insertable<Log> {
   final int id;
@@ -2310,66 +1604,6 @@ class Log extends DataClass implements Insertable<Log> {
       createdAt: Value(createdAt),
     );
   }
-
-  factory Log.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return Log(
-      id: serializer.fromJson<int>(json['id']),
-      level: serializer.fromJson<String>(json['level']),
-      message: serializer.fromJson<String>(json['message']),
-      detail: serializer.fromJson<String?>(json['detail']),
-      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<int>(id),
-      'level': serializer.toJson<String>(level),
-      'message': serializer.toJson<String>(message),
-      'detail': serializer.toJson<String?>(detail),
-      'createdAt': serializer.toJson<DateTime>(createdAt),
-    };
-  }
-
-  Log copyWith(
-          {int? id,
-          String? level,
-          String? message,
-          Value<String?> detail = const Value.absent(),
-          DateTime? createdAt}) =>
-      Log(
-        id: id ?? this.id,
-        level: level ?? this.level,
-        message: message ?? this.message,
-        detail: detail.present ? detail.value : this.detail,
-        createdAt: createdAt ?? this.createdAt,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('Log(')
-          ..write('id: $id, ')
-          ..write('level: $level, ')
-          ..write('message: $message, ')
-          ..write('detail: $detail, ')
-          ..write('createdAt: $createdAt')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(id, level, message, detail, createdAt);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is Log &&
-          other.id == this.id &&
-          other.level == this.level &&
-          other.message == this.message &&
-          other.detail == this.detail &&
-          other.createdAt == this.createdAt);
 }
 
 class LogsCompanion extends UpdateCompanion<Log> {
@@ -2410,21 +1644,6 @@ class LogsCompanion extends UpdateCompanion<Log> {
     });
   }
 
-  LogsCompanion copyWith(
-      {Value<int>? id,
-      Value<String>? level,
-      Value<String>? message,
-      Value<String?>? detail,
-      Value<DateTime>? createdAt}) {
-    return LogsCompanion(
-      id: id ?? this.id,
-      level: level ?? this.level,
-      message: message ?? this.message,
-      detail: detail ?? this.detail,
-      createdAt: createdAt ?? this.createdAt,
-    );
-  }
-
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -2444,18 +1663,6 @@ class LogsCompanion extends UpdateCompanion<Log> {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('LogsCompanion(')
-          ..write('id: $id, ')
-          ..write('level: $level, ')
-          ..write('message: $message, ')
-          ..write('detail: $detail, ')
-          ..write('createdAt: $createdAt')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -2548,8 +1755,8 @@ class $LogsTable extends Logs with TableInfo<$LogsTable, Log> {
           .read(DriftSqlType.string, data['${effectivePrefix}message'])!,
       detail: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}detail']),
-      createdAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      createdAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
   }
 
@@ -2558,6 +1765,10 @@ class $LogsTable extends Logs with TableInfo<$LogsTable, Log> {
     return $LogsTable(attachedDatabase, alias);
   }
 }
+
+// ---------------------------------------------------------------------------
+// KvSettings
+// ---------------------------------------------------------------------------
 
 class KvSetting extends DataClass implements Insertable<KvSetting> {
   final String key;
@@ -2577,45 +1788,6 @@ class KvSetting extends DataClass implements Insertable<KvSetting> {
       value: Value(value),
     );
   }
-
-  factory KvSetting.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return KvSetting(
-      key: serializer.fromJson<String>(json['key']),
-      value: serializer.fromJson<String>(json['value']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'key': serializer.toJson<String>(key),
-      'value': serializer.toJson<String>(value),
-    };
-  }
-
-  KvSetting copyWith({String? key, String? value}) => KvSetting(
-        key: key ?? this.key,
-        value: value ?? this.value,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('KvSetting(')
-          ..write('key: $key, ')
-          ..write('value: $value')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(key, value);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is KvSetting &&
-          other.key == this.key &&
-          other.value == this.value);
 }
 
 class KvSettingsCompanion extends UpdateCompanion<KvSetting> {
@@ -2640,13 +1812,6 @@ class KvSettingsCompanion extends UpdateCompanion<KvSetting> {
     });
   }
 
-  KvSettingsCompanion copyWith({Value<String>? key, Value<String>? value}) {
-    return KvSettingsCompanion(
-      key: key ?? this.key,
-      value: value ?? this.value,
-    );
-  }
-
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -2657,15 +1822,6 @@ class KvSettingsCompanion extends UpdateCompanion<KvSetting> {
       map['value'] = Variable<String>(value.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('KvSettingsCompanion(')
-          ..write('key: $key, ')
-          ..write('value: $value')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -2730,10 +1886,14 @@ class $KvSettingsTable extends KvSettings
   }
 }
 
+// ---------------------------------------------------------------------------
+// SourceConfigs
+// ---------------------------------------------------------------------------
+
 class SourceConfig extends DataClass implements Insertable<SourceConfig> {
   final String sourceId;
   final String type;
-  final String enabled;
+  final bool enabled;
   final String? loginState;
   final String? voiceList;
   final String? selectedVoiceId;
@@ -2755,7 +1915,7 @@ class SourceConfig extends DataClass implements Insertable<SourceConfig> {
     final map = <String, Expression>{};
     map['source_id'] = Variable<String>(sourceId);
     map['type'] = Variable<String>(type);
-    map['enabled'] = Variable<String>(enabled);
+    map['enabled'] = Variable<bool>(enabled);
     if (!nullToAbsent || loginState != null) {
       map['login_state'] = Variable<String>(loginState);
     }
@@ -2801,100 +1961,12 @@ class SourceConfig extends DataClass implements Insertable<SourceConfig> {
           extra == null && nullToAbsent ? const Value.absent() : Value(extra),
     );
   }
-
-  factory SourceConfig.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return SourceConfig(
-      sourceId: serializer.fromJson<String>(json['sourceId']),
-      type: serializer.fromJson<String>(json['type']),
-      enabled: serializer.fromJson<String>(json['enabled']),
-      loginState: serializer.fromJson<String?>(json['loginState']),
-      voiceList: serializer.fromJson<String?>(json['voiceList']),
-      selectedVoiceId: serializer.fromJson<String?>(json['selectedVoiceId']),
-      lineList: serializer.fromJson<String?>(json['lineList']),
-      selectedLineId: serializer.fromJson<String?>(json['selectedLineId']),
-      extra: serializer.fromJson<String?>(json['extra']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'sourceId': serializer.toJson<String>(sourceId),
-      'type': serializer.toJson<String>(type),
-      'enabled': serializer.toJson<String>(enabled),
-      'loginState': serializer.toJson<String?>(loginState),
-      'voiceList': serializer.toJson<String?>(voiceList),
-      'selectedVoiceId': serializer.toJson<String?>(selectedVoiceId),
-      'lineList': serializer.toJson<String?>(lineList),
-      'selectedLineId': serializer.toJson<String?>(selectedLineId),
-      'extra': serializer.toJson<String?>(extra),
-    };
-  }
-
-  SourceConfig copyWith(
-          {String? sourceId,
-          String? type,
-          String? enabled,
-          Value<String?> loginState = const Value.absent(),
-          Value<String?> voiceList = const Value.absent(),
-          Value<String?> selectedVoiceId = const Value.absent(),
-          Value<String?> lineList = const Value.absent(),
-          Value<String?> selectedLineId = const Value.absent(),
-          Value<String?> extra = const Value.absent()}) =>
-      SourceConfig(
-        sourceId: sourceId ?? this.sourceId,
-        type: type ?? this.type,
-        enabled: enabled ?? this.enabled,
-        loginState: loginState.present ? loginState.value : this.loginState,
-        voiceList: voiceList.present ? voiceList.value : this.voiceList,
-        selectedVoiceId: selectedVoiceId.present
-            ? selectedVoiceId.value
-            : this.selectedVoiceId,
-        lineList: lineList.present ? lineList.value : this.lineList,
-        selectedLineId:
-            selectedLineId.present ? selectedLineId.value : this.selectedLineId,
-        extra: extra.present ? extra.value : this.extra,
-      );
-  @override
-  String toString() {
-    return (StringBuffer('SourceConfig(')
-          ..write('sourceId: $sourceId, ')
-          ..write('type: $type, ')
-          ..write('enabled: $enabled, ')
-          ..write('loginState: $loginState, ')
-          ..write('voiceList: $voiceList, ')
-          ..write('selectedVoiceId: $selectedVoiceId, ')
-          ..write('lineList: $lineList, ')
-          ..write('selectedLineId: $selectedLineId, ')
-          ..write('extra: $extra')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(sourceId, type, enabled, loginState,
-      voiceList, selectedVoiceId, lineList, selectedLineId, extra);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is SourceConfig &&
-          other.sourceId == this.sourceId &&
-          other.type == this.type &&
-          other.enabled == this.enabled &&
-          other.loginState == this.loginState &&
-          other.voiceList == this.voiceList &&
-          other.selectedVoiceId == this.selectedVoiceId &&
-          other.lineList == this.lineList &&
-          other.selectedLineId == this.selectedLineId &&
-          other.extra == this.extra);
 }
 
 class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
   final Value<String> sourceId;
   final Value<String> type;
-  final Value<String> enabled;
+  final Value<bool> enabled;
   final Value<String?> loginState;
   final Value<String?> voiceList;
   final Value<String?> selectedVoiceId;
@@ -2927,7 +1999,7 @@ class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
   static Insertable<SourceConfig> custom({
     Expression<String>? sourceId,
     Expression<String>? type,
-    Expression<String>? enabled,
+    Expression<bool>? enabled,
     Expression<String>? loginState,
     Expression<String>? voiceList,
     Expression<String>? selectedVoiceId,
@@ -2948,29 +2020,6 @@ class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
     });
   }
 
-  SourceConfigsCompanion copyWith(
-      {Value<String>? sourceId,
-      Value<String>? type,
-      Value<String>? enabled,
-      Value<String?>? loginState,
-      Value<String?>? voiceList,
-      Value<String?>? selectedVoiceId,
-      Value<String?>? lineList,
-      Value<String?>? selectedLineId,
-      Value<String?>? extra}) {
-    return SourceConfigsCompanion(
-      sourceId: sourceId ?? this.sourceId,
-      type: type ?? this.type,
-      enabled: enabled ?? this.enabled,
-      loginState: loginState ?? this.loginState,
-      voiceList: voiceList ?? this.voiceList,
-      selectedVoiceId: selectedVoiceId ?? this.selectedVoiceId,
-      lineList: lineList ?? this.lineList,
-      selectedLineId: selectedLineId ?? this.selectedLineId,
-      extra: extra ?? this.extra,
-    );
-  }
-
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -2981,7 +2030,7 @@ class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
       map['type'] = Variable<String>(type.value);
     }
     if (enabled.present) {
-      map['enabled'] = Variable<String>(enabled.value);
+      map['enabled'] = Variable<bool>(enabled.value);
     }
     if (loginState.present) {
       map['login_state'] = Variable<String>(loginState.value);
@@ -3002,22 +2051,6 @@ class SourceConfigsCompanion extends UpdateCompanion<SourceConfig> {
       map['extra'] = Variable<String>(extra.value);
     }
     return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('SourceConfigsCompanion(')
-          ..write('sourceId: $sourceId, ')
-          ..write('type: $type, ')
-          ..write('enabled: $enabled, ')
-          ..write('loginState: $loginState, ')
-          ..write('voiceList: $voiceList, ')
-          ..write('selectedVoiceId: $selectedVoiceId, ')
-          ..write('lineList: $lineList, ')
-          ..write('selectedLineId: $selectedLineId, ')
-          ..write('extra: $extra')
-          ..write(')'))
-        .toString();
   }
 }
 
@@ -3041,11 +2074,16 @@ class $SourceConfigsTable extends SourceConfigs
   static const VerificationMeta _enabledMeta =
       const VerificationMeta('enabled');
   @override
-  late final GeneratedColumn<String> enabled = GeneratedColumn<String>(
+  late final GeneratedColumn<bool> enabled = GeneratedColumn<bool>(
       'enabled', aliasedName, false,
-      type: DriftSqlType.string,
+      type: DriftSqlType.bool,
       requiredDuringInsert: false,
-      defaultValue: const Constant('true'));
+      defaultConstraints: GeneratedColumn.constraintsDependsOnDialect({
+        SqlDialect.sqlite: 'CHECK ("enabled" IN (0, 1))',
+        SqlDialect.mysql: '',
+        SqlDialect.postgres: '',
+      }),
+      defaultValue: const Constant(true));
   static const VerificationMeta _loginStateMeta =
       const VerificationMeta('loginState');
   @override
@@ -3061,9 +2099,9 @@ class $SourceConfigsTable extends SourceConfigs
   static const VerificationMeta _selectedVoiceIdMeta =
       const VerificationMeta('selectedVoiceId');
   @override
-  late final GeneratedColumn<String> selectedVoiceId = GeneratedColumn<String>(
-      'selected_voice_id', aliasedName, true,
-      type: DriftSqlType.string, requiredDuringInsert: false);
+  late final GeneratedColumn<String> selectedVoiceId =
+      GeneratedColumn<String>('selected_voice_id', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _lineListMeta =
       const VerificationMeta('lineList');
   @override
@@ -3073,9 +2111,9 @@ class $SourceConfigsTable extends SourceConfigs
   static const VerificationMeta _selectedLineIdMeta =
       const VerificationMeta('selectedLineId');
   @override
-  late final GeneratedColumn<String> selectedLineId = GeneratedColumn<String>(
-      'selected_line_id', aliasedName, true,
-      type: DriftSqlType.string, requiredDuringInsert: false);
+  late final GeneratedColumn<String> selectedLineId =
+      GeneratedColumn<String>('selected_line_id', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _extraMeta = const VerificationMeta('extra');
   @override
   late final GeneratedColumn<String> extra = GeneratedColumn<String>(
@@ -3119,10 +2157,8 @@ class $SourceConfigsTable extends SourceConfigs
           enabled.isAcceptableOrUnknown(data['enabled']!, _enabledMeta));
     }
     if (data.containsKey('login_state')) {
-      context.handle(
-          _loginStateMeta,
-          loginState.isAcceptableOrUnknown(
-              data['login_state']!, _loginStateMeta));
+      context.handle(_loginStateMeta,
+          loginState.isAcceptableOrUnknown(data['login_state']!, _loginStateMeta));
     }
     if (data.containsKey('voice_list')) {
       context.handle(_voiceListMeta,
@@ -3162,7 +2198,7 @@ class $SourceConfigsTable extends SourceConfigs
       type: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}type'])!,
       enabled: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}enabled'])!,
+          .read(DriftSqlType.bool, data['${effectivePrefix}enabled'])!,
       loginState: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}login_state']),
       voiceList: attachedDatabase.typeMapping
@@ -3183,6 +2219,10 @@ class $SourceConfigsTable extends SourceConfigs
     return $SourceConfigsTable(attachedDatabase, alias);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Database
+// ---------------------------------------------------------------------------
 
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);

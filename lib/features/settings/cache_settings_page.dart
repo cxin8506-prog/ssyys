@@ -1,17 +1,18 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
 
-import '../../core/constants/app_constants.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../core/di/providers.dart';
-import '../../core/theme/app_theme.dart';
-import '../../plugins/data/auto_cache.dart';
+import '../../core/utils/path_utils.dart';
 import '../../shared/widgets/common.dart';
 
-/// 缓存设置页（照我的听书的样子排）：
-/// 自动缓存后续章节（默认关）/ 每本书最大缓存集数（默认 3）
-/// / 缓存频率（标准）/ 只在WIFI条件下缓存 / 自动清理缓存文件（个数上限，默认 40）
-/// / 清除所有音频缓存。默认关就绝不偷偷缓存。
+/// 缓存设置页。
+///
+/// 缓存只自动缓存后续章节，不做手动下载；isCacheable() 返回 false
+/// 的源一集都不下；集数上不出现感叹号。
+/// 默认值：自动缓存关、每本书 3 集、标准 30%、仅 Wi-Fi 开、自动清理 40。
 class CacheSettingsPage extends ConsumerStatefulWidget {
   const CacheSettingsPage({super.key});
 
@@ -20,242 +21,308 @@ class CacheSettingsPage extends ConsumerStatefulWidget {
 }
 
 class _CacheSettingsPageState extends ConsumerState<CacheSettingsPage> {
-  int _cachedCount = 0;
+  int? _cacheBytes;
+  String? _cachePath;
+  String? _dataPath;
+  bool _clearing = false;
 
   @override
   void initState() {
     super.initState();
-    _refreshCount();
+    _refreshSize();
   }
 
-  Future<void> _refreshCount() async {
-    final n = await AutoCache.cachedCount();
-    if (mounted) setState(() => _cachedCount = n);
+  Future<void> _refreshSize() async {
+    try {
+      final dir = await PathUtils.cacheDir;
+      _cachePath = dir.path;
+      var total = 0;
+      await for (final e in dir.list(recursive: true, followLinks: false)) {
+        if (e is File) {
+          try {
+            total += await e.length();
+          } catch (_) {}
+        }
+      }
+      final appDir = await PathUtils.appFilesDir;
+      if (!mounted) return;
+      setState(() {
+        _cacheBytes = total;
+        _dataPath = appDir.path;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cacheBytes = 0);
+    }
+  }
+
+  String _sizeText(int? bytes) {
+    if (bytes == null) return '正在计算…';
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> _clearCache() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清除所有音频缓存？'),
+        content: const Text('已缓存的后续章节会被删掉，下次播放时重新缓存。书架、断点、收藏不受影响。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清除'),
+          ),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    setState(() => _clearing = true);
+    try {
+      final dir = await PathUtils.cacheDir;
+      if (await dir.exists()) {
+        await for (final e in dir.list(followLinks: false)) {
+          try {
+            await e.delete(recursive: true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _clearing = false);
+    await _refreshSize();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('缓存已清除')),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final prefs = ref.read(sharedPrefsProvider);
-    final autoCache = ref.watch(autoCacheProvider);
-    final count = ref.watch(autoCacheCountProvider);
     final freq = ref.watch(autoCacheFreqProvider);
-    final wifiOnly = ref.watch(autoCacheWifiOnlyProvider);
-    final cleanLimit = ref.watch(autoCleanLimitProvider);
-
     return Scaffold(
       appBar: AppBar(title: const Text('缓存设置')),
       body: ListView(
-        padding: pagePadding(context, top: 8, bottom: 32),
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
-          Container(
-            decoration: BoxDecoration(
-              color: context.cardColor,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: context.palette.outline),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                SwitchListTile(
-                  title: const Text('自动缓存后续章节'),
-                  subtitle: const Text(
-                      '在播放时根据一定的时间规则，自动缓存后续章节。注意：暂停时不触发缓存。缓存过的书籍在没有网络时可从我的收藏打开进行离线播放。'),
-                  value: autoCache,
-                  onChanged: (v) {
-                    ref.read(autoCacheProvider.notifier).state = v;
-                    prefs.setBool(AppConstants.keyAutoCache, v);
-                  },
-                ),
-                const Divider(height: 1, indent: 16),
-                ListTile(
-                  title: const Text('每本书最大缓存集数'),
-                  subtitle:
-                      const Text('当前播放章节向后缓存的数量'),
-                  trailing: Text('$count 集',
-                      style: TextStyle(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.primary)),
-                  onTap: () => _pickCount(context, ref, prefs, count),
-                ),
-                const Divider(height: 1, indent: 16),
-                ListTile(
-                  title: const Text('缓存频率'),
-                  subtitle: Text(_freqLabel(freq)),
-                  trailing: Text(_freqName(freq),
-                      style: TextStyle(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.primary)),
-                  onTap: () => _pickFreq(context, ref, prefs, freq),
-                ),
-                const Divider(height: 1, indent: 16),
-                SwitchListTile(
-                  title: const Text('只在WIFI条件下缓存'),
-                  subtitle: const Text('开了只在 WiFi 下缓存，不用流量'),
-                  value: wifiOnly,
-                  onChanged: (v) {
-                    ref.read(autoCacheWifiOnlyProvider.notifier).state = v;
-                    prefs.setBool(AppConstants.keyAutoCacheWifiOnly, v);
-                  },
-                ),
-                const Divider(height: 1, indent: 16),
-                ListTile(
-                  title: const Text('自动清理缓存文件'),
-                  subtitle: const Text(
-                      '当超过指定的数量时，按下载的时间顺序从最老的缓存开始清理。注意：清理针对的是全部缓存，如果你同时在听多本书籍则尽量把清理上限设的大一点。'),
-                  trailing: Text(
-                      cleanLimit <= 0 ? '不清理' : '$cleanLimit 个',
-                      style: TextStyle(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.primary)),
-                  onTap: () =>
-                      _pickCleanLimit(context, ref, prefs, cleanLimit),
-                ),
-                const Divider(height: 1, indent: 16),
-                ListTile(
-                  title: const Text('清除所有音频缓存'),
-                  subtitle: Text(_cachedCount > 0
-                      ? '当前已缓存 $_cachedCount 集，点一下全部清除'
-                      : '当前没有缓存'),
-                  trailing: const Icon(Icons.chevron_right, size: 20),
-                  onTap: () => _clearAll(context),
-                ),
-              ],
+          InfoRow(
+            title: '自动缓存后续章节',
+            subtitle: ref.watch(autoCacheProvider) ? '开' : '关',
+            info: '默认关：播放时自动预缓存后面几集。isCacheable() 返回 false 的源一集都不下；集数上不出现感叹号。',
+            trailing: Switch(
+              value: ref.watch(autoCacheProvider),
+              onChanged: (v) =>
+                  saveBoolSetting(ref, autoCacheProvider, 'auto_cache', v),
             ),
           ),
+          InfoRow(
+            title: '每本书最大缓存集数',
+            subtitle: '${ref.watch(autoCacheCountProvider)} 集',
+            info: '默认 3 集。播完的集会按自动清理规则删掉。',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${ref.watch(autoCacheCountProvider)} 集',
+                    style: TextStyle(fontSize: 13, color: context.subtleColor)),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right,
+                    size: 20, color: context.subtleColor),
+              ],
+            ),
+            onTap: () => _pickCount(context),
+          ),
+          InfoRow(
+            title: '缓存频率',
+            subtitle: _freqLabel(freq),
+            info: '标准 = 播到 30% 开始缓存后面几集；较快 15%；较慢 50%。',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_freqLabel(freq),
+                    style: TextStyle(fontSize: 13, color: context.subtleColor)),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right,
+                    size: 20, color: context.subtleColor),
+              ],
+            ),
+            onTap: () => _pickFreq(context, freq),
+          ),
+          InfoRow(
+            title: '只在 Wi-Fi 下缓存',
+            subtitle: ref.watch(autoCacheWifiOnlyProvider) ? '开' : '关',
+            info: '默认开：流量下不自动缓存，免得偷跑流量。',
+            trailing: Switch(
+              value: ref.watch(autoCacheWifiOnlyProvider),
+              onChanged: (v) => saveBoolSetting(
+                  ref, autoCacheWifiOnlyProvider, 'auto_cache_wifi_only', v),
+            ),
+          ),
+          InfoRow(
+            title: '自动清理缓存文件',
+            subtitle: '${ref.watch(autoCleanLimitProvider)} 个',
+            info: '缓存文件超过这个数就自动清理最旧的，默认 40 个。',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${ref.watch(autoCleanLimitProvider)} 个',
+                    style: TextStyle(fontSize: 13, color: context.subtleColor)),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right,
+                    size: 20, color: context.subtleColor),
+              ],
+            ),
+            onTap: () => _pickCleanLimit(context),
+          ),
+          const Divider(),
+          InfoRow(
+            title: '缓存占用',
+            subtitle: _sizeText(_cacheBytes),
+            info: '当前音频缓存占用的空间。',
+            trailing: TextButton(
+              onPressed: _clearing ? null : _clearCache,
+              child: Text(_clearing ? '清除中…' : '清除全部'),
+            ),
+          ),
+          InfoRow(
+            title: '数据目录',
+            subtitle: _dataPath ?? '正在读取…',
+            info: '书架、进度、收藏、书签、设置、日志都存在这里。',
+            trailing: IconButton(
+              icon: const Icon(Icons.copy, size: 18),
+              tooltip: '复制路径',
+              onPressed: _dataPath == null
+                  ? null
+                  : () {
+                      Clipboard.setData(ClipboardData(text: _dataPath!));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('路径已复制')),
+                      );
+                    },
+            ),
+          ),
+          if (_cachePath != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Text(
+                '缓存目录：$_cachePath',
+                style: TextStyle(fontSize: 12, color: context.subtleColor),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  String _freqName(String freq) {
-    switch (freq) {
-      case 'fast':
-        return '较快';
-      case 'slow':
-        return '较慢';
-      default:
-        return '标准';
-    }
-  }
-
   String _freqLabel(String freq) {
     switch (freq) {
       case 'fast':
-        return '较快（间隔约为时长的 15%）';
+        return '较快 15%';
       case 'slow':
-        return '较慢（间隔约为时长的 50%）';
+        return '较慢 50%';
       default:
-        return '标准（间隔约为时长的 30%）';
+        return '标准 30%';
     }
   }
 
-  void _pickCount(
-      BuildContext context, WidgetRef ref, SharedPreferences prefs, int current) {
-    showDialog(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('每本书最大缓存集数'),
-        children: [1, 3, 5].map((v) {
-          return SimpleDialogOption(
-            onPressed: () {
-              ref.read(autoCacheCountProvider.notifier).state = v;
-              prefs.setInt(AppConstants.keyAutoCacheCount, v);
-              Navigator.pop(ctx);
-            },
-            child: Row(
-              children: [
-                Text('$v 集', style: const TextStyle(fontSize: 15)),
-                if (v == current) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.check,
-                      size: 16, color: Theme.of(context).colorScheme.primary),
-                ],
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  void _pickFreq(
-      BuildContext context, WidgetRef ref, SharedPreferences prefs, String current) {
-    const options = {'standard': '标准', 'fast': '较快', 'slow': '较慢'};
-    showDialog(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('缓存频率'),
-        children: options.entries.map((e) {
-          return SimpleDialogOption(
-            onPressed: () {
-              ref.read(autoCacheFreqProvider.notifier).state = e.key;
-              prefs.setString(AppConstants.keyAutoCacheFreq, e.key);
-              Navigator.pop(ctx);
-            },
-            child: Row(
-              children: [
-                Text(e.value, style: const TextStyle(fontSize: 15)),
-                if (e.key == current) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.check,
-                      size: 16, color: Theme.of(context).colorScheme.primary),
-                ],
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  /// 自动清理缓存文件：单选弹窗，按缓存文件个数限（不是按 MB）
-  void _pickCleanLimit(BuildContext context, WidgetRef ref,
-      SharedPreferences prefs, int current) {
-    const options = [0, 40, 60, 80, 100, 120, 200, 300, 400, 500];
-    showDialog(
+  Future<void> _pickCount(BuildContext context) async {
+    final current = ref.read(autoCacheCountProvider);
+    final controller = TextEditingController(text: '$current');
+    final picked = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('自动清理缓存文件'),
-        contentPadding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: options.map((v) {
-              return ListTile(
-                title: Text(v == 0 ? '不清理' : '$v',
-                    style: const TextStyle(fontSize: 15)),
-                trailing: v == current
-                    ? Icon(Icons.check,
-                        size: 18,
-                        color: Theme.of(context).colorScheme.primary)
-                    : null,
-                onTap: () {
-                  ref.read(autoCleanLimitProvider.notifier).state = v;
-                  prefs.setInt(AppConstants.keyAutoCleanLimit, v);
-                  Navigator.pop(ctx);
-                  // 立刻按新上限清理一次
-                  AutoCache.enforceCountLimit(v).then((_) => _refreshCount());
-                },
-              );
-            }).toList(),
-          ),
+        title: const Text('每本书最大缓存集数'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(hintText: '1–20'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('取消'),
           ),
+          TextButton(
+            onPressed: () {
+              final v = int.tryParse(controller.text.trim()) ?? current;
+              Navigator.pop(ctx, v.clamp(1, 20));
+            },
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
+    if (picked != null) {
+      await saveIntSetting(
+          ref, autoCacheCountProvider, 'auto_cache_count', picked);
+    }
   }
 
-  Future<void> _clearAll(BuildContext context) async {
-    final n = await AutoCache.clearAllAudioCache();
-    await _refreshCount();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(n > 0 ? '已清除 $n 集音频缓存' : '当前没有缓存')));
+  Future<void> _pickFreq(BuildContext context, String current) async {
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('缓存频率'),
+        children: [
+          for (final e in const [
+            ['standard', '标准 30%'],
+            ['fast', '较快 15%'],
+            ['slow', '较慢 50%'],
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, e[0]),
+              child: Row(
+                children: [
+                  Text(e[1]),
+                  const Spacer(),
+                  if (current == e[0]) const Icon(Icons.check, size: 18),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked != null) {
+      await saveStringSetting(
+          ref, autoCacheFreqProvider, 'auto_cache_freq', picked);
+    }
+  }
+
+  Future<void> _pickCleanLimit(BuildContext context) async {
+    final current = ref.read(autoCleanLimitProvider);
+    final controller = TextEditingController(text: '$current');
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('自动清理缓存文件数'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(hintText: '0–500'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              final v = int.tryParse(controller.text.trim()) ?? current;
+              Navigator.pop(ctx, v.clamp(0, 500));
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (picked != null) {
+      await saveIntSetting(
+          ref, autoCleanLimitProvider, 'auto_clean_limit', picked);
+    }
   }
 }

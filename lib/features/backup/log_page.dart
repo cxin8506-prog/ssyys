@@ -1,13 +1,11 @@
-import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/database/app_database.dart' show Log;
-import '../../core/di/providers.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/database/library_repository.dart';
 
-/// 日志页：查看 / 清空 / 复制（不写本地文件）
+/// 运行日志页：查看 / 清空 / 复制。
+/// 日志存在数据库 Logs 表（最新 500 条），不写本地文件；重启后还在。
 class LogPage extends ConsumerStatefulWidget {
   const LogPage({super.key});
 
@@ -16,59 +14,75 @@ class LogPage extends ConsumerStatefulWidget {
 }
 
 class _LogPageState extends ConsumerState<LogPage> {
-  Future<List<Log>>? _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _load();
-  }
-
-  Future<List<Log>> _load() async {
-    final db = ref.read(databaseProvider);
-    final query = db.select(db.logs)
-      ..orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)])
-      ..limit(500);
-    return query.get();
-  }
-
   @override
   Widget build(BuildContext context) {
+    final repo = ref.read(libraryRepositoryProvider);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('日志'),
+        title: const Text('运行日志'),
         actions: [
           IconButton(
-              icon: const Icon(Icons.copy),
-              onPressed: _copyAll,
-              tooltip: '复制'),
+            icon: const Icon(Icons.copy),
+            tooltip: '复制全部',
+            onPressed: () => _copyAll(repo),
+          ),
           IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _clear,
-              tooltip: '清空'),
+            icon: const Icon(Icons.delete_outline),
+            tooltip: '清空日志',
+            onPressed: () => _confirmClear(repo),
+          ),
         ],
       ),
-      body: FutureBuilder<List<Log>>(
-        future: _future,
-        builder: (context, snap) {
-          final rows = snap.data ?? [];
-          if (rows.isEmpty) {
-            return const EmptyLog();
+      body: FutureBuilder(
+        future: repo.getLogs(limit: 500),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final logs = snapshot.data ?? const [];
+          if (logs.isEmpty) {
+            return const Center(child: Text('暂无日志'));
           }
           return ListView.builder(
-            itemCount: rows.length,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            itemCount: logs.length,
             itemBuilder: (context, i) {
-              final r = rows[i];
-              final color = r.level == 'error'
-                  ? Colors.redAccent
-                  : r.level == 'warning'
-                      ? Colors.orange
-                      : context.subtleColor;
-              return ListTile(
-                leading: Icon(Icons.circle, size: 10, color: color),
-                title: Text(r.message, style: TextStyle(color: color)),
-                subtitle: Text('${r.createdAt} ${r.detail ?? ''}', maxLines: 2),
+              final r = logs[i];
+              return InkWell(
                 onLongPress: () => _copyOne(r),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _levelChip(r.level),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _formatTime(r.createdAt),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(r.message,
+                          style: const TextStyle(fontSize: 13.5)),
+                      if (r.detail != null && r.detail!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(r.detail!,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(fontSize: 11.5)),
+                        ),
+                      const Divider(height: 12),
+                    ],
+                  ),
+                ),
               );
             },
           );
@@ -77,56 +91,77 @@ class _LogPageState extends ConsumerState<LogPage> {
     );
   }
 
-  void _clear() async {
-    final db = ref.read(databaseProvider);
-    await db.delete(db.logs).go();
-    setState(() => _future = _load());
-    if (mounted)
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('日志已清空')));
+  Widget _levelChip(String level) {
+    final color = level == 'error'
+        ? Colors.red
+        : level == 'warning'
+            ? Colors.orange
+            : Colors.green;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(level,
+          style: TextStyle(fontSize: 11, color: color)),
+    );
   }
 
-  /// 复制全部日志
-  void _copyAll() async {
-    final rows = await _load();
-    if (rows.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('暂无日志可复制')));
-      }
-      return;
-    }
+  String _formatTime(DateTime t) {
+    final m = '${t.month}'.padLeft(2, '0');
+    final d = '${t.day}'.padLeft(2, '0');
+    final h = '${t.hour}'.padLeft(2, '0');
+    final min = '${t.minute}'.padLeft(2, '0');
+    final s = '${t.second}'.padLeft(2, '0');
+    return '${t.year}-$m-$d $h:$min:$s';
+  }
+
+  Future<void> _copyAll(LibraryRepository repo) async {
+    final logs = await repo.getLogs(limit: 500);
     final buffer = StringBuffer();
-    for (final r in rows) {
-      buffer.write(_formatLogRow(r));
+    for (final r in logs) {
+      buffer.writeln('[${_formatTime(r.createdAt)}] [${r.level}] ${r.message}');
+      if (r.detail != null && r.detail!.isNotEmpty) {
+        buffer.writeln(r.detail);
+      }
     }
     await Clipboard.setData(ClipboardData(text: buffer.toString()));
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已复制')));
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('已复制全部日志')));
   }
 
-  /// 长按某一行：复制该条日志（时间 + 级别 + 内容 + 详情）
-  void _copyOne(Log r) async {
-    await Clipboard.setData(ClipboardData(text: _formatLogRow(r).trimRight()));
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已复制该条日志')));
-    }
+  Future<void> _copyOne(dynamic r) async {
+    await Clipboard.setData(ClipboardData(
+        text: '[${_formatTime(r.createdAt)}] [${r.level}] ${r.message}'
+            '${r.detail == null || (r.detail as String).isEmpty ? '' : '\n${r.detail}'}'));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('已复制这条日志')));
   }
 
-  /// 单条日志的文本格式，复制全部和复制单条共用
-  static String _formatLogRow(Log r) {
-    final buffer = StringBuffer();
-    buffer.writeln('[${r.createdAt}] [${r.level}] ${r.message}');
-    if (r.detail != null) buffer.writeln('  ${r.detail}');
-    return buffer.toString();
+  Future<void> _confirmClear(LibraryRepository repo) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空日志'),
+        content: const Text('会删掉全部运行日志，确定吗？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('清空')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await repo.clearLogs();
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('日志已清空')));
   }
-}
-
-class EmptyLog extends StatelessWidget {
-  const EmptyLog({super.key});
-  @override
-  Widget build(BuildContext context) => const Center(child: Text('暂无日志记录'));
 }

@@ -103,4 +103,7 @@ dependencies {
     implementation "org.jsoup:jsoup:1.15.3"
     implementation "com.github.kittinunf.fuel:fuel-android:2.3.1"
     implementation "com.github.kittinunf.fuel:fuel-json:2.3.1"
+    // MyExt.extractorAsyncExecute 的返回值是 RxJava 的 Disposable，
+    // 原版 SDK 里就有，源编译时按这个签名调，宿主必须提供
+    implementation "io.reactivex.rxjava2:rxjava:2.2.21"
 }

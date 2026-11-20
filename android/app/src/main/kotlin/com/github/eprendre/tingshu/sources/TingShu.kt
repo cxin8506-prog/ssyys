@@ -4,8 +4,9 @@ import com.github.eprendre.tingshu.utils.Book
 import com.github.eprendre.tingshu.utils.BookDetail
 import com.github.eprendre.tingshu.utils.Category
 import com.github.eprendre.tingshu.utils.CategoryMenu
-import com.localreader.local_media_app.TingShuRuntime
+import com.github.eprendre.tingshu.utils.ConfigItem
 import com.github.kittinunf.fuel.json.FuelJson
+import com.localreader.local_media_app.TingShuRuntime
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 
@@ -36,6 +37,33 @@ abstract class TingShu {
     open fun isDiscoverable() = true
     open fun isCacheable() = true
     open fun isWebViewNotRequired() = false
+}
+
+/**
+ * 源向宿主声明配置项（设置页用）。
+ * 旧版 SDK 里没有这个接口，是 App 自己加的：源实现它，宿主就能在
+ * 源详情页里按声明画出配置控件（文本框/下拉/开关/多选/按钮），
+ * 值存在源配置里，运行时经 setConfig/applyConfig 推给源。
+ * 没实现这个接口的源，宿主按“没有配置项”处理，不报错。
+ */
+interface ConfigurableSource {
+    fun getCustomConfigItems(): List<ConfigItem>
+}
+
+/**
+ * 播放状态回调（源想知道播放器在干什么时实现）。
+ * 宿主目前没有主动推状态的地方，先把接口留出来，源实现它也不会崩。
+ */
+interface IPlaybackStateCallback {
+    fun onPlaying()
+    fun onPaused()
+    fun onStopped()
+    fun onPositionChanged(positionMs: Long, durationMs: Long)
+}
+
+/** 封面地址也要带请求头时用（和 AudioUrlExtraHeaders 同理）。 */
+interface CoverUrlExtraHeaders {
+    fun coverHeaders(coverUrl: String): Map<String, String>
 }
 
 interface AudioUrlExtractor {

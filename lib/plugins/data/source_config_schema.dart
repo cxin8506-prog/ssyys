@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-/// 一个下拉/单选项
+/// 一个下拉/单选项。
 class ConfigOption {
   final String value;
   final String label;
@@ -23,36 +23,39 @@ class ConfigOption {
 /// ```
 /// 也可以由脚本运行时提供：`function getConfig() { return [...] }`，
 /// App 在源详情页调用一次取回声明。
+/// JAR 格式的源走 ConfigurableSource.getCustomConfigItems()，
+/// 五种控件是 Text / Select / Switch / MultiSelect / Button。
 class ConfigField {
-  /// 存值用的 key，同时用于插件侧读取（host.config[key]）
+  /// 存值用的 key，同时用于插件侧读取（host.config[key]）。
   final String key;
 
-  /// 显示名
+  /// 显示名。
   final String name;
 
-  /// text | textarea | password | number | switch | select | radio | action
+  /// text | textarea | password | number | switch | select | radio |
+  /// action | login。JAR 的 MultiSelect 也归一化成 select（多选）。
   final String type;
   final String hint;
   final String desc;
   final dynamic defaultValue;
   final bool required;
 
-  /// 静态选项
+  /// 静态选项。
   final List<ConfigOption> options;
 
-  /// 动态选项来源：voices / lines / 源里的任意方法名
+  /// 动态选项来源：voices / lines / 源里的任意方法名。
   final String optionSource;
 
-  /// action 类型点击时调用的源方法
+  /// action 类型点击时调用的源方法。
   final String action;
 
-  /// login 类型：网页登录地址
+  /// login 类型：网页登录地址。
   final String loginUrl;
 
-  /// login 类型：登录成功后跳到的地址（用于自动判定登录完成）
+  /// login 类型：登录成功后跳到的地址（用于自动判定登录完成）。
   final String successUrl;
 
-  /// login 类型：登录后从这个地址读 Cookie（默认用 loginUrl 的 origin）
+  /// login 类型：登录后从这个地址读 Cookie（默认用 loginUrl 的 origin）。
   final String cookieUrl;
 
   const ConfigField({
@@ -63,7 +66,7 @@ class ConfigField {
     this.desc = '',
     this.defaultValue,
     this.required = false,
-    this.options = const [],
+    this.options = const <ConfigOption>[],
     this.optionSource = '',
     this.action = '',
     this.loginUrl = '',
@@ -75,7 +78,7 @@ class ConfigField {
   bool get isLogin => type == 'login';
   bool get needsFetch => optionSource.isNotEmpty && options.isEmpty;
 
-  /// 默认值（switch 一定是 bool，number 一定是 num）
+  /// 默认值（switch 一定是 bool，number 一定是 num）。
   dynamic get initial {
     final d = defaultValue;
     if (type == 'switch') {
@@ -93,18 +96,18 @@ class ConfigField {
   }
 }
 
-/// 一份完整声明
+/// 一份完整声明。
 class ConfigSchema {
   final List<ConfigField> fields;
 
-  /// 声明来源：manifest | script | inferred | none
+  /// 声明来源：manifest | script | inferred | none。
   final String origin;
 
-  /// 源自己写的说明（可选）
+  /// 源自己写的说明（可选）。
   final String note;
 
   const ConfigSchema({
-    this.fields = const [],
+    this.fields = const <ConfigField>[],
     this.origin = 'none',
     this.note = '',
   });
@@ -115,8 +118,15 @@ class ConfigSchema {
 
 // ---------------------------------------------------------------- 解析
 
-const _keyNames = ['key', 'id', 'field', 'param', 'name', 'code'];
-const _labelNames = [
+const List<String> _keyNames = <String>[
+  'key',
+  'id',
+  'field',
+  'param',
+  'name',
+  'code',
+];
+const List<String> _labelNames = <String>[
   'label',
   'title',
   'text',
@@ -138,17 +148,20 @@ ConfigSchema parseConfigSchema(
   String note = '',
 }) {
   final data = _decode(raw);
-  if (data == null) return ConfigSchema(origin: 'none');
+  if (data == null) return const ConfigSchema(origin: 'none');
 
   List<dynamic>? list;
+  var noteOut = note;
 
   if (data is List) {
     list = data;
   } else if (data is Map) {
     final m = Map<String, dynamic>.from(data);
-    note = note.isNotEmpty ? note : _str(m, const ['note', 'desc', 'tip']) ?? '';
+    if (noteOut.isEmpty) {
+      noteOut = _str(m, const <String>['note', 'desc', 'tip']) ?? '';
+    }
 
-    for (final k in const [
+    for (final k in const <String>[
       'fields',
       'config',
       'configs',
@@ -166,7 +179,7 @@ ConfigSchema parseConfigSchema(
       }
       // { config: { fields: [...] } }
       if (v is Map && v.values.any((e) => e is List)) {
-        final inner = parseConfigSchema(v, origin: origin, note: note);
+        final inner = parseConfigSchema(v, origin: origin, note: noteOut);
         if (!inner.isEmpty) return inner;
       }
     }
@@ -176,15 +189,18 @@ ConfigSchema parseConfigSchema(
       final allMap = m.isNotEmpty && m.values.every((e) => e is Map);
       if (allMap) {
         list = m.entries
-            .map((e) => {...Map<String, dynamic>.from(e.value as Map), 'key': e.key})
+            .map((e) => <String, dynamic>{
+                  ...Map<String, dynamic>.from(e.value as Map),
+                  'key': e.key,
+                })
             .toList();
       } else if (m.containsKey('key') || m.containsKey('type')) {
-        list = [m];
+        list = <dynamic>[m];
       }
     }
   }
 
-  if (list == null) return ConfigSchema(origin: 'none');
+  if (list == null) return const ConfigSchema(origin: 'none');
 
   final fields = <ConfigField>[];
   final seen = <String>{};
@@ -197,11 +213,11 @@ ConfigSchema parseConfigSchema(
   return ConfigSchema(
     fields: fields,
     origin: fields.isEmpty ? 'none' : origin,
-    note: note,
+    note: noteOut,
   );
 }
 
-/// 源没声明时按可用方法兜底：有 voices 给音色下拉，有 lines 给线路下拉
+/// 源没声明时按可用方法兜底：有 voices 给音色下拉，有 lines 给线路下拉。
 ConfigSchema inferredSchema({bool voices = false, bool lines = false}) {
   final fields = <ConfigField>[
     if (voices)
@@ -240,26 +256,53 @@ ConfigField? _field(dynamic e, int index) {
   final key = _str(m, _keyNames) ?? 'field$index';
   var name = _str(m, _labelNames) ?? key;
   if (name == key) {
-    name = _str(m, const ['title', 'label', 'text', 'desc']) ?? key;
+    name = _str(m, const <String>['title', 'label', 'text', 'desc']) ?? key;
   }
 
-  final type = normalizeType(_str(m, const ['type', 'widget', 'inputType', 'kind']));
+  final type =
+      normalizeType(_str(m, const <String>['type', 'widget', 'inputType', 'kind']));
   final opts = _options(m);
 
   return ConfigField(
     key: key,
     name: name,
     type: type,
-    hint: _str(m, const ['hint', 'placeholder', 'tip', 'tips']) ?? '',
-    desc: _str(m, const ['desc', 'description', 'summary', 'help', 'remark']) ?? '',
+    hint: _str(m, const <String>['hint', 'placeholder', 'tip', 'tips']) ?? '',
+    desc: _str(m, const <String>[
+          'desc',
+          'description',
+          'summary',
+          'help',
+          'remark',
+        ]) ??
+        '',
     defaultValue: m['default'] ?? m['value'] ?? m['def'] ?? m['init'],
     required: m['required'] == true,
     options: opts,
-    optionSource: _str(m, const ['source', 'from', 'optionsFrom', 'dynamic']) ?? '',
-    action: _str(m, const ['action', 'command', 'method']) ?? '',
-    loginUrl: _str(m, const ['url', 'loginUrl', 'loginURL', 'href', 'link']) ?? '',
-    successUrl: _str(m, const ['successUrl', 'successURL', 'redirectUrl']) ?? '',
-    cookieUrl: _str(m, const ['cookieUrl', 'cookieURL', 'domain']) ?? '',
+    optionSource: _str(m, const <String>[
+          'source',
+          'from',
+          'optionsFrom',
+          'dynamic',
+        ]) ??
+        '',
+    action: _str(m, const <String>['action', 'command', 'method']) ?? '',
+    loginUrl: _str(m, const <String>[
+          'url',
+          'loginUrl',
+          'loginURL',
+          'href',
+          'link',
+        ]) ??
+        '',
+    successUrl: _str(m, const <String>[
+          'successUrl',
+          'successURL',
+          'redirectUrl',
+        ]) ??
+        '',
+    cookieUrl: _str(m, const <String>['cookieUrl', 'cookieURL', 'domain']) ??
+        '',
   );
 }
 
@@ -303,6 +346,12 @@ String normalizeType(String? raw) {
     case 'single':
     case 'list':
       return 'select';
+    case 'multiselect':
+    case 'multi-select':
+    case 'multi':
+    case 'checkboxes':
+      // JAR 的 MultiSelect：界面用多选控件，值按逗号分隔存。
+      return 'select';
     case 'action':
     case 'button':
     case 'command':
@@ -321,7 +370,7 @@ String normalizeType(String? raw) {
 
 List<ConfigOption> _options(Map<String, dynamic> m) {
   final raw = m['options'] ?? m['items'] ?? m['values'] ?? m['choices'];
-  if (raw == null) return const [];
+  if (raw == null) return const <ConfigOption>[];
   if (raw is List) {
     final out = <ConfigOption>[];
     for (final e in raw) {
@@ -341,7 +390,7 @@ List<ConfigOption> _options(Map<String, dynamic> m) {
         .map((e) => ConfigOption('${e.key}', '${e.value}'))
         .toList(growable: false);
   }
-  return const [];
+  return const <ConfigOption>[];
 }
 
 String? _str(Map<String, dynamic> m, List<String> keys) {

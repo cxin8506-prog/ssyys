@@ -1,19 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/di/providers.dart';
-import '../../../core/theme/app_theme.dart';
-import '../data/ua_constants.dart';
-import '../data/ua_repository.dart';
-import '../../../shared/widgets/common.dart';
+import '../../../core/database/app_database.dart';
+import '../ua_constants.dart';
+import '../ua_repository.dart';
+import '../ua_resolver.dart';
 
-/// UA 设置（参考主流源管理类 App 的做法）
+/// UA 设置页：只存两条当前值（手机一条、电脑一条），两个文本框可改；
+/// 内置推荐是筛过的（主流、真实、不容易被站方发现是伪造的），分手机/电脑两栏；
+/// 规则表用户可增删改、每条可开关；按站记忆可逐条清除。
 ///
-/// 结构：
-/// - 顶部「当前生效」卡：自动选择开关 + 当前手机/电脑 UA
-/// - 手机 UA / 电脑 UA 两个分栏
-/// - 每栏：搜索 + 内置推荐（点选即生效）+ 我的 UA（新增/编辑/删除）
+/// TabBar 颜色钉死白色（AppBar 底色是主题 primary，绝不许用 primary 色当选中色，
+/// 否则字在 primary 底色上看不见——旧审计 B 第 10.1 项）。
 class UaSettingsPage extends ConsumerStatefulWidget {
   const UaSettingsPage({super.key});
 
@@ -23,634 +21,623 @@ class UaSettingsPage extends ConsumerStatefulWidget {
 
 class _UaSettingsPageState extends ConsumerState<UaSettingsPage>
     with SingleTickerProviderStateMixin {
-  late UaRepository _repo;
-  late TabController _tabs;
+  late final TabController _tabController;
+  final _searchCtrl = TextEditingController();
+  final _mobileCtrl = TextEditingController();
+  final _desktopCtrl = TextEditingController();
 
-  bool _auto = UaConstants.defaultAutoSelect;
-  String? _mobileCurrent;
-  String? _desktopCurrent;
-  List<String> _mobileMine = [];
-  List<String> _desktopMine = [];
-  bool _loading = true;
+  bool _autoSelect = true;
+  String _mobileCurrent = '';
+  String _desktopCurrent = '';
+  List<String> _mobileList = const [];
+  List<String> _desktopList = const [];
+  List<UaRule> _rules = const [];
+  Map<String, String> _siteMemory = const {};
   String _query = '';
+
+  UaRepository get _repo => UaRepository(ref.read(databaseProvider));
 
   @override
   void initState() {
     super.initState();
-    _repo = ref.read(uaRepositoryProvider);
-    _tabs = TabController(length: 2, vsync: this);
-    _tabs.addListener(() {
-      if (!_tabs.indexIsChanging) setState(() {});
-    });
-    _load();
+    _tabController = TabController(length: 2, vsync: this);
+    _reload();
   }
 
   @override
   void dispose() {
-    _tabs.dispose();
+    _tabController.dispose();
+    _searchCtrl.dispose();
+    _mobileCtrl.dispose();
+    _desktopCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    final auto = await _repo.autoSelect();
-    final mc = await _repo.mobileCurrent();
-    final dc = await _repo.desktopCurrent();
-    final mm = await _repo.mobileUas();
-    final dm = await _repo.desktopUas();
+  Future<void> _reload() async {
+    final repo = _repo;
+    final auto = await repo.autoSelect();
+    final mobile = await repo.mobileCurrent();
+    final desktop = await repo.desktopCurrent();
+    final mobileList = await repo.mobileUas();
+    final desktopList = await repo.desktopUas();
+    final rules = await repo.rules();
+    final memory = await repo.siteMemory();
     if (!mounted) return;
     setState(() {
-      _auto = auto;
-      _mobileCurrent = mc;
-      _desktopCurrent = dc;
-      _mobileMine = mm;
-      _desktopMine = dm;
-      _loading = false;
+      _autoSelect = auto;
+      _mobileCurrent = mobile;
+      _desktopCurrent = desktop;
+      _mobileList = mobileList;
+      _desktopList = desktopList;
+      _rules = rules;
+      _siteMemory = memory;
+      _mobileCtrl.text = mobile;
+      _desktopCtrl.text = desktop;
     });
+  }
+
+  Future<void> _setMobileCurrent(String ua) async {
+    await ref.read(uaResolverProvider).setMobileCurrent(ua);
+    await _reload();
+  }
+
+  Future<void> _setDesktopCurrent(String ua) async {
+    await ref.read(uaResolverProvider).setDesktopCurrent(ua);
+    await _reload();
+  }
+
+  Future<void> _resetDefaults() async {
+    await _repo.resetToDefaults();
+    // 恢复默认也要发 onUaChanged，让引擎清会话、重建 WebView
+    await ref.read(uaResolverProvider).setMobileCurrent(
+        UaConstants.defaultMobileUa);
+    await ref.read(uaResolverProvider).setDesktopCurrent(
+        UaConstants.defaultDesktopUa);
+    await _reload();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('已恢复默认 UA')));
+  }
+
+  List<UaPreset> _filteredPresets(bool mobile) {
+    final all =
+        mobile ? UaConstants.mobilePresets : UaConstants.desktopPresets;
+    if (_query.isEmpty) return all;
+    final q = _query.toLowerCase();
+    return all
+        .where((p) =>
+            p.name.toLowerCase().contains(q) ||
+            p.ua.toLowerCase().contains(q) ||
+            p.tag.toLowerCase().contains(q))
+        .toList();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('UA 设置'),
+        title: const Text('模拟浏览器信息'),
         bottom: TabBar(
-          controller: _tabs,
-          indicatorColor: Theme.of(context).colorScheme.primary,
-          labelColor: Theme.of(context).colorScheme.primary,
-          unselectedLabelColor: context.subtleColor,
+          controller: _tabController,
+          // AppBar 底色是主题 primary：选中/未选中/指示器一律用白色系，
+          // 绝不许用 primary 色（旧审计 B 第 10.1 项：字隐形）
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          indicatorColor: Colors.white,
           tabs: const [
-            Tab(text: '手机 UA'),
-            Tab(text: '电脑 UA'),
+            Tab(text: '手机'),
+            Tab(text: '电脑'),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addCustom(isMobile: _tabs.index == 0),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        icon: const Icon(Icons.add, color: Colors.black87),
-        label: const Text('自定义', style: TextStyle(color: Colors.black87)),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _currentCard(),
-                _searchBar(),
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabs,
-                    children: [
-                      _buildTab(isMobile: true),
-                      _buildTab(isMobile: false),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-
-  // ---------------------------------------------------------------- 当前生效
-
-  Widget _currentCard() {
-    final primary = Theme.of(context).colorScheme.primary;
-    final mcName =
-        _mobileCurrent == null ? '未设置' : UaConstants.labelOf(_mobileCurrent!);
-    final dcName = _desktopCurrent == null
-        ? '未设置'
-        : UaConstants.labelOf(_desktopCurrent!);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-      decoration: BoxDecoration(
-        color: context.cardColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: context.palette.outline),
-      ),
-      child: Column(
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
-          Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: context.palette.primarySoft,
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(Icons.auto_awesome, size: 20, color: primary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('按源自动选择 UA',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 2),
-                    Text(
-                      _auto
-                          ? '哔哩哔哩等 PC 站用电脑 UA，其余用手机 UA'
-                          : '已关闭：沿用各源自己的默认行为',
-                      style: Theme.of(context).textTheme.bodySmall,
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('自动选择 UA'),
+            subtitle: const Text('按站点规则自动在手机/电脑 UA 间切换；'
+                '关了只按下面两条当前值走'),
+            value: _autoSelect,
+            onChanged: (v) async {
+              await _repo.setAutoSelect(v);
+              setState(() => _autoSelect = v);
+            },
+          ),
+          const SizedBox(height: 8),
+          const Text('当前 UA',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          const Text('只存这两条：手机一条、电脑一条。改完立即生效，'
+              '引擎会清会话、重建 WebView、重载或重播。',
+              style: TextStyle(fontSize: 12.5)),
+          const SizedBox(height: 10),
+          _currentField(
+            label: '手机 UA',
+            controller: _mobileCtrl,
+            current: _mobileCurrent,
+            onSave: _setMobileCurrent,
+          ),
+          const SizedBox(height: 10),
+          _currentField(
+            label: '电脑 UA',
+            controller: _desktopCtrl,
+            current: _desktopCurrent,
+            onSave: _setDesktopCurrent,
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.restore_outlined),
+              label: const Text('恢复默认 UA'),
+              onPressed: _resetDefaults,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text('内置推荐',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          const Text('筛过的：只留主流、真实、不容易被站方发现是伪造的。'
+              '点一下就设为对应平台的当前值。',
+              style: TextStyle(fontSize: 12.5)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _searchCtrl,
+            decoration: InputDecoration(
+              hintText: '按名字 / UA / 标签搜，比如 微信、Pixel',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() => _query = '');
+                      },
                     ),
-                  ],
-                ),
-              ),
-              Switch(
-                value: _auto,
-                onChanged: (v) async {
-                  await _repo.setAutoSelect(v);
-                  setState(() => _auto = v);
-                },
-              ),
-            ],
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: (v) => setState(() => _query = v.trim()),
           ),
-          const SizedBox(height: 10),
-          Divider(height: 1, color: context.palette.outline),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 320,
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _presetList(mobile: true),
+                _presetList(mobile: false),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
           Row(
             children: [
-              Expanded(
-                child: _currentItem(
-                    icon: Icons.smartphone, label: '手机端', name: mcName),
-              ),
-              Container(width: 1, height: 30, color: context.palette.outline),
-              Expanded(
-                child: _currentItem(
-                    icon: Icons.desktop_windows, label: '电脑端', name: dcName),
+              const Text('我的 UA',
+                  style:
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              TextButton.icon(
+                icon: const Icon(Icons.add),
+                label: const Text('粘贴新增'),
+                onPressed: _addCustomUa,
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _currentItem(
-      {required IconData icon, required String label, required String name}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: context.subtleColor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: Theme.of(context).textTheme.bodySmall),
-                const SizedBox(height: 2),
-                Text(name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600)),
-              ],
-            ),
+          const Text('自己粘贴的 UA，点一下设为当前值；长按可编辑。',
+              style: TextStyle(fontSize: 12.5)),
+          const SizedBox(height: 6),
+          ..._customTiles(),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              const Text('规则表',
+                  style:
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              TextButton.icon(
+                icon: const Icon(Icons.add),
+                label: const Text('新增规则'),
+                onPressed: () => _editRule(null),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await _repo.resetRules();
+                  await _reload();
+                },
+                child: const Text('恢复预设'),
+              ),
+            ],
           ),
+          const Text('域名或关键词 → 用电脑版还是手机版；每条可开关。',
+              style: TextStyle(fontSize: 12.5)),
+          const SizedBox(height: 6),
+          ..._ruleTiles(),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              const Text('按站记忆',
+                  style:
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              TextButton(
+                onPressed: () async {
+                  await _repo.clearAllSiteMemory();
+                  await _reload();
+                },
+                child: const Text('全部清除'),
+              ),
+            ],
+          ),
+          const Text('在某个源/站手动切过 UA 后会记住，下次打开这个源还用它。',
+              style: TextStyle(fontSize: 12.5)),
+          const SizedBox(height: 6),
+          if (_siteMemory.isEmpty)
+            const Text('暂无按站记忆', style: TextStyle(fontSize: 13)),
+          ..._siteMemory.entries.map((e) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(e.key, style: const TextStyle(fontSize: 13.5)),
+                subtitle: Text(UaConstants.labelOf(e.value),
+                    style: const TextStyle(fontSize: 12)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  tooltip: '清除这条记忆',
+                  onPressed: () async {
+                    await _repo.clearSiteUa(e.key);
+                    await _reload();
+                  },
+                ),
+              )),
         ],
       ),
     );
   }
 
-  Widget _searchBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-      child: TextField(
-        decoration: const InputDecoration(
-          hintText: '搜索浏览器 / 机型 / UA 关键字',
-          prefixIcon: Icon(Icons.search, size: 20),
-          isDense: true,
-        ),
-        onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------- 分栏
-
-  Widget _buildTab({required bool isMobile}) {
-    final presets =
-        isMobile ? UaConstants.mobilePresets : UaConstants.desktopPresets;
-    final mine = isMobile ? _mobileMine : _desktopMine;
-    final current = isMobile ? _mobileCurrent : _desktopCurrent;
-
-    final filteredPresets = presets.where((p) {
-      if (_query.isEmpty) return true;
-      return p.name.toLowerCase().contains(_query) ||
-          p.ua.toLowerCase().contains(_query) ||
-          p.tag.toLowerCase().contains(_query);
-    }).toList();
-
-    final filteredMine = mine.where((ua) {
-      if (_query.isEmpty) return true;
-      return ua.toLowerCase().contains(_query) ||
-          UaConstants.labelOf(ua).toLowerCase().contains(_query);
-    }).toList();
-
-    return ListView(
-      padding: pagePadding(context, top: 4, bottom: 100),
+  Widget _currentField({
+    required String label,
+    required TextEditingController controller,
+    required String current,
+    required Future<void> Function(String) onSave,
+  }) {
+    final isCurrent = controller.text.trim() == current;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _hint(isMobile),
-        const SizedBox(height: 14),
-        _groupTitle('内置推荐', '${filteredPresets.length} 条'),
-        const SizedBox(height: 8),
-        ...filteredPresets.map((p) => _presetTile(p, current, isMobile)),
-        const SizedBox(height: 18),
-        _groupTitle('我的 UA', '${mine.length} 条'),
-        const SizedBox(height: 8),
-        if (filteredMine.isEmpty)
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 14),
-            decoration: BoxDecoration(
-              color: context.cardColor,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: context.palette.outline),
+        Text(label, style: const TextStyle(fontSize: 13)),
+        const SizedBox(height: 4),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                maxLines: 3,
+                minLines: 2,
+                style: const TextStyle(fontSize: 12.5),
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                ),
+              ),
             ),
-            child: Column(
-              children: [
-                Icon(Icons.playlist_add, color: context.subtleColor, size: 28),
-                const SizedBox(height: 8),
-                Text('还没有自定义 UA',
-                    style: Theme.of(context).textTheme.bodyMedium),
-                const SizedBox(height: 4),
-                Text('点右下角「自定义」粘贴一条 UA 即可',
-                    style: Theme.of(context).textTheme.bodySmall),
-              ],
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: isCurrent
+                  ? null
+                  : () => onSave(controller.text.trim()),
+              child: const Text('保存'),
             ),
-          )
-        else
-          ...filteredMine.map((ua) => _mineTile(ua, current, isMobile)),
-        const SizedBox(height: 18),
-        _helpCard(),
+          ],
+        ),
       ],
     );
   }
 
-  Widget _hint(bool isMobile) {
-    final text = isMobile
-        ? '部分源是手机版站点，别在这里放 PC 版 UA，否则会加载出错。'
-        : '部分源是 PC 版站点，别在这里放手机版 UA，否则会加载出错。';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.secondary.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline,
-              size: 16, color: Theme.of(context).colorScheme.secondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(text,
-                style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.secondary)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _groupTitle(String title, String count) => Row(
-        children: [
-          Text(title,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(width: 8),
-          Text(count, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      );
-
-  Widget _presetTile(UaPreset p, String? current, bool isMobile) {
-    final selected = current == p.ua;
-    final primary = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => _setCurrent(p.ua, isMobile),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(
-            color: selected ? context.palette.primarySoft : context.cardColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: selected ? primary : context.palette.outline,
-              width: selected ? 1.4 : 1,
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(_iconFor(p.tag),
-                  size: 20, color: selected ? primary : context.subtleColor),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(p.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: selected
-                                      ? FontWeight.w600
-                                      : FontWeight.w500)),
-                        ),
-                        const SizedBox(width: 6),
-                        _tag(p.tag),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(p.ua,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(fontSize: 11)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              selected
-                  ? Icon(Icons.check_circle, size: 20, color: primary)
-                  : Icon(Icons.radio_button_unchecked,
-                      size: 18, color: context.palette.outline),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _mineTile(String ua, String? current, bool isMobile) {
-    final selected = current == ua;
-    final primary = Theme.of(context).colorScheme.primary;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? context.palette.primarySoft : context.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? primary : context.palette.outline,
-            width: selected ? 1.4 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: InkWell(
-                onTap: () => _setCurrent(ua, isMobile),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(UaConstants.labelOf(ua),
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight:
-                                selected ? FontWeight.w600 : FontWeight.w500)),
-                    const SizedBox(height: 3),
-                    Text(ua,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(fontSize: 11)),
-                  ],
-                ),
-              ),
-            ),
-            IconButton(
-              icon: Icon(Icons.edit_outlined,
-                  size: 18, color: context.subtleColor),
-              onPressed: () => _editCustom(ua, isMobile),
-              tooltip: '编辑',
-            ),
-            IconButton(
-              icon: Icon(Icons.delete_outline,
-                  size: 18, color: context.subtleColor),
-              onPressed: () => _deleteCustom(ua, isMobile),
-              tooltip: '删除',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _helpCard() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: context.cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: context.palette.outline),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.help_outline, size: 16, color: context.subtleColor),
-              const SizedBox(width: 6),
-              const Text('怎么找 UA？',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '在百度搜「UserAgent」或「我的浏览器UA」，注意分清手机端和电脑端。'
-            '部分源播放或加载受限时，来这里换一条 UA 再试。',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tag(String text) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-        decoration: BoxDecoration(
-          color: context.palette.surfaceAlt,
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: Text(text,
-            style: TextStyle(fontSize: 10, color: context.subtleColor)),
-      );
-
-  IconData _iconFor(String tag) {
-    switch (tag) {
-      case '微信':
-        return Icons.chat_bubble_outline;
-      case 'Safari':
-        return Icons.explore_outlined;
-      case 'Chrome':
-        return Icons.public;
-      case 'Edge':
-        return Icons.waves;
-      case 'Firefox':
-        return Icons.local_fire_department_outlined;
-      case 'QQ浏览器':
-      case 'UC':
-      case '夸克':
-      case '360':
-      case 'Opera':
-        return Icons.travel_explore;
-      default:
-        return Icons.smartphone;
+  Widget _presetList({required bool mobile}) {
+    final presets = _filteredPresets(mobile);
+    if (presets.isEmpty) {
+      return const Center(child: Text('没有匹配的推荐'));
     }
+    final current = mobile ? _mobileCurrent : _desktopCurrent;
+    return ListView.builder(
+      itemCount: presets.length,
+      itemBuilder: (context, i) {
+        final p = presets[i];
+        final selected = p.ua == current;
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            selected ? Icons.check_circle : Icons.circle_outlined,
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).disabledColor,
+          ),
+          title: Text(p.name,
+              style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight:
+                      selected ? FontWeight.w600 : FontWeight.normal)),
+          subtitle: Text(p.tag, style: const TextStyle(fontSize: 12)),
+          onTap: () =>
+              mobile ? _setMobileCurrent(p.ua) : _setDesktopCurrent(p.ua),
+        );
+      },
+    );
   }
 
-  // ---------------------------------------------------------------- 操作
-
-  Future<void> _setCurrent(String ua, bool isMobile) async {
-    if (isMobile) {
-      await _repo.setMobileCurrent(ua);
-      setState(() => _mobileCurrent = ua);
-    } else {
-      await _repo.setDesktopCurrent(ua);
-      setState(() => _desktopCurrent = ua);
-    }
-    _toast('已切换到「${UaConstants.labelOf(ua)}」');
-  }
-
-  Future<void> _addCustom({required bool isMobile}) async {
-    final controller = TextEditingController();
-    final ua = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(isMobile ? '添加手机 UA' : '添加电脑 UA'),
-        content: Column(
+  List<Widget> _customTiles() {
+    final tiles = <Widget>[];
+    for (final entry in <MapEntry<bool, String>>[
+      ..._mobileList.map((u) => MapEntry(true, u)),
+      ..._desktopList.map((u) => MapEntry(false, u)),
+    ]) {
+      final isMobile = entry.key;
+      final ua = entry.value;
+      // 内置推荐不算“我的 UA”，只展示自定义的
+      final builtin = isMobile
+          ? UaConstants.builtinMobileUas
+          : UaConstants.builtinDesktopUas;
+      if (builtin.contains(ua)) continue;
+      final current = isMobile ? _mobileCurrent : _desktopCurrent;
+      tiles.add(ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(UaConstants.labelOf(ua),
+            style: const TextStyle(fontSize: 13.5)),
+        subtitle: Text(ua,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11.5)),
+        trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: controller,
-              maxLines: 4,
-              minLines: 3,
-              decoration: const InputDecoration(
-                hintText: '粘贴完整 UA，通常以 Mozilla/5.0 开头',
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton.icon(
-                    icon: const Icon(Icons.paste, size: 16),
-                    label: const Text('从剪贴板粘贴'),
-                    onPressed: () async {
-                      final data = await Clipboard.getData('text/plain');
-                      if (data?.text != null) controller.text = data!.text!;
-                    },
-                  ),
-                ),
-              ],
+            if (ua == current)
+              const Icon(Icons.check, size: 18, color: Colors.green),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              tooltip: '删除',
+              onPressed: () => _deleteCustomUa(isMobile, ua),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(
-            onPressed: () {
-              final v = controller.text.trim();
-              if (v.isNotEmpty) Navigator.pop(ctx, v);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    if (ua == null || ua.isEmpty) return;
-    await _upsert(ua, isMobile);
+        onTap: () =>
+            isMobile ? _setMobileCurrent(ua) : _setDesktopCurrent(ua),
+        onLongPress: () => _editCustomUa(isMobile, ua),
+      ));
+    }
+    if (tiles.isEmpty) {
+      tiles.add(const Text('还没有自定义 UA', style: TextStyle(fontSize: 13)));
+    }
+    return tiles;
   }
 
-  Future<void> _editCustom(String old, bool isMobile) async {
-    final controller = TextEditingController(text: old);
-    final ua = await showDialog<String>(
+  Future<void> _addCustomUa() async {
+    final ctrl = TextEditingController();
+    var mobile = _tabController.index == 0;
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: const Text('新增自定义 UA'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ctrl,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: '粘贴 UA 字符串',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Text('平台'),
+                  const SizedBox(width: 12),
+                  DropdownButton<bool>(
+                    value: mobile,
+                    items: const [
+                      DropdownMenuItem(value: true, child: Text('手机')),
+                      DropdownMenuItem(value: false, child: Text('电脑')),
+                    ],
+                    onChanged: (v) =>
+                        setDlg(() => mobile = v ?? true),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消')),
+            TextButton(
+              onPressed: () => Navigator.pop(
+                  ctx, {'ua': ctrl.text.trim(), 'mobile': mobile}),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    final ua = (result['ua'] as String?) ?? '';
+    if (ua.isEmpty) return;
+    final isMobile = result['mobile'] as bool;
+    if (isMobile) {
+      await _repo.setMobileUas([..._mobileList, ua]);
+      await _setMobileCurrent(ua);
+    } else {
+      await _repo.setDesktopUas([..._desktopList, ua]);
+      await _setDesktopCurrent(ua);
+    }
+    await _reload();
+  }
+
+  Future<void> _editCustomUa(bool isMobile, String oldUa) async {
+    final ctrl = TextEditingController(text: oldUa);
+    final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('编辑 UA'),
-        content:
-            TextField(controller: controller, maxLines: 4, minLines: 3),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 4,
+          decoration:
+              const InputDecoration(border: OutlineInputBorder()),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消')),
           TextButton(
-            onPressed: () {
-              final v = controller.text.trim();
-              if (v.isNotEmpty) Navigator.pop(ctx, v);
-            },
-            child: const Text('保存'),
-          ),
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('保存')),
         ],
       ),
     );
-    if (ua == null || ua.isEmpty || ua == old) return;
-    final list = isMobile
-        ? List<String>.from(_mobileMine)
-        : List<String>.from(_desktopMine);
-    final i = list.indexOf(old);
-    if (i >= 0) list[i] = ua;
+    if (result == null || result.isEmpty || result == oldUa) return;
     if (isMobile) {
-      await _repo.setMobileUas(list);
-      if (_mobileCurrent == old) await _repo.setMobileCurrent(ua);
+      await _repo.setMobileUas(
+          _mobileList.map((u) => u == oldUa ? result : u).toList());
+      if (_mobileCurrent == oldUa) await _setMobileCurrent(result);
     } else {
-      await _repo.setDesktopUas(list);
-      if (_desktopCurrent == old) await _repo.setDesktopCurrent(ua);
+      await _repo.setDesktopUas(
+          _desktopList.map((u) => u == oldUa ? result : u).toList());
+      if (_desktopCurrent == oldUa) await _setDesktopCurrent(result);
     }
-    await _load();
-    _toast('已更新');
+    await _reload();
   }
 
-  Future<void> _deleteCustom(String ua, bool isMobile) async {
-    final list = isMobile
-        ? List<String>.from(_mobileMine)
-        : List<String>.from(_desktopMine);
-    list.remove(ua);
+  Future<void> _deleteCustomUa(bool isMobile, String ua) async {
     if (isMobile) {
-      await _repo.setMobileUas(list);
+      await _repo
+          .setMobileUas(_mobileList.where((u) => u != ua).toList());
     } else {
-      await _repo.setDesktopUas(list);
+      await _repo
+          .setDesktopUas(_desktopList.where((u) => u != ua).toList());
     }
-    await _load();
-    _toast('已删除');
+    await _reload();
   }
 
-  Future<void> _upsert(String ua, bool isMobile) async {
-    final list = isMobile
-        ? List<String>.from(_mobileMine)
-        : List<String>.from(_desktopMine);
-    if (!list.contains(ua)) list.insert(0, ua);
-    if (isMobile) {
-      await _repo.setMobileUas(list);
-      await _repo.setMobileCurrent(ua);
-    } else {
-      await _repo.setDesktopUas(list);
-      await _repo.setDesktopCurrent(ua);
-    }
-    await _load();
-    _toast('已添加并设为当前');
+  List<Widget> _ruleTiles() {
+    return _rules.map((rule) {
+      return ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(rule.pattern,
+            style: const TextStyle(fontSize: 13.5)),
+        subtitle: Text(rule.desktop ? '用电脑版 UA' : '用手机版 UA',
+            style: const TextStyle(fontSize: 12)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Switch(
+              value: rule.enabled,
+              onChanged: (v) async {
+                final updated = _rules
+                    .map((r) => r.id == rule.id
+                        ? r.copyWith(enabled: v)
+                        : r)
+                    .toList();
+                await _repo.setRules(updated);
+                await _reload();
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 20),
+              tooltip: '编辑',
+              onPressed: () => _editRule(rule),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20),
+              tooltip: '删除',
+              onPressed: () async {
+                final updated =
+                    _rules.where((r) => r.id != rule.id).toList();
+                await _repo.setRules(updated);
+                await _reload();
+              },
+            ),
+          ],
+        ),
+      );
+    }).toList();
   }
 
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      duration: const Duration(seconds: 2),
-      behavior: SnackBarBehavior.floating,
-    ));
+  Future<void> _editRule(UaRule? rule) async {
+    final patternCtrl = TextEditingController(text: rule?.pattern ?? '');
+    var desktop = rule?.desktop ?? true;
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text(rule == null ? '新增规则' : '编辑规则'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: patternCtrl,
+                decoration: const InputDecoration(
+                  labelText: '域名或关键词',
+                  hintText: '比如 pan.baidu.com',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Text('用'),
+                  const SizedBox(width: 12),
+                  DropdownButton<bool>(
+                    value: desktop,
+                    items: const [
+                      DropdownMenuItem(value: true, child: Text('电脑版')),
+                      DropdownMenuItem(value: false, child: Text('手机版')),
+                    ],
+                    onChanged: (v) => setDlg(() => desktop = v ?? true),
+                  ),
+                  const Text(' UA'),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, {
+                'pattern': patternCtrl.text.trim(),
+                'desktop': desktop,
+              }),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    final pattern = (result['pattern'] as String?) ?? '';
+    if (pattern.isEmpty) return;
+    final isDesktop = result['desktop'] as bool;
+    List<UaRule> updated;
+    if (rule == null) {
+      updated = [
+        ..._rules,
+        UaRule(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          pattern: pattern,
+          desktop: isDesktop,
+        ),
+      ];
+    } else {
+      updated = _rules
+          .map((r) => r.id == rule.id
+              ? r.copyWith(pattern: pattern, desktop: isDesktop)
+              : r)
+          .toList();
+    }
+    await _repo.setRules(updated);
+    await _reload();
   }
 }

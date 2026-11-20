@@ -2,7 +2,9 @@ import 'package:logging/logging.dart' as lg;
 
 import '../database/app_database.dart';
 
-/// 统一日志服务：同时输出到控制台和数据库，便于查看/导出。
+/// 统一日志服务：同时输出到控制台和数据库 Logs 表，便于在日志页查看/复制。
+///
+/// 只写数据库，不写本地文件；日志表只保留最新 500 条（见 [AppDatabase.pruneLogs]）。
 class AppLogger {
   AppLogger._();
 
@@ -31,11 +33,17 @@ class AppLogger {
 
   void error(String message, {Object? error, StackTrace? stack}) {
     _log.severe(message, error, stack);
-    _write('error', message, '${error ?? ''}\n${stack ?? ''}');
+    final detail = '${error ?? ''}\n${stack ?? ''}'.trim();
+    _write('error', message, detail.isEmpty ? null : detail);
   }
 
   void _write(String level, String message, String? detail) {
-    _db?.log(level, message, detail: detail).catchError((_) => 0);
+    final db = _db;
+    if (db == null) return;
+    db
+        .log(level, message, detail: detail)
+        .then((_) => db.pruneLogs())
+        .catchError((_) => 0);
   }
 }
 

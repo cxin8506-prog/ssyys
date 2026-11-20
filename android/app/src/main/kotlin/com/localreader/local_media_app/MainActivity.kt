@@ -18,8 +18,8 @@ import java.util.Enumeration
 
 class MainActivity : FlutterActivity() {
 
-    private var dexLoader: DexClassLoader? = null
-    private var loadedJar: String? = null
+    /** 通用 JAR 插件：每个 JAR 一个加载器（按路径缓存的 Map），重导时能单独清。 */
+    private val jarLoaders = HashMap<String, DexClassLoader>()
 
     /** 我的听书源调用都是网络请求，统一放后台线程 */
     private val tingShuExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -46,6 +46,12 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // ---------- 播放控制：JAR 源调 MyExt.playerControl / todayPlaybackTime
+        // 时，从原生侧调进 Dart（audioHandler / 收听统计）。Dart 侧在 main()
+        // 里接 "suishou/player" 通道。
+        TingShuRuntime.playerChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "suishou/player")
 
         // ---------- JAR 插件：DexClassLoader 反射调用 ----------
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "suishou/jar")
@@ -74,8 +80,12 @@ class MainActivity : FlutterActivity() {
                             result.success(hasJarMethods(path, className, names))
                         }
                         "unload" -> {
-                            dexLoader = null
-                            loadedJar = null
+                            val path = call.argument<String>("path") ?: ""
+                            if (path.isEmpty()) {
+                                jarLoaders.clear()
+                            } else {
+                                jarLoaders.remove(path)
+                            }
                             result.success(true)
                         }
                         else -> result.notImplemented()
@@ -108,6 +118,20 @@ class MainActivity : FlutterActivity() {
                                     arr.put(JSONObject(m as Map<*, *>))
                                 }
                                 arr.toString()
+                            }
+                            // 安装完把 JAR 设只读（Android 14+ 拒绝加载可写的 dex），
+                            // 再清掉这个 JAR 的旧加载器/odex 缓存——重导同一个包前必须做
+                            "makeReadOnly" -> if (TingShuRuntime.makeReadOnly(path)) "true" else "false"
+                            "clearJarCache" -> {
+                                TingShuRuntime.clearCacheFor(path)
+                                "ok"
+                            }
+                            // Dart 侧解析出来的 UA（手机/电脑各一条），推给运行时
+                            "setUserAgents" -> {
+                                val mobile = call.argument<String>("mobile") ?: ""
+                                val desktop = call.argument<String>("desktop") ?: ""
+                                TingShuRuntime.setUserAgents(mobile, desktop)
+                                "ok"
                             }
                             "callSource" -> TingShuRuntime.call(path, entryClass, index, sourceMethod, params)
                             // 登录入口（ILogin）：没有返回 null
@@ -151,6 +175,24 @@ class MainActivity : FlutterActivity() {
                                 val cm = android.webkit.CookieManager.getInstance()
                                 cm.setAcceptCookie(true)
                                 result.success(cm.getCookie(url) ?: "")
+                            }
+                        }
+                        // JS 引擎收到 Set-Cookie 后写回 WebView，
+                        // 和登录页、验证页是同一份 CookieManager。
+                        "setCookie" -> {
+                            val url = call.argument<String>("url") ?: ""
+                            val cookie = call.argument<String>("cookie") ?: ""
+                            if (url.isEmpty() || cookie.isEmpty()) {
+                                result.success(false)
+                            } else {
+                                val cm = android.webkit.CookieManager.getInstance()
+                                cm.setAcceptCookie(true)
+                                for (part in cookie.split(";")) {
+                                    val c = part.trim()
+                                    if (c.isNotEmpty()) cm.setCookie(url, c)
+                                }
+                                cm.flush()
+                                result.success(true)
                             }
                         }
                         "clearCookies" -> {
@@ -211,15 +253,14 @@ class MainActivity : FlutterActivity() {
         if (path.isEmpty()) throw IllegalArgumentException("path 为空")
         val jar = File(path)
         if (!jar.exists()) throw IllegalArgumentException("JAR 不存在: $path")
-        if (loadedJar == path && dexLoader != null) return true
+        if (jarLoaders.containsKey(path)) return true
 
         val out = File(codeCacheDir, "plugin_dex")
         if (!out.exists()) out.mkdirs()
         val loader = DexClassLoader(path, out.absolutePath, null, classLoader)
         // 主动触发一次类扫描，dex 缺失会在这里暴露
         loader.loadClass("java.lang.Object")
-        dexLoader = loader
-        loadedJar = path
+        jarLoaders[path] = loader
         return true
     }
 
@@ -245,8 +286,8 @@ class MainActivity : FlutterActivity() {
     /** 主类是否声明了这些方法中的任意一个（用于源能力判断） */
     private fun hasJarMethods(path: String, className: String, names: List<String>): Boolean {
         if (names.isEmpty()) return false
-        if (dexLoader == null || loadedJar != path) loadJar(path)
-        val loader = dexLoader ?: return false
+        if (!jarLoaders.containsKey(path)) loadJar(path)
+        val loader = jarLoaders[path] ?: return false
         val cls = Class.forName(className, true, loader)
         return cls.methods.any { it.name in names }
     }
@@ -258,8 +299,8 @@ class MainActivity : FlutterActivity() {
         method: String,
         argsJson: String
     ): String {
-        if (dexLoader == null || loadedJar != path) loadJar(path)
-        val loader = dexLoader ?: throw IllegalStateException("类加载器未就绪")
+        if (!jarLoaders.containsKey(path)) loadJar(path)
+        val loader = jarLoaders[path] ?: throw IllegalStateException("类加载器未就绪")
         val cls = Class.forName(className, true, loader)
         val args = JSONArray(argsJson)
 

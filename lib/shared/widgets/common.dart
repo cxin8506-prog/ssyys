@@ -1,131 +1,153 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
-/// 左侧抽屉已拆除（问题 3/4）：入口重新安置在书源页顶栏
-/// （设置→齿轮图标，源管理→源管理图标）和设置页（备份）里，
-/// 收听统计在底部中间播放键长按，源搜索走搜索页。
 
-/// 滚动页面的统一内边距。
+/// 通用小部件：封面、书卡、空状态、说明行、格式化。
 ///
-/// 全面屏（edge-to-edge）下 Scaffold 不会自动避让系统导航条/手势条，
-/// 滚动内容如果只写固定 bottom，最后一块会被压住。这里统一加上安全区。
-EdgeInsets pagePadding(
-  BuildContext context, {
-  double left = 16,
-  double top = 12,
-  double right = 16,
-  double bottom = 28,
-}) {
-  final safeBottom = MediaQuery.of(context).padding.bottom;
-  return EdgeInsets.fromLTRB(left, top, right, bottom + safeBottom);
+/// 颜色一律跟主题走，不写死深色/浅色；文字不写死 Colors.white
+///（白字 bug 的根因就是颜色没指定、任由默认样式接手）。
+
+String formatDuration(int ms) {
+  if (ms <= 0) return '00:00';
+  final totalSeconds = ms ~/ 1000;
+  final h = totalSeconds ~/ 3600;
+  final m = (totalSeconds % 3600) ~/ 60;
+  final s = totalSeconds % 60;
+  final mm = m.toString().padLeft(2, '0');
+  final ss = s.toString().padLeft(2, '0');
+  if (h > 0) return '$h:$mm:$ss';
+  return '$mm:$ss';
 }
 
-/// 底部固定悬浮元素的避让高度（系统手势条 + 悬浮导航条）
-double bottomBarInset(BuildContext context, {double extra = 0}) =>
-    MediaQuery.of(context).padding.bottom + extra;
+String formatDateTime(DateTime? dt) {
+  if (dt == null) return '';
+  final y = dt.year;
+  final mo = dt.month.toString().padLeft(2, '0');
+  final d = dt.day.toString().padLeft(2, '0');
+  final h = dt.hour.toString().padLeft(2, '0');
+  final mi = dt.minute.toString().padLeft(2, '0');
+  return '$y-$mo-$d $h:$mi';
+}
 
-/// 封面图：有路径显示图片，否则显示占位首字
+String formatListen(int seconds) {
+  final h = seconds ~/ 3600;
+  final m = (seconds % 3600) ~/ 60;
+  if (h > 0) return '$h 小时 $m 分钟';
+  return '$m 分钟';
+}
+
+/// 封面：网络图加载失败时显示首字占位，不留空白黑块。
 class CoverImage extends StatelessWidget {
-  final String? path;
+  final String? url;
   final String title;
-  final double size;
-  final bool isVideo;
+  final double width;
+  final double height;
+  final double radius;
 
   const CoverImage({
     super.key,
-    this.path,
+    this.url,
     required this.title,
-    this.size = 64,
-    this.isVideo = false,
+    this.width = 78,
+    this.height = 104,
+    this.radius = 8,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isHttp = path != null && path!.startsWith('http');
-    final hasCover = isHttp ||
-        (path != null && path!.isNotEmpty && File(path!).existsSync());
-    return Container(
-      width: size,
-      height: size * 1.35,
+    final fallback = Container(
+      width: width,
+      height: height,
       decoration: BoxDecoration(
-        color: context.palette.surfaceAlt,
-        borderRadius: BorderRadius.circular(8),
+        color: Theme.of(context).colorScheme.primary.withOpacity(0.16),
+        borderRadius: BorderRadius.circular(radius),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: !hasCover
-          ? _placeholder(context)
-          : isHttp
-              ? Image.network(path!,
-                  fit: BoxFit.cover,
-                  cacheWidth: (size * 2).round(),
-                  cacheHeight: (size * 2.7).round(),
-                  filterQuality: FilterQuality.low,
-                  errorBuilder: (_, __, ___) => _placeholder(context))
-              : Image.file(File(path!),
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _placeholder(context)),
+      alignment: Alignment.center,
+      child: Text(
+        title.isEmpty ? '书' : title.characters.first,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.primary,
+          fontSize: width * 0.32,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+    if (url == null || url!.isEmpty) return fallback;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Image.network(
+        url!,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => fallback,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            width: width,
+            height: height,
+            color: context.palette.surfaceAlt,
+            alignment: Alignment.center,
+            child: const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        },
+      ),
     );
   }
-
-  Widget _placeholder(BuildContext context) => Stack(
-        alignment: Alignment.center,
-        children: [
-          Icon(
-            isVideo ? Icons.movie_outlined : Icons.headphones_outlined,
-            size: size * 0.4,
-            color: Theme.of(context).colorScheme.primary.withOpacity(0.55),
-          ),
-          Positioned(
-            bottom: 6,
-            child: Text(
-              title.isEmpty ? '?' : title.substring(0, 1),
-              style: TextStyle(color: context.subtleColor, fontSize: 11),
-            ),
-          ),
-        ],
-      );
 }
 
-/// 空状态提示
+/// 空状态：只写真实存在的入口，不写代码里不存在的路径。
 class EmptyState extends StatelessWidget {
   final IconData icon;
-  final String message;
+  final String title;
   final String? hint;
-  final VoidCallback? onAction;
   final String? actionLabel;
+  final VoidCallback? onAction;
 
   const EmptyState({
     super.key,
     required this.icon,
-    required this.message,
+    required this.title,
     this.hint,
-    this.onAction,
     this.actionLabel,
+    this.onAction,
   });
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 64, color: context.subtleColor.withOpacity(0.5)),
-            const SizedBox(height: 16),
-            Text(message, style: Theme.of(context).textTheme.titleMedium),
+            Icon(icon, size: 48, color: context.subtleColor),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 15,
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
+            ),
             if (hint != null) ...[
               const SizedBox(height: 8),
-              Text(hint!,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center),
+              Text(
+                hint!,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: context.subtleColor),
+              ),
             ],
-            if (onAction != null) ...[
-              const SizedBox(height: 20),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 16),
               ElevatedButton(
-                  onPressed: onAction, child: Text(actionLabel ?? '添加')),
+                onPressed: onAction,
+                child: Text(actionLabel!),
+              ),
             ],
           ],
         ),
@@ -134,24 +156,140 @@ class EmptyState extends StatelessWidget {
   }
 }
 
-/// 简单加载指示
-class LoadingOverlay extends StatelessWidget {
-  final String message;
-  const LoadingOverlay({super.key, this.message = '处理中...'});
+/// 分组标题（瘦版横条）。
+class SectionTitle extends StatelessWidget {
+  final String title;
+  final Widget? trailing;
+
+  const SectionTitle({super.key, required this.title, this.trailing});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black54,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).textTheme.bodyMedium?.color,
+              ),
+            ),
+          ),
+          if (trailing != null) trailing!,
+        ],
+      ),
+    );
+  }
+}
+
+/// 带说明的设置行：标题 + 副标题 + 右侧控件 + info 图标（点弹 Dialog）。
+class InfoRow extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final String info;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  const InfoRow({
+    super.key,
+    required this.title,
+    this.subtitle,
+    required this.info,
+    this.trailing,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary),
-            const SizedBox(height: 16),
-            Text(message, style: const TextStyle(color: Colors.white)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: TextStyle(fontSize: 12, color: context.subtleColor),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.info_outline, size: 18),
+              color: context.subtleColor,
+              tooltip: '说明',
+              onPressed: () {
+                showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: Text(title),
+                    content: Text(info, style: const TextStyle(fontSize: 14, height: 1.6)),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('知道了'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            if (trailing != null) trailing!,
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 首字图标（源卡片用）：42×42 圆角 12，渐变底 + 首字。
+class SourceAvatar extends StatelessWidget {
+  final String name;
+  final double size;
+
+  const SourceAvatar({super.key, required this.name, this.size = 42});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final first = name.isEmpty ? '源' : name.characters.first;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          colors: [primary, primary.withOpacity(0.65)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        first,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: size * 0.42,
+          fontWeight: FontWeight.bold,
         ),
       ),
     );

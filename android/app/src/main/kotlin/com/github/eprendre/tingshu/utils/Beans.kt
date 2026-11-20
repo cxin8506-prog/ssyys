@@ -1,6 +1,9 @@
 package com.github.eprendre.tingshu.utils
 
-/** 与「我的听书」SDK 对齐的数据类，字段顺序会影响 JAR 里的构造调用，不要改。 */
+/**
+ * 与「我的听书」SDK 对齐的数据类。
+ * 字段顺序会影响 JAR 里的构造调用，不要改。
+ */
 data class Book(
     var coverUrl: String,
     val bookUrl: String,
@@ -83,4 +86,21 @@ data class Category(
     val totalPage: Int,
     val currentUrl: String,
     val nextUrl: String
+)
+
+/**
+ * 源向宿主声明的配置项（源实现 ConfigurableSource.getCustomConfigItems() 时用）。
+ * [type] 五种控件：text（文本框）/ select（下拉）/ switch（开关）/
+ * multiselect（多选）/ button（按钮）。
+ * [options] 是 select / multiselect 的可选项（"值=显示名" 或纯值）；
+ * multiselect 的值按逗号分隔存。
+ * [defaultValue] 是默认值；switch 用 "true"/"false"。
+ */
+data class ConfigItem(
+    val type: String,
+    val key: String,
+    val title: String,
+    val defaultValue: String = "",
+    val options: List<String> = emptyList(),
+    val hint: String = ""
 )

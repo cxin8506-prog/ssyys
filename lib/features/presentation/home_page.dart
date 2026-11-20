@@ -1,21 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
-import '../../core/constants/app_constants.dart';
+import '../../core/database/library_repository.dart';
 import '../../core/di/providers.dart';
 import '../../core/theme/app_theme.dart';
-import '../../plugins/data/home_feed.dart';
-import '../../plugins/data/login_entry.dart';
 import '../../plugins/data/plugin_providers.dart';
-import '../../plugins/data/plugin_resume.dart';
 import '../../plugins/model/plugin_source.dart';
 import '../../plugins/presentation/source_book_page.dart';
-import '../../plugins/presentation/source_search_page.dart';
+import '../../shared/widgets/bottom_bar_inset.dart';
 import '../../shared/widgets/common.dart';
 
-/// 书源页（网格层）：顶栏只留搜索/设置两个图标（无标题、无播放键）→
-/// 源组横条（瘦版）→ 源卡片网格 → 推荐
-/// 点源卡片切到 tab 1（DiscoverPage，内容层），网格层随 tab 切换隐藏。
+/// 首页（书源 tab）。
+///
+/// 只留：搜索、继续收听大卡、在听 / 听完、源。
+/// 没有分类板块，没有推荐 feed（审计 D 第 21 项：首页的
+/// 「分类·玄幻武侠」板块是错放到首页的源内分类，重写删掉；
+/// 分类只在发现页按当前源展示）。
+/// 点源卡片 = 切源 + 进该源页（发现页）；源卡片上没有假放大镜。
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -24,672 +26,653 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  final _scroll = ScrollController();
-  /// 展开的分组（点横条展开/收起；默认展开第一个分组，其余收着）
-  final Set<String> _openGroups = {};
-  bool _groupsInit = false;
-  final Map<String, bool> _loginFlags = {};
-  String _lastIds = '';
-  int _lastRefresh = 0;
+  final _scrollController = ScrollController();
+  String _segment = 'listening';
+  String _sort = 'recent';
+  List<String> _hiddenIds = const <String>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHidden();
+  }
+
+  Future<void> _loadHidden() async {
+    final prefs = ref.read(sharedPrefsProvider);
+    if (!mounted) return;
+    setState(() {
+      _hiddenIds = prefs.getStringList('hidden_book_ids') ?? const <String>[];
+    });
+  }
 
   @override
   void dispose() {
-    _scroll.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final source = ref.watch(activeHomeSourceProvider);
-    final list = ref.watch(sourceListProvider).value ?? const <PluginSource>[];
-    final enabled = list.where((s) => s.enabled).toList(growable: false);
-    final isActiveTab = ref.watch(shellTabProvider) == 0;
-    if (isActiveTab) _maybeRefresh(enabled);
-
-    // 分组：按源的 group（包名，如 JAR 文件名「影视聚合」）分；
-    // group 为空（JS/ZIP 源）时用源自己的名字当分组名，绝不出现「其他」
-    final groups = <String>[];
-    for (final s in enabled) {
-      final g = _groupOf(s);
-      if (!groups.contains(g)) groups.add(g);
-    }
-    if (!_groupsInit && groups.isNotEmpty) {
-      _openGroups.add(groups.first);
-      _groupsInit = true;
-    }
-    bool isOpen(String g) => _openGroups.contains(g);
-    List<PluginSource> groupSources(String g) => enabled.where((s) {
-          if (_groupOf(s) != g) return false;
-          return true;
-        }).toList(growable: false);
-    final columns = ref.watch(sourceColumnsProvider);
+    ref.listen<int>(homeScrollToTopProvider, (_, __) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+    final repo = ref.watch(libraryRepositoryProvider);
+    final videoEnabled = ref.watch(videoEnabledProvider);
+    final sourcesAsync = ref.watch(sourceListProvider);
 
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: () => _refresh(ref),
-        child: CustomScrollView(
-          controller: _scroll,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            _appBar(context, ref, source),
-            if (enabled.isEmpty)
-              SliverToBoxAdapter(child: _noSource(context, ref))
-            else
-              for (final g in groups)
-                if (groupSources(g).isNotEmpty) ...[
-                  SliverToBoxAdapter(
-                      child: _groupBar(context, g, groupSources(g).length,
-                          isOpen(g), () {
-                    setState(() {
-                      if (_openGroups.contains(g)) {
-                        _openGroups.remove(g);
-                      } else {
-                        _openGroups.add(g);
-                      }
-                    });
-                  })),
-                  if (isOpen(g))
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                      sliver: SliverGrid(
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: columns,
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          mainAxisExtent: 132,
-                        ),
-                        delegate: SliverChildBuilderDelegate(
-                          (ctx, i) => _sourceCard(groupSources(g)[i]),
-                          childCount: groupSources(g).length,
-                        ),
-                      ),
+      appBar: AppBar(
+        title: const Text('随意听书'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: '搜索',
+            onPressed: () => context.push('/search'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: '设置',
+            onPressed: () => context.push('/settings'),
+          ),
+        ],
+      ),
+      body: FutureBuilder<List<MediaItem>>(
+        future: _loadAll(repo),
+        builder: (context, snapshot) {
+          final all = snapshot.data ?? const <MediaItem>[];
+          final visible =
+              all.where((e) => !_hiddenIds.contains(e.id)).toList();
+          final listening =
+              visible.where((e) => !e.isFinished).toList(growable: false);
+          final finished =
+              visible.where((e) => e.isFinished).toList(growable: false);
+          final shown = _segment == 'listening' ? listening : finished;
+          final sorted = _sortItems(shown, _sort);
+          final continueItem = visible.isEmpty ? null : visible.first;
+          return RefreshIndicator(
+            onRefresh: () async {
+              setState(() {});
+            },
+            child: ListView(
+              controller: _scrollController,
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 12),
+              children: [
+                _SearchEntry(
+                  onTap: () => context.push('/search'),
+                ),
+                const SizedBox(height: 12),
+                if (continueItem != null)
+                  _ContinueCard(
+                    item: continueItem,
+                    onOpen: () => _openBook(continueItem),
+                    onPlay: () => _openBook(continueItem, autoPlay: true),
+                  ),
+                const SectionTitle(title: '在听 / 听完'),
+                _SegmentBar(
+                  value: _segment,
+                  listeningCount: listening.length,
+                  finishedCount: finished.length,
+                  onChanged: (v) => setState(() => _segment = v),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Spacer(),
+                    _SortMenu(
+                      value: _sort,
+                      onChanged: (v) => setState(() => _sort = v),
                     ),
-                ],
-            ..._feedSlivers(context, ref, source),
-            const SliverToBoxAdapter(child: SizedBox(height: 96)),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                  height: MediaQuery.of(context).padding.bottom + 8),
+                  ],
+                ),
+                if (sorted.isEmpty)
+                  EmptyState(
+                    icon: Icons.menu_book_outlined,
+                    title: _segment == 'listening' ? '还没有在听的书' : '还没有听完的书',
+                    hint: '去发现页找书，或点右上角搜索。',
+                    actionLabel: '去发现',
+                    onAction: () =>
+                        ref.read(shellTabProvider.notifier).state = 1,
+                  )
+                else
+                  ...sorted.map((e) => _BookRow(
+                        item: e,
+                        onTap: () => _openBook(e),
+                        onHide: () => _hide(e),
+                      )),
+                const SectionTitle(title: '源'),
+                sourcesAsync.when(
+                  loading: () => const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                  error: (e, _) => Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text('读取源失败：$e'),
+                  ),
+                  data: (list) {
+                    final enabled = list.where((s) => s.enabled).toList();
+                    final shownSources = videoEnabled
+                        ? enabled
+                        : enabled.where((s) => s.isAudio).toList();
+                    if (shownSources.isEmpty) {
+                      return EmptyState(
+                        icon: Icons.extension_outlined,
+                        title: '还没有导入源',
+                        hint: '内容只从插件来，先导入一个 JS/ZIP 或 JAR 插件。',
+                        actionLabel: '导入源',
+                        onAction: () => context.push('/sources'),
+                      );
+                    }
+                    final columns = ref.watch(sourceColumnsProvider);
+                    final cols =
+                        columns < 2 ? 2 : (columns > 4 ? 4 : columns);
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate:
+                          SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: cols,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                        mainAxisExtent: 96,
+                      ),
+                      itemCount: shownSources.length,
+                      itemBuilder: (_, i) =>
+                          _SourceCard(source: shownSources[i]),
+                    );
+                  },
+                ),
+                bottomBarSpace(context),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<List<MediaItem>> _loadAll(LibraryRepository repo) async {
+    try {
+      final listening = await repo.getListening();
+      final finished = await repo.getFinished();
+      final merged = <MediaItem>[...listening, ...finished];
+      merged.sort((a, b) {
+        final at = a.lastPlayedAt;
+        final bt = b.lastPlayedAt;
+        if (at == null && bt == null) return 0;
+        if (at == null) return 1;
+        if (bt == null) return -1;
+        return bt.compareTo(at);
+      });
+      return merged;
+    } catch (_) {
+      return const <MediaItem>[];
+    }
+  }
+
+  List<MediaItem> _sortItems(List<MediaItem> items, String sort) {
+    final list = List<MediaItem>.from(items);
+    switch (sort) {
+      case 'name':
+        list.sort((a, b) => a.title.compareTo(b.title));
+        break;
+      case 'updated':
+        list.sort((a, b) {
+          final at = a.lastPlayedAt;
+          final bt = b.lastPlayedAt;
+          if (at == null && bt == null) return 0;
+          if (at == null) return 1;
+          if (bt == null) return -1;
+          return bt.compareTo(at);
+        });
+        break;
+      case 'recentOrUpdated':
+        // 最近阅读或更新：这里按最后播放时间倒序（更新时间未单独立字段）。
+        list.sort((a, b) {
+          final at = a.lastPlayedAt;
+          final bt = b.lastPlayedAt;
+          if (at == null && bt == null) return 0;
+          if (at == null) return 1;
+          if (bt == null) return -1;
+          return bt.compareTo(at);
+        });
+        break;
+      case 'manual':
+        final order =
+            ref.read(sharedPrefsProvider).getStringList('home_manual_order') ??
+                const <String>[];
+        list.sort((a, b) {
+          final ia = order.indexOf(a.id);
+          final ib = order.indexOf(b.id);
+          final ra = ia >= 0 ? ia : 1000000;
+          final rb = ib >= 0 ? ib : 1000000;
+          return ra.compareTo(rb);
+        });
+        break;
+      default: // recent
+        list.sort((a, b) {
+          final at = a.lastPlayedAt;
+          final bt = b.lastPlayedAt;
+          if (at == null && bt == null) return 0;
+          if (at == null) return 1;
+          if (bt == null) return -1;
+          return bt.compareTo(at);
+        });
+    }
+    return list;
+  }
+
+  /// 从 MediaItem.id 里还原 bookUrl：插件书的 id 约定为
+  /// 'sourceId|bookUrl'；解析不到就返回空字符串，详情页会退回源首页。
+  /// （跨组缺口：契约的 MediaItem 字段里没有 bookUrl；见汇报。）
+  String _bookUrlOf(MediaItem item) {
+    final parts = item.id.split('|');
+    if (parts.length >= 2) return parts.sublist(1).join('|');
+    return '';
+  }
+
+  void _openBook(MediaItem item, {bool autoPlay = false}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SourceBookPage(
+          sourceId: item.sourceId,
+          bookUrl: _bookUrlOf(item),
+          title: item.title,
+          coverUrl: item.coverUrl,
+          author: item.author,
+          autoPlay: autoPlay,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _hide(MediaItem item) async {
+    final prefs = ref.read(sharedPrefsProvider);
+    final hidden = List<String>.from(_hiddenIds)..add(item.id);
+    await prefs.setStringList('hidden_book_ids', hidden);
+    if (!mounted) return;
+    setState(() => _hiddenIds = hidden);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已隐藏，可在收藏页菜单里查看已隐藏的书')),
+    );
+  }
+}
+
+class _SearchEntry extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _SearchEntry({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final author = item.author ?? '';
+    final sourceName = item.sourceName ?? '';
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        height: 46,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: context.palette.surfaceAlt,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.search, size: 20, color: context.subtleColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '搜索书名、作者、演播…',
+                style: TextStyle(fontSize: 15, color: context.subtleColor),
+              ),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  /// 分组名：group（包名）为空时用源自己的名字，绝不出现「其他」
-  String _groupOf(PluginSource s) => s.group.isEmpty ? s.name : s.group;
+/// 继续收听大卡：点卡片进书，点播放键直接播。
+class _ContinueCard extends StatelessWidget {
+  final MediaItem item;
+  final VoidCallback onOpen;
+  final VoidCallback onPlay;
 
-  /// 回到书源页时刷新登录标记（节流 2 秒，避免反复 setState）。
-  void _maybeRefresh(List<PluginSource> enabled) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastRefresh < 2000) return;
-    _lastRefresh = now;
-    final ids = enabled.map((s) => s.id).join(',');
-    if (ids != _lastIds) {
-      _lastIds = ids;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _loadLoginFlags(enabled));
-    }
-  }
+  const _ContinueCard({
+    required this.item,
+    required this.onOpen,
+    required this.onPlay,
+  });
 
-  /// 读每个源的登录入口，用来在卡片上标“登录”。
-  /// JS 源读 manifest 里的 login；JAR（我的听书格式）没有 manifest，
-  /// 问引擎的 ILogin，两种格式一视同仁。
-  Future<void> _loadLoginFlags(List<PluginSource> sources) async {
-    final repo = ref.read(sourceRepositoryProvider);
-    var changed = false;
-    for (final s in sources) {
-      if (_loginFlags.containsKey(s.id)) continue;
-      try {
-        final manifest = await repo.readManifest(s);
-        final entry = LoginEntry.parse(manifest);
-        var has = entry != null && entry.valid;
-        if (!has && (s.isTingShu || s.isSsts)) {
-          try {
-            final engine = engineForSource(ref, s);
-            await engine.attach(s);
-            final info = await engine.loginInfo();
-            has = '${info?['url'] ?? ''}'.trim().isNotEmpty;
-          } catch (_) {}
-        }
-        _loginFlags[s.id] = has;
-      } catch (_) {
-        _loginFlags[s.id] = false;
-      }
-      changed = true;
-    }
-    if (changed && mounted) setState(() {});
-  }
-
-  // ------------------------------------------------------------ 顶部
-  // 纠正（2026-11-20）：网格层顶栏不要标题（不要「书源」也不要源名），
-  // 不要播放按钮；只留搜索放大镜（进搜索页）和设置齿轮（进设置页）。
-  // 列数切换、源管理都不放顶栏（列数由设置页提供，源管理放设置页里）。
-  // 背景用主题强调色（AppBarTheme）。
-  Widget _appBar(BuildContext context, WidgetRef ref, PluginSource? source) {
-    return SliverAppBar(
-      pinned: true,
-      elevation: 0,
-      scrolledUnderElevation: 0,
-      toolbarHeight: 64,
-      automaticallyImplyLeading: false,
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.search_rounded),
-          tooltip: '搜索',
-          onPressed: () => _openSearch(context, source),
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final progress = item.lastDurationMs > 0
+        ? (item.lastPositionMs / item.lastDurationMs).clamp(0.0, 1.0)
+        : 0.0;
+    return InkWell(
+      onTap: onOpen,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [primary, primary.withOpacity(0.7)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
-        IconButton(
-          icon: const Icon(Icons.settings_outlined),
-          tooltip: '设置',
-          onPressed: () => Navigator.of(context).pushNamed('/settings'),
+        child: Row(
+          children: [
+            CoverImage(
+              url: item.coverUrl,
+              title: item.title,
+              width: 84,
+              height: 112,
+              radius: 10,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '继续收听',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    item.lastPositionMs > 0
+                        ? '已听 ${formatDuration(item.lastPositionMs)}'
+                        : '还没开始听',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: Colors.white30,
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            InkWell(
+              onTap: onPlay,
+              customBorder: const CircleBorder(),
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.play_arrow_rounded,
+                    size: 32, color: primary),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 6),
+      ),
+    );
+  }
+}
+
+class _SegmentBar extends StatelessWidget {
+  final String value;
+  final int listeningCount;
+  final int finishedCount;
+  final ValueChanged<String> onChanged;
+
+  const _SegmentBar({
+    required this.value,
+    required this.listeningCount,
+    required this.finishedCount,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _seg(context, 'listening', '在听 ($listeningCount)'),
+        const SizedBox(width: 8),
+        _seg(context, 'finished', '听完 ($finishedCount)'),
       ],
     );
   }
 
-  // ------------------------------------------------------------ 源组 / 源列表
+  Widget _seg(BuildContext context, String key, String label) {
+    final selected = value == key;
+    final primary = Theme.of(context).colorScheme.primary;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      selectedColor: primary.withOpacity(0.16),
+      labelStyle: TextStyle(
+        color: selected
+            ? primary
+            : Theme.of(context).textTheme.bodyMedium?.color,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+      ),
+      onSelected: (_) => onChanged(key),
+    );
+  }
+}
 
-  /// 分组横条（瘦版）：整条主题主色淡底 + 主色组名居中，
-  /// 点一下展开这个分组的源卡片，再点一下收起。默认展开第一个分组。
-  /// 颜色跟主题走：底用 primarySoft、字用 primary，深色主题下也是深底亮字。
-  Widget _groupBar(BuildContext context, String name, int count, bool open,
-      VoidCallback onTap) {
-    final bg = context.palette.primarySoft;
-    final fg = Theme.of(context).colorScheme.primary;
+/// 书架排序 5 档：最近阅读 / 最新更新 / 书名拼音 / 手动 / 最近阅读或更新。
+class _SortMenu extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _SortMenu({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    const labels = <String, String>{
+      'recent': '最近阅读',
+      'updated': '最新更新',
+      'name': '书名拼音',
+      'manual': '手动',
+      'recentOrUpdated': '最近阅读或更新',
+    };
+    return PopupMenuButton<String>(
+      onSelected: onChanged,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            labels[value] ?? '最近阅读',
+            style: TextStyle(fontSize: 13, color: context.subtleColor),
+          ),
+          const SizedBox(width: 2),
+          Icon(Icons.arrow_drop_down, size: 18, color: context.subtleColor),
+        ],
+      ),
+      itemBuilder: (_) => labels.entries
+          .map((e) => PopupMenuItem<String>(
+                value: e.key,
+                child: Text(e.value),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _BookRow extends StatelessWidget {
+  final MediaItem item;
+  final VoidCallback onTap;
+  final VoidCallback onHide;
+
+  const _BookRow({
+    required this.item,
+    required this.onTap,
+    required this.onHide,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 6, 16, 2),
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(8),
-        ),
+      onLongPress: () async {
+        final hide = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(item.title),
+            content: const Text('要隐藏这本书吗？隐藏后不在首页显示，可在收藏页菜单里查看已隐藏的书。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('隐藏'),
+              ),
+            ],
+          ),
+        );
+        if (hide == true) onHide();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
-            const SizedBox(width: 28),
-            Expanded(
-              child: Text(name,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: fg)),
+            CoverImage(
+              url: item.coverUrl,
+              title: item.title,
+              width: 56,
+              height: 76,
+              radius: 8,
             ),
-            Text('$count 个',
-                style: TextStyle(fontSize: 11, color: fg)),
-            const SizedBox(width: 2),
-            Icon(
-                open
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                size: 20,
-                color: fg),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    [
+                      if (author.isNotEmpty) author,
+                      if (sourceName.isNotEmpty) sourceName,
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: context.subtleColor),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    item.isFinished
+                        ? '已听完'
+                        : (item.lastPositionMs > 0
+                            ? '听到 ${formatDuration(item.lastPositionMs)}'
+                            : '未收听'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 20, color: context.subtleColor),
           ],
         ),
       ),
     );
   }
+}
 
-  /// 源卡片：源名（加粗，可换两行，完整显示不截断）+ 登录标记 + 介绍，两行省略
-  Widget _sourceCard(PluginSource s) {
+class _SourceCard extends ConsumerWidget {
+  final PluginSource source;
+
+  const _SourceCard({required this.source});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(activeHomeSourceProvider);
+    final selected = active?.id == source.id;
     final primary = Theme.of(context).colorScheme.primary;
-    final hasLogin = _loginFlags[s.id] ?? false;
+    final desc = source.description ?? '';
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      // 点源卡片 = 切源 + 进该源页（发现页）。卡片上没有假放大镜。
       onTap: () {
-        setHomeSource(ref, s.id);
+        setHomeSource(ref, source.id);
         ref.read(shellTabProvider.notifier).state = 1;
       },
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: context.palette.outline),
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? primary : context.palette.outline,
+            width: selected ? 1.5 : 1,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
+                SourceAvatar(name: source.name, size: 32),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: Text(s.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w700)),
-                ),
-                if (hasLogin) ...[
-                  const SizedBox(width: 4),
-                  Text('登录',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: primary)),
-                ],
-                if (hasLogin) ...[
-                  const SizedBox(width: 4),
-                  Icon(Icons.lightbulb_outline,
-                      size: 14, color: primary),
-                ],
-                const SizedBox(width: 2),
-                Icon(Icons.search, size: 14, color: context.subtleColor),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              s.description.isEmpty
-                  ? (s.isAudio ? '听书源' : '视频源')
-                  : s.description,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 11, height: 1.4, color: context.subtleColor),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ------------------------------------------------------------ 推荐内容
-
-  List<Widget> _feedSlivers(
-      BuildContext context, WidgetRef ref, PluginSource? source) {
-    if (source == null) {
-      if (ref.watch(sourceListProvider).isLoading) {
-        return [
-          SliverToBoxAdapter(child: _feedLoading(context, '正在读取已安装的源…')),
-        ];
-      }
-      return const [];
-    }
-
-    final async = ref.watch(homeFeedProvider(source.id));
-
-    return [
-      const SliverToBoxAdapter(child: SizedBox(height: 10)),
-      ...async.when(
-        data: (sections) {
-          final usable = sections.where((s) => s.books.isNotEmpty).toList();
-          if (usable.isEmpty) {
-            return [SliverToBoxAdapter(child: _feedEmpty(context, ref, source))];
-          }
-          final out = <Widget>[];
-          for (final sec in usable) {
-            out.add(SliverToBoxAdapter(
-              child: _sectionHeader(context, ref, source, sec),
-            ));
-            out.add(SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              sliver: SliverGrid(
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 0.55,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (ctx, i) => _BookCard(book: sec.books[i], source: source),
-                  childCount: sec.books.length,
-                ),
-              ),
-            ));
-          }
-          return out;
-        },
-        loading: () => [
-          SliverToBoxAdapter(
-              child: _feedLoading(context, '正在加载「${source.name}」的推荐…')),
-        ],
-        error: (e, _) => [
-          SliverToBoxAdapter(child: _feedError(context, ref, source, e)),
-        ],
-      ),
-    ];
-  }
-
-  Widget _sectionHeader(
-      BuildContext context, WidgetRef ref, PluginSource source, FeedSection sec) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 6, 0),
-      child: Row(
-        children: [
-          _bar(context),
-          const SizedBox(width: 8),
-          Text(sec.title,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            color: context.subtleColor,
-            tooltip: '换一批',
-            onPressed: () => ref.invalidate(homeFeedProvider(source.id)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bar(BuildContext context) => Container(
-        width: 3,
-        height: 15,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary,
-          borderRadius: BorderRadius.circular(2),
-        ),
-      );
-
-  Widget _feedLoading(BuildContext context, String title) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(title, style: Theme.of(context).textTheme.bodySmall),
-        ),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: 6,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 10,
-              childAspectRatio: 0.55,
-            ),
-            itemBuilder: (_, __) => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: context.palette.surfaceAlt,
-                      borderRadius: BorderRadius.circular(10),
+                  child: Text(
+                    source.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  height: 10,
-                  width: 70,
-                  decoration: BoxDecoration(
-                    color: context.palette.surfaceAlt,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
               ],
             ),
-          ),
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  /// 推荐加载失败：只显示人话提示和重试，不把英文报错原文甩给用户
-  Widget _feedError(
-      BuildContext context, WidgetRef ref, PluginSource source, Object e) {
-    final msg = '$e';
-    final noMethod = msg.contains('未实现') || msg.contains('METHOD_NOT_FOUND');
-    if (noMethod) return _feedEmpty(context, ref, source);
-
-    final hint = (msg.contains('403') || msg.toLowerCase().contains('ua'))
-        ? '可能被源站限制了，去「UA 设置」换一条 UA 再试。'
-        : '有些源的网络较慢，可以稍后重试。';
-
-    return _Notice(
-      icon: Icons.cloud_off_outlined,
-      title: '推荐加载失败',
-      message: '这个源的推荐暂时打不开，可以重试或直接搜索。',
-      hint: hint,
-      actions: [
-        OutlinedButton(
-          onPressed: () => ref.invalidate(homeFeedProvider(source.id)),
-          child: const Text('重试'),
-        ),
-        TextButton(
-          onPressed: () => _openSearch(context, source),
-          child: const Text('直接搜索'),
-        ),
-      ],
-    );
-  }
-
-  /// 只有搜索能力的源：不摆「暂时没有推荐」大空白卡片，
-  /// 改成一行紧凑的搜索入口（「这个源只提供搜索」+「去搜索」按钮）。
-  /// 推荐按源实际能力走：推荐 → 分类（点源卡片进内容层看分类）→ 搜索入口。
-  Widget _feedEmpty(BuildContext context, WidgetRef ref, PluginSource source) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: context.palette.outline),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search_rounded,
-                size: 18, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text('这个源只提供搜索',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13)),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton(
-              onPressed: () => _openSearch(context, source),
-              child: const Text('去搜索'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _noSource(BuildContext context, WidgetRef ref) {
-    return _Notice(
-      icon: Icons.extension_outlined,
-      title: '还没有可用的源',
-      message: '导入一个插件源，首页会显示它配置的推荐内容。',
-      hint: '听书、视频都可以用插件源在线播放。',
-      actions: [
-        ElevatedButton(
-          onPressed: () async {
-            await Navigator.of(context).pushNamed('/sources');
-            ref.invalidate(sourceListProvider);
-          },
-          child: const Text('导入源'),
-        ),
-      ],
-    );
-  }
-
-  // ------------------------------------------------------------ 动作
-
-  void _openSearch(BuildContext context, PluginSource? source) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => SourceSearchPage(
-        type: source?.type ?? AppConstants.typeAudio,
-        initialSourceId: source?.id,
-      ),
-    ));
-  }
-
-  Future<void> _refresh(WidgetRef ref) async {
-    ref.invalidate(sourceListProvider);
-    final s = ref.read(activeHomeSourceProvider);
-    if (s == null) return;
-    ref.invalidate(homeFeedProvider(s.id));
-    try {
-      await ref.read(homeFeedProvider(s.id).future);
-    } catch (_) {
-      // 错误交给页面展示
-    }
-  }
-}
-
-// ---------------------------------------------------------------- 推荐卡片
-
-class _BookCard extends StatelessWidget {
-  final FeedBook book;
-  final PluginSource source;
-
-  const _BookCard({required this.book, required this.source});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => SourceBookPage(
-          sourceId: source.id,
-          bookUrl: book.url,
-          title: book.title,
-          coverUrl: book.cover.isEmpty ? null : book.cover,
-          author: book.author,
-          intro: book.intro,
-        ),
-      )),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(child: _cover(context)),
-          const SizedBox(height: 7),
-          Text(
-            book.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.25,
-              fontWeight: FontWeight.w500,
-              color: Theme.of(context).textTheme.bodyMedium?.color,
-            ),
-          ),
-          if (book.author.isNotEmpty) ...[
-            const SizedBox(height: 3),
-            Text(
-              book.author,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10.5, color: context.subtleColor),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _cover(BuildContext context) {
-    final radius = BorderRadius.circular(10);
-    final placeholder = Container(
-      decoration: BoxDecoration(
-        color: context.palette.surfaceAlt,
-        borderRadius: radius,
-      ),
-      alignment: Alignment.center,
-      child: Icon(
-        source.isAudio ? Icons.headphones : Icons.movie_outlined,
-        size: 22,
-        color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
-      ),
-    );
-
-    if (book.cover.isEmpty || !book.cover.startsWith('http')) {
-      return placeholder;
-    }
-    return ClipRRect(
-      borderRadius: radius,
-      child: Image.network(
-        book.cover,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        cacheWidth: 240,
-        cacheHeight: 320,
-        filterQuality: FilterQuality.low,
-        errorBuilder: (_, __, ___) => placeholder,
-        loadingBuilder: (ctx, child, progress) =>
-            progress == null ? child : placeholder,
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------- 空/错误提示
-
-class _Notice extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String message;
-  final String? hint;
-  final List<Widget> actions;
-
-  const _Notice({
-    required this.icon,
-    required this.title,
-    required this.message,
-    this.hint,
-    this.actions = const [],
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 22),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: context.palette.outline),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 30, color: context.subtleColor),
-            const SizedBox(height: 12),
-            Text(title,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
-            Text(message,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(height: 1.5)),
-            if (hint != null) ...[
-              const SizedBox(height: 4),
-              Text(hint!,
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      height: 1.5,
-                      color: context.subtleColor.withOpacity(0.85))),
-            ],
-            if (actions.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Wrap(spacing: 10, runSpacing: 8, children: actions),
-            ],
+            Text(
+              source.isAudio ? '听书源' : '视频源',
+              style: TextStyle(fontSize: 12, color: context.subtleColor),
+            ),
+            if (desc.isNotEmpty)
+              Text(
+                desc,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: context.subtleColor),
+              ),
           ],
         ),
       ),

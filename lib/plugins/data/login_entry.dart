@@ -8,13 +8,15 @@
 ///            "cookieUrl": "https://example.com" }
 /// "loginUrl": "https://example.com/login"
 /// ```
+/// JAR 源没有 manifest，登录入口走引擎的 ILogin（见 TingShuBridge.loginInfo），
+/// 不走这里。
 class LoginEntry {
   final String url;
 
-  /// 登录成功后 WebView 会跳到的地址（用于自动判定登录完成）
+  /// 登录成功后 WebView 会跳到的地址（用于自动判定登录完成）。
   final String successUrl;
 
-  /// 从这个地址读 Cookie（默认取 [url] 的 origin）
+  /// 从这个地址读 Cookie（默认取 [url] 的 origin）。
   final String cookieUrl;
 
   const LoginEntry({
@@ -25,7 +27,7 @@ class LoginEntry {
 
   bool get valid => url.isNotEmpty;
 
-  /// 读 Cookie 用的地址
+  /// 读 Cookie 用的地址。
   String get readCookieUrl {
     if (cookieUrl.isNotEmpty) return cookieUrl;
     final u = Uri.tryParse(url);
@@ -34,7 +36,13 @@ class LoginEntry {
   }
 
   static LoginEntry? parse(Map<String, dynamic> manifest) {
-    for (final k in const ['login', 'loginUrl', 'login_url', 'auth', 'oauth']) {
+    for (final k in const <String>[
+      'login',
+      'loginUrl',
+      'login_url',
+      'auth',
+      'oauth',
+    ]) {
       final v = manifest[k];
       if (v == null) continue;
       if (v is String && v.trim().isNotEmpty) {

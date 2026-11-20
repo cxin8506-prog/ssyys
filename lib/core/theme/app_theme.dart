@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// 主题扩展：提供语义化的次级颜色，避免各页面硬编码深色/浅色。
+/// 主题扩展：语义化次级颜色，避免各页面硬编码深色/浅色。
 @immutable
 class AppPalette extends ThemeExtension<AppPalette> {
   /// 次级背景（输入框、进度条底、标签底）
@@ -48,7 +48,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
   }
 }
 
-/// 一套配色方案（同时给出深色与浅色的具体色值）
+/// 一套配色方案（同时给出深色与浅色的具体色值）。
 class AppScheme {
   final String name;
   final Color primary;
@@ -89,12 +89,13 @@ extension AppThemeContext on BuildContext {
 class AppTheme {
   AppTheme._();
 
-  /// 内置配色（设置页可切换）：暖阳橙（默认）/ 海蓝 / 青竹绿 / 樱花粉 / 墨夜
-  /// 墨夜是独立一套，浅色值也全是黑，一直保持黑色
+  /// 内置配色：暖阳橙（默认）/ 海蓝 / 青竹绿 / 樱花粉 / 墨夜。
+  /// 墨夜已禁用（不开放选择）：只保留定义，供旧存量值迁移回落时
+  /// 强制走深色；主题选择页不提供墨夜入口。
   static const List<AppScheme> schemes = [
     AppScheme(
       name: '暖阳橙',
-      primary: Color(0xFFF08C3A),
+      primary: Color(0xFFFF6B4A),
       accent: Color(0xFFFFB877),
       darkBg: Color(0xFF14100C),
       darkSurface: Color(0xFF1F1913),
@@ -143,11 +144,18 @@ class AppTheme {
       darkBg: Color(0xFF000000),
       darkSurface: Color(0xFF0B0B0B),
       darkSurfaceAlt: Color(0xFF161616),
+      // 注意：墨夜的浅色值也是黑的（一直保持黑色）。配色卡上的文字
+      // 颜色必须按卡片实际底色选，不能按明暗模式选，否则浅色模式下
+      // 深字压黑底看不见（审计 A 补充第 1 项）。主题选择页里墨夜卡
+      // 已禁用，展示时强制用浅色字。
       lightBg: Color(0xFF000000),
       lightSurface: Color(0xFF0B0B0B),
       lightSurfaceAlt: Color(0xFF161616),
     ),
   ];
+
+  /// 开放选择的配色数量（0..3）。下标 4（墨夜）不开放。
+  static const int openSchemeCount = 4;
 
   /// 墨夜主题的下标（独立一套，一直保持黑色）
   static const int nightSchemeIndex = 4;
@@ -157,7 +165,7 @@ class AppTheme {
     return schemes[index];
   }
 
-  /// 兼容旧代码引用的品牌色（默认青玉）
+  /// 兼容旧代码引用的品牌色
   static Color get primary => schemes.first.primary;
   static Color get primaryDark => schemes.first.primary;
   static Color get accent => schemes.first.accent;
@@ -174,11 +182,16 @@ class AppTheme {
   static const Color lightText = Color(0xFF2A2724);
   static const Color lightTextSub = Color(0xFF837A70);
 
-  static ThemeData dark([int schemeIndex = 0]) {
+  static ThemeData dark([int schemeIndex = 0, bool pureBlack = false]) {
     final s = schemeAt(schemeIndex);
+    // 纯黑（Voice pureBlack）：只刷背景系（背景/卡片/最低层），
+    // 容器描边和主色点缀留着，别全刷黑导致卡片分不清。
+    final bg = pureBlack ? const Color(0xFF000000) : s.darkBg;
+    final surface = pureBlack ? const Color(0xFF0B0B0B) : s.darkSurface;
+    final surfaceAlt = pureBlack ? const Color(0xFF161616) : s.darkSurfaceAlt;
     final palette = AppPalette(
-      surfaceAlt: s.darkSurfaceAlt,
-      outline: Color.alphaBlend(s.primary.withOpacity(0.14), s.darkSurface),
+      surfaceAlt: surfaceAlt,
+      outline: Color.alphaBlend(s.primary.withOpacity(0.14), surface),
       subtle: const Color(0xFF9AA8A1),
       primarySoft: s.primary.withOpacity(0.16),
     );
@@ -186,8 +199,8 @@ class AppTheme {
       brightness: Brightness.dark,
       primary: s.primary,
       accent: s.accent,
-      bg: s.darkBg,
-      surface: s.darkSurface,
+      bg: bg,
+      surface: surface,
       text: darkText,
       sub: darkTextSub,
       palette: palette,
@@ -195,18 +208,20 @@ class AppTheme {
   }
 
   static ThemeData light([int schemeIndex = 0]) {
-    // 墨夜是独立一套，一直保持黑色：浅色主题也直接用深色
-    if (schemeIndex == nightSchemeIndex) return dark(schemeIndex);
     final s = schemeAt(schemeIndex);
+    // 墨夜强制走深色：浅色值也是黑的，浅色主题下整页会全黑。
+    if (schemeIndex == nightSchemeIndex) return dark(schemeIndex);
+    // 浅色主题下主色按 HSL 亮度压暗，否则按钮上的白字对比度不够。
+    final primary = _darkenForLight(s.primary);
     final palette = AppPalette(
       surfaceAlt: s.lightSurfaceAlt,
-      outline: const Color(0xFFEDE3D8),
+      outline: Color.alphaBlend(primary.withOpacity(0.16), s.lightSurface),
       subtle: lightTextSub,
-      primarySoft: s.primary.withOpacity(0.14),
+      primarySoft: primary.withOpacity(0.12),
     );
     return _build(
       brightness: Brightness.light,
-      primary: _darkenForLight(s.primary),
+      primary: primary,
       accent: s.accent,
       bg: s.lightBg,
       surface: s.lightSurface,
@@ -216,10 +231,10 @@ class AppTheme {
     );
   }
 
-  /// 浅色主题下主色需要压暗一点，否则按钮上的白字对比度不足
   static Color _darkenForLight(Color c) {
     final hsl = HSLColor.fromColor(c);
-    return hsl.withLightness((hsl.lightness * 0.74).clamp(0.30, 0.56)).toColor();
+    final l = (hsl.lightness * 0.74).clamp(0.0, 1.0);
+    return hsl.withLightness(l).toColor();
   }
 
   static ThemeData _build({
@@ -233,143 +248,124 @@ class AppTheme {
     required AppPalette palette,
   }) {
     final isDark = brightness == Brightness.dark;
-    final base = ThemeData(
-      useMaterial3: false,
+    final colorScheme = ColorScheme(
       brightness: brightness,
-      primaryColor: primary,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: primary,
-        brightness: brightness,
-      ).copyWith(
-        primary: primary,
-        secondary: accent,
-        surface: surface,
-        background: bg,
-        error: isDark ? const Color(0xFFFF8A80) : const Color(0xFFD93F35),
-      ),
-      scaffoldBackgroundColor: bg,
-      cardColor: surface,
-      canvasColor: bg,
-      dividerColor: palette.outline,
-      splashFactory: InkRipple.splashFactory,
+      primary: primary,
+      onPrimary: Colors.white,
+      secondary: accent,
+      onSecondary: isDark ? Colors.black : Colors.white,
+      error: const Color(0xFFD32F2F),
+      onError: Colors.white,
+      background: bg,
+      onBackground: text,
+      surface: surface,
+      onSurface: text,
     );
-
-    return base.copyWith(
+    return ThemeData(
+      brightness: brightness,
+      colorScheme: colorScheme,
+      primaryColor: primary,
+      scaffoldBackgroundColor: bg,
+      canvasColor: bg,
+      cardColor: surface,
+      dividerColor: palette.outline,
       extensions: <ThemeExtension<dynamic>>[palette],
       appBarTheme: AppBarTheme(
         backgroundColor: primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: false,
         iconTheme: const IconThemeData(color: Colors.white),
-        actionsIconTheme: const IconThemeData(color: Colors.white),
-        titleTextStyle: const TextStyle(
-            color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
+        titleTextStyle: TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+        ),
+        toolbarTextStyle: TextStyle(color: Colors.white, fontSize: 15),
       ),
+      // 底栏：贴底标准栏，图标与文字都跟主题走，不写死颜色。
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: surface,
         selectedItemColor: primary,
         unselectedItemColor: sub,
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
         selectedLabelStyle:
-            const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        unselectedLabelStyle: const TextStyle(fontSize: 11),
+            const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: const TextStyle(fontSize: 10),
+        type: BottomNavigationBarType.fixed,
+        elevation: 8,
       ),
-      iconTheme: IconThemeData(color: text),
-      textTheme: _textTheme(text, sub),
-      cardTheme: CardTheme(
-        color: surface,
-        elevation: 0,
-        margin: EdgeInsets.zero,
+      textTheme: TextTheme(
+        titleLarge: TextStyle(color: text, fontSize: 20),
+        titleMedium: TextStyle(color: text, fontSize: 16),
+        titleSmall: TextStyle(color: text, fontSize: 14),
+        bodyLarge: TextStyle(color: text, fontSize: 15),
+        bodyMedium: TextStyle(color: text, fontSize: 14),
+        bodySmall: TextStyle(color: sub, fontSize: 12),
+        labelLarge: TextStyle(color: text, fontSize: 13),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) return Colors.white;
+          return isDark ? const Color(0xFF8A8A8A) : const Color(0xFFBDBDBD);
+        }),
+        trackColor: MaterialStateProperty.resolveWith((states) {
+          if (states.contains(MaterialState.selected)) return primary;
+          return isDark ? const Color(0xFF3A3A3A) : const Color(0xFFE0E0E0);
+        }),
+      ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: primary,
+        inactiveTrackColor: palette.surfaceAlt,
+        thumbColor: primary,
+      ),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: primary),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: primary,
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: palette.surfaceAlt,
+        selectedColor: primary.withOpacity(0.16),
+        labelStyle: TextStyle(color: text, fontSize: 13),
+        secondaryLabelStyle: TextStyle(color: text, fontSize: 13),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: palette.outline, width: 1),
         ),
       ),
-      listTileTheme: ListTileThemeData(
-        iconColor: sub,
-        textColor: text,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          primary: primary,
-          onPrimary: isDark ? Colors.black87 : Colors.white,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          textStyle:
-              const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      tabBarTheme: TabBarTheme(
+        labelColor: primary,
+        unselectedLabelColor: sub,
+        indicatorSize: TabBarIndicatorSize.label,
+        indicator: UnderlineTabIndicator(
+          borderSide: BorderSide(color: primary, width: 3),
         ),
       ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          primary: text,
-          side: BorderSide(color: palette.outline),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          textStyle:
-              const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      dialogTheme: DialogTheme(
+        backgroundColor: surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
         ),
       ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(primary: primary),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: isDark ? const Color(0xFF2B2B2B) : const Color(0xFF323232),
+        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: palette.surfaceAlt,
-        hintStyle: TextStyle(color: sub, fontSize: 14),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: palette.outline),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: palette.outline),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: primary, width: 1.4),
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: primary, width: 1.5),
         ),
       ),
-      switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith(
-            (s) => s.contains(MaterialState.selected) ? Colors.white : null),
-        trackColor: MaterialStateProperty.resolveWith(
-            (s) => s.contains(MaterialState.selected) ? primary : null),
-      ),
-      snackBarTheme: SnackBarThemeData(
-        backgroundColor: isDark ? palette.surfaceAlt : const Color(0xFF2C3230),
-        contentTextStyle: const TextStyle(color: Colors.white),
-        behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-      dialogTheme: DialogTheme(
-        backgroundColor: surface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      ),
-      dividerTheme: DividerThemeData(color: palette.outline, thickness: 1),
     );
   }
-
-  static TextTheme _textTheme(Color main, Color sub) => TextTheme(
-        headlineLarge:
-            TextStyle(color: main, fontWeight: FontWeight.bold, fontSize: 28),
-        headlineMedium:
-            TextStyle(color: main, fontWeight: FontWeight.bold, fontSize: 22),
-        titleLarge:
-            TextStyle(color: main, fontWeight: FontWeight.w700, fontSize: 18),
-        titleMedium:
-            TextStyle(color: main, fontWeight: FontWeight.w600, fontSize: 16),
-        bodyLarge: TextStyle(color: main, fontSize: 15),
-        bodyMedium: TextStyle(color: main, fontSize: 14),
-        bodySmall: TextStyle(color: sub, fontSize: 12),
-      );
 }

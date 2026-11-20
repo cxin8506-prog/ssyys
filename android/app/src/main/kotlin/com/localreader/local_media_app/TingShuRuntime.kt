@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -12,6 +13,7 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import dalvik.system.DexClassLoader
 import dalvik.system.DexFile
+import io.flutter.plugin.common.MethodChannel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -28,6 +30,14 @@ import java.util.zip.GZIPInputStream
  *   - 提供源需要的 UA / 网络抓取 / 音频嗅探
  *   - 反射加载 JAR 里的 SourceEntry，列出它包含的每个源
  *   - 把源的 search / 分类 / 详情 / 章节 / 音频地址转成统一 JSON
+ *
+ * 关键点（1.0.2/1.0.3 的教训）：
+ *   - 每个 JAR 一个 DexClassLoader（按路径缓存的 Map），重导时能单独清；
+ *     以前只缓存一个加载器，两个包来回切会互相串。
+ *   - 每个 JAR 一个 odex 子目录（名字按 JAR 路径算），重导不命中旧 odex。
+ *   - 入口类缓存 entryCache 可失效；扫描/列出失败要把原始异常带出去，
+ *     别吞成空列表，不然 Dart 侧分不清“扫不到”和“列不出”。
+ *   - JAR 拷完要设只读（Android 14+ 拒绝加载可写的 dex）。
  */
 object TingShuRuntime {
 
@@ -41,6 +51,12 @@ object TingShuRuntime {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/112.0.0.0 Safari/537.36"
 
+    /** Dart 侧解析出来的 UA（手机/电脑各一条），attach 时由引擎推过来。 */
+    fun setUserAgents(mobile: String, desktop: String) {
+        if (mobile.isNotEmpty()) mobileUA = mobile
+        if (desktop.isNotEmpty()) desktopUA = desktop
+    }
+
     private var appContext: Context? = null
 
     fun init(ctx: Context) {
@@ -51,6 +67,72 @@ object TingShuRuntime {
         appContext?.getSharedPreferences("tingshu_ext", Context.MODE_PRIVATE)
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // ------------------------------------------------------------ 播放控制（源调宿主）
+
+    /**
+     * Dart 侧播放器通道（MainActivity 在 configureFlutterEngine 里接上）。
+     * 源代码跑在 JVM 里，调 MyExt.playerControl / todayPlaybackTime 时要
+     * 经过这个通道转给 Dart 的 audioHandler；没接上就静默不做，不抛错。
+     */
+    @JvmStatic
+    var playerChannel: MethodChannel? = null
+
+    /** 源调 playerControl("play/pause/skipToNext/...")：转给 Dart 播放器 */
+    fun playerControl(action: String) {
+        val ch = playerChannel ?: return
+        mainHandler.post {
+            try {
+                ch.invokeMethod(action, null)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    /** 源调 todayPlaybackTime()：问 Dart 侧的收听统计（今日毫秒数），2 秒超时回 0 */
+    fun todayPlaybackTime(): Long {
+        val ch = playerChannel ?: return 0L
+        val latch = CountDownLatch(1)
+        var ms = 0L
+        mainHandler.post {
+            try {
+                ch.invokeMethod("todayPlaybackTime", null,
+                    object : MethodChannel.Result {
+                        override fun success(result: Any?) {
+                            ms = (result as? Number)?.toLong() ?: 0L
+                            latch.countDown()
+                        }
+
+                        override fun error(code: String, msg: String?, details: Any?) {
+                            latch.countDown()
+                        }
+
+                        override fun notImplemented() {
+                            latch.countDown()
+                        }
+                    })
+            } catch (_: Throwable) {
+                latch.countDown()
+            }
+        }
+        latch.await(2000, TimeUnit.MILLISECONDS)
+        return ms
+    }
+
+    /** 源自己的缓存目录：filesDir/tingshu_cache/<源id>/<子目录>，不存在就建 */
+    fun sourceCacheDir(sourceId: String, subDir: String): File {
+        val ctx = appContext ?: throw IllegalStateException("TingShuRuntime 未初始化")
+        val safeId = sourceId.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .ifEmpty { "default" }
+        val safeSub = subDir.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val dir = if (safeSub.isEmpty()) {
+            File(File(ctx.filesDir, "tingshu_cache"), safeId)
+        } else {
+            File(File(ctx.filesDir, "tingshu_cache/$safeId"), safeSub)
+        }
+        dir.mkdirs()
+        return dir
+    }
 
     /**
      * 读 WebView 的 Cookie：登录态、cf_clearance 都存在这里，
@@ -294,27 +376,72 @@ object TingShuRuntime {
 
     // ------------------------------------------------------------ JAR / 源
 
-    private class Loaded(val path: String, val loader: DexClassLoader)
-
-    private var loaded: Loaded? = null
+    // 每个 JAR 一个加载器（按路径缓存的 Map），重导时能单独清；
+    // 以前只缓存一个加载器，两个包来回切会互相串。
+    private val loaders = HashMap<String, DexClassLoader>()
     private val instanceCache = HashMap<String, Any>()
 
-    private fun loaderFor(path: String): DexClassLoader {
-        val cached = loaded
-        if (cached != null && cached.path == path) return cached.loader
+    /**
+     * 每个 JAR 一个 odex 子目录（名字按 JAR 路径算）。
+     * 以前所有 JAR 共用 codeCacheDir/plugin_dex + 写死的 scan.dex，
+     * 重导同一个包会拿到旧的优化 dex；现在一包一目录，互不干扰。
+     */
+    private fun odexDirFor(path: String): File {
         val ctx = appContext ?: throw IllegalStateException("TingShuRuntime 未初始化")
-        val out = File(ctx.codeCacheDir, "plugin_dex")
+        val base = File(path).name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val tag = Integer.toUnsignedString(path.hashCode(), 36)
+        val out = File(File(ctx.codeCacheDir, "plugin_dex"), "${base}_$tag")
         if (!out.exists()) out.mkdirs()
+        return out
+    }
+
+    @Synchronized
+    private fun loaderFor(path: String): DexClassLoader {
+        loaders[path]?.let { return it }
+        val out = odexDirFor(path)
         val loader = DexClassLoader(path, out.absolutePath, null, javaClass.classLoader)
-        loaded = Loaded(path, loader)
-        instanceCache.clear()
+        loaders[path] = loader
         return loader
     }
 
+    /**
+     * 清掉某个 JAR 的全部缓存：加载器、入口缓存、源实例缓存、odex 目录。
+     * 重导同一个包前必须调一次，否则同路径会命中旧加载器/旧 odex，
+     * 新包导进来还是旧的源（1.0.3 失败的怀疑点 b）。
+     */
+    @Synchronized
+    fun clearCacheFor(path: String) {
+        loaders.remove(path)
+        entryCache.remove(path)
+        val it = instanceCache.keys.iterator()
+        while (it.hasNext()) {
+            if (it.next().startsWith("$path#")) it.remove()
+        }
+        try {
+            odexDirFor(path).deleteRecursively()
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * 把 JAR 设成只读（chmod 444）。
+     * Android 14+ 拒绝加载可写的 dex/jar，拷出来的 plugin.jar 默认可写，
+     * 不设只读 DexFile.loadDex / DexClassLoader 直接抛错（1.0.3 失败的
+     * 怀疑点 a，随心听书专门做了 makeReadOnly + 专门报错）。
+     * 返回是否成功，失败也不抛错（调用方记日志继续走）。
+     */
+    fun makeReadOnly(path: String): Boolean {
+        return try {
+            val f = File(path)
+            if (!f.exists()) return false
+            f.setReadOnly()
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     private fun listClassNames(path: String): List<String> {
-        val ctx = appContext ?: return emptyList()
-        val out = File(ctx.codeCacheDir, "plugin_dex")
-        if (!out.exists()) out.mkdirs()
+        val out = odexDirFor(path)
         val dex = DexFile.loadDex(path, File(out, "scan.dex").absolutePath, 0)
         val names = ArrayList<String>()
         val e = dex.entries()
@@ -333,11 +460,17 @@ object TingShuRuntime {
 
     private val entryCache = HashMap<String, List<String>>()
 
-    /** 找 JAR 里的源入口类（含 getSources 的类） */
+    /** 找 JAR 里的源入口类（含 getSources 的类）。 */
     @Synchronized
     fun findEntryClasses(path: String): List<String> {
         entryCache[path]?.let { return it }
-        val found = scanEntryClasses(path)
+        val found = try {
+            scanEntryClasses(path)
+        } catch (t: Throwable) {
+            // dex 本身加载失败（比如文件可写被 Android 14+ 拒绝）：
+            // 别吞成空列表，带上原因抛出去，Dart 侧才能区分“扫不到”和“列不出”
+            throw RuntimeException("扫描 JAR 入口失败：${t.message ?: t}", t)
+        }
         entryCache[path] = found
         return found
     }
@@ -360,7 +493,12 @@ object TingShuRuntime {
                 }
                 if (hasStatic || hasInstance) hits.add(n)
                 if (hits.isNotEmpty() && n.endsWith("SourceEntry")) break
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                // 只有入口候选类加载失败才记日志：普通类加载失败是正常的
+                // （引用了宿主没有的类型），记了也没用，只会刷屏
+                if (n.endsWith("SourceEntry") || n.endsWith("SourceList")) {
+                    Log.w("TingShuRuntime", "入口候选类加载失败 $n: ${t.message}")
+                }
             }
         }
         return hits
@@ -377,7 +515,14 @@ object TingShuRuntime {
         } else {
             cls.getField("INSTANCE").get(null)
         }
-        val raw = m.invoke(receiver) as? List<*> ?: emptyList<Any>()
+        // getSources() 要实例化全部源对象，任何一个源的构造器抛错，
+        // 整个调用就失败——带上入口类名抛出去，别和“扫不到”混成同一句报错
+        val raw = try {
+            m.invoke(receiver) as? List<*> ?: emptyList<Any>()
+        } catch (t: Throwable) {
+            val cause = (t.cause ?: t).message ?: t.toString()
+            throw RuntimeException("调用 $entryClass.getSources() 失败：$cause", t)
+        }
         return raw.filterNotNull()
     }
 
@@ -485,6 +630,169 @@ object TingShuRuntime {
         } catch (_: Throwable) {
             true
         }
+    }
+
+    // ------------------------------------------------------------ 线路 / 音色 / 配置
+
+    /**
+     * 把当前线路/音色推给源（播放前调）。
+     * 先试源的线路方法 setLineId / setCurrentLine / setLine；
+     * 再把 "<源id>.lineId" 写进 ExternalSourcePrefs，供源自己读；
+     * 最后试 setConfig / applyConfig（传 {"lineId":..,"voiceId":..} 的 JSON）。
+     * 三种方式都没有时如实记一笔日志，不静默丢掉。
+     */
+    fun pushLine(source: Any, sourceId: String, lineId: String?, voiceId: String?) {
+        if (lineId.isNullOrEmpty() && voiceId.isNullOrEmpty()) return
+        var pushed = false
+        if (!lineId.isNullOrEmpty()) {
+            for (name in listOf("setLineId", "setCurrentLine", "setLine")) {
+                try {
+                    source.javaClass.getMethod(name, String::class.java)
+                        .invoke(source, lineId)
+                    pushed = true
+                    break
+                } catch (_: Throwable) {
+                }
+            }
+            try {
+                prefs()?.edit()?.putString("$sourceId.lineId", lineId)?.apply()
+            } catch (_: Throwable) {
+            }
+        }
+        if (!pushed) {
+            val cfg = JSONObject()
+            if (!lineId.isNullOrEmpty()) cfg.put("lineId", lineId)
+            if (!voiceId.isNullOrEmpty()) cfg.put("voiceId", voiceId)
+            for (name in listOf("setConfig", "applyConfig")) {
+                try {
+                    source.javaClass.getMethod(name, String::class.java)
+                        .invoke(source, cfg.toString())
+                    pushed = true
+                    break
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        if (!pushed) {
+            Log.i("TingShuRuntime", "源 $sourceId 没有线路接口，lineId=$lineId 未推给源")
+        }
+    }
+
+    /** 探源的线路/音色方法：lines()/lineList()/getLines()/videoLines() 等。 */
+    private fun probeList(
+        source: Any,
+        names: List<String>,
+        url: String?
+    ): List<Map<String, String>> {
+        for (name in names) {
+            val result = try {
+                val m = source.javaClass.methods.firstOrNull {
+                    it.name == name && (it.parameterCount == 0 ||
+                        (it.parameterCount == 1 && it.parameterTypes[0] == String::class.java))
+                } ?: continue
+                if (m.parameterCount == 0) m.invoke(source) else m.invoke(source, url ?: "")
+            } catch (_: Throwable) {
+                continue
+            } ?: continue
+            val items = when (result) {
+                is List<*> -> result.filterNotNull()
+                is Array<*> -> result.filterNotNull()
+                else -> continue
+            }
+            val out = ArrayList<Map<String, String>>()
+            for (e in items) {
+                out.add(normalizeLineItem(e))
+            }
+            if (out.isNotEmpty()) return out
+            // 方法存在但返回空列表：这是源的真实答案（没有线路/音色），
+            // 别再试下一个别名，直接返回空。
+            return emptyList()
+        }
+        return emptyList()
+    }
+
+    /** 线路/音色条目归一化：String / Map / Pair / 有 getId/getName 的对象。 */
+    private fun normalizeLineItem(e: Any): Map<String, String> {
+        when (e) {
+            is String -> return mapOf("id" to e, "name" to e)
+            is Map<*, *> -> {
+                val id = (e["id"] ?: e["key"] ?: e["value"] ?: "").toString()
+                val name = (e["name"] ?: e["label"] ?: e["title"] ?: id).toString()
+                return mapOf("id" to id, "name" to name)
+            }
+            is Pair<*, *> -> {
+                val id = e.first?.toString() ?: ""
+                val name = e.second?.toString() ?: id
+                return mapOf("id" to id, "name" to name)
+            }
+        }
+        val id = try {
+            e.javaClass.getMethod("getId").invoke(e)?.toString() ?: ""
+        } catch (_: Throwable) {
+            ""
+        }
+        val name = try {
+            e.javaClass.getMethod("getName").invoke(e)?.toString() ?: ""
+        } catch (_: Throwable) {
+            ""
+        }
+        val text = if (name.isNotEmpty()) name else e.toString()
+        return mapOf("id" to if (id.isNotEmpty()) id else text, "name" to text)
+    }
+
+    /** 源声明的配置项（ConfigurableSource），或 getConfig() 返回的 Map/List。 */
+    private fun probeConfig(source: Any): JSONObject {
+        try {
+            val m = source.javaClass.getMethod("getCustomConfigItems")
+            @Suppress("UNCHECKED_CAST")
+            val items = m.invoke(source) as? List<*> ?: emptyList<Any>()
+            val arr = JSONArray()
+            for (item in items) {
+                if (item == null) continue
+                fun str(name: String): String = try {
+                    item.javaClass.getMethod(name).invoke(item)?.toString() ?: ""
+                } catch (_: Throwable) {
+                    ""
+                }
+                val options = try {
+                    val raw = item.javaClass.getMethod("getOptions").invoke(item)
+                    val o = JSONArray()
+                    if (raw is List<*>) {
+                        for (v in raw) if (v != null) o.put(v.toString())
+                    }
+                    o
+                } catch (_: Throwable) {
+                    JSONArray()
+                }
+                arr.put(
+                    JSONObject()
+                        .put("type", str("getType"))
+                        .put("key", str("getKey"))
+                        .put("title", str("getTitle"))
+                        .put("defaultValue", str("getDefaultValue"))
+                        .put("options", options)
+                        .put("hint", str("getHint"))
+                )
+            }
+            return JSONObject().put("fields", arr)
+        } catch (_: Throwable) {
+        }
+        try {
+            val m = source.javaClass.getMethod("getConfig")
+            val raw = m.invoke(source)
+            return when (raw) {
+                is Map<*, *> -> JSONObject(raw as Map<*, *>)
+                is List<*> -> JSONObject().put("fields", JSONArray(raw))
+                is String -> try {
+                    JSONObject(raw)
+                } catch (_: Throwable) {
+                    JSONObject().put("fields", JSONArray())
+                }
+                else -> JSONObject().put("fields", JSONArray())
+            }
+        } catch (_: Throwable) {
+        }
+        return JSONObject().put("fields", JSONArray())
     }
 
     // ------------------------------------------------------------ 调用
@@ -630,6 +938,18 @@ object TingShuRuntime {
             }
             "audio" -> {
                 val url = params["url"] as? String ?: params["chapterUrl"] as? String ?: ""
+                // 先把线路/音色推给源，再解析地址（以前只传 URL 是断层）。
+                val sourceId = try {
+                    s.javaClass.getMethod("getSourceId").invoke(s) as? String ?: ""
+                } catch (_: Throwable) {
+                    ""
+                }
+                pushLine(
+                    s,
+                    sourceId,
+                    params["lineId"] as? String,
+                    params["voiceId"] as? String
+                )
                 val em = s.javaClass.getMethod("getAudioUrlExtractor")
                 val extractor = em.invoke(s)
                     ?: throw RuntimeException("源没有返回 AudioUrlExtractor")
@@ -656,6 +976,33 @@ object TingShuRuntime {
                 }
                 out.toString()
             }
+            "lines" -> {
+                val url = params["url"] as? String ?: ""
+                val items = probeList(
+                    s,
+                    listOf("lines", "lineList", "getLines", "videoLines"),
+                    url
+                )
+                val arr = JSONArray()
+                for (item in items) {
+                    arr.put(JSONObject(item as Map<*, *>))
+                }
+                JSONObject().put("lines", arr).toString()
+            }
+            "voices" -> {
+                val url = params["url"] as? String ?: ""
+                val items = probeList(
+                    s,
+                    listOf("voices", "voiceList", "getVoices", "tones"),
+                    url
+                )
+                val arr = JSONArray()
+                for (item in items) {
+                    arr.put(JSONObject(item as Map<*, *>))
+                }
+                JSONObject().put("voices", arr).toString()
+            }
+            "config" -> probeConfig(s).toString()
             else -> throw RuntimeException("不支持的调用：$method")
         }
     }

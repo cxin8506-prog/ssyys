@@ -3,16 +3,69 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
-import '../../core/di/providers.dart';
-import '../../core/theme/app_theme.dart';
+import '../../core/database/app_database.dart';
+import '../../core/log/app_logger.dart';
 import '../../core/utils/path_utils.dart';
 import '../backup/backup_service.dart';
+import 'progress_sync.dart';
 import 'webdav_client.dart';
-import '../../shared/widgets/common.dart';
 
-/// 坚果云同步：WebDAV 上存 zip 备份，换机后下载恢复
+/// 启动时检查云端备份（供界面组 main.dart 调用）：
+/// 同步关着、没填配置、云端没有备份 → 返回 null；
+/// 云端最新备份比本地 lastBackup 新超过 1 分钟 → 返回那份备份的信息，界面弹框问。
+Future<Map<String, dynamic>?> checkCloudBackup() async {
+  final prefs = await SharedPreferences.getInstance();
+  if (!(prefs.getBool(AppConstants.keySyncEnabled) ?? false)) return null;
+  final url = prefs.getString(AppConstants.keySyncUrl) ?? '';
+  final user = prefs.getString(AppConstants.keySyncUser) ?? '';
+  final pass = prefs.getString(AppConstants.keySyncPass) ?? '';
+  if (url.isEmpty || user.isEmpty || pass.isEmpty) return null;
+
+  final client = WebDavClient(baseUrl: url, username: user, password: pass);
+  try {
+    final list = await client.listBackups();
+    if (list.isEmpty) return null;
+    final latest = list.first;
+    // 优先用 PROPFIND 给的最后修改时间；没有时从文件名里的时间戳取
+    var lastModify = latest.lastModified?.millisecondsSinceEpoch ?? 0;
+    if (lastModify == 0) {
+      final m = RegExp(r'(\d{10,})').firstMatch(latest.name);
+      if (m != null) {
+        final n = int.tryParse(m.group(1)!) ?? 0;
+        if (n > 0) lastModify = n;
+      }
+    }
+    if (lastModify == 0) return null;
+    final localLast = prefs.getInt(AppConstants.keyLastBackup) ?? 0;
+    if (lastModify - localLast > 60 * 1000) {
+      return {
+        'name': latest.displayName,
+        'lastModify': lastModify,
+        'size': latest.size,
+      };
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 用户在“云端有新备份”弹框上点“取消”后调用：把本地 lastBackup 置为二者较大值，
+/// 下次不再问这一份。
+Future<void> markCloudBackupSeen(Map<String, dynamic> info) async {
+  final prefs = await SharedPreferences.getInstance();
+  final cloud = (info['lastModify'] as num?)?.toInt() ?? 0;
+  final local = prefs.getInt(AppConstants.keyLastBackup) ?? 0;
+  await prefs.setInt(AppConstants.keyLastBackup, cloud > local ? cloud : local);
+}
+
+/// 坚果云 WebDAV 同步页：上传整包备份、列云端备份、从云端恢复、保留份数、进度同步。
+///
+/// 进度同步与整包备份是两条线：进度每本书一个小文件（progress/ 下的 .json），
+/// 由 ProgressSync 处理；整包备份是下面的“备份到云端”与“从云端恢复”。
 class SyncPage extends ConsumerStatefulWidget {
   const SyncPage({super.key});
 
@@ -24,21 +77,23 @@ class _SyncPageState extends ConsumerState<SyncPage> {
   final _urlCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  final _backup = BackupService();
+  bool _obscurePass = true;
 
-  bool _obscure = true;
+  bool _syncEnabled = false;
+  int _keepCount = 0;
+  bool _progressSyncEnabled = false;
+  bool _testing = false;
   bool _busy = false;
+  bool _syncingProgress = false;
   String _status = '';
-  List<WebDavItem> _items = [];
+  DateTime? _lastSyncAt;
+  List<WebDavItem> _cloudBackups = const [];
+  String _cloudError = '';
 
   @override
   void initState() {
     super.initState();
-    final prefs = ref.read(sharedPrefsProvider);
-    _urlCtrl.text =
-        prefs.getString(AppConstants.keySyncUrl) ?? AppConstants.defaultSyncUrl;
-    _userCtrl.text = prefs.getString(AppConstants.keySyncUser) ?? '';
-    _passCtrl.text = prefs.getString(AppConstants.keySyncPass) ?? '';
+    _loadConfig();
   }
 
   @override
@@ -49,343 +104,128 @@ class _SyncPageState extends ConsumerState<SyncPage> {
     super.dispose();
   }
 
+  Future<void> _loadConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _urlCtrl.text = prefs.getString(AppConstants.keySyncUrl) ??
+          AppConstants.defaultSyncUrl;
+      _userCtrl.text = prefs.getString(AppConstants.keySyncUser) ?? '';
+      _passCtrl.text = prefs.getString(AppConstants.keySyncPass) ?? '';
+      _syncEnabled =
+          prefs.getBool(AppConstants.keySyncEnabled) ?? false;
+      _keepCount =
+          prefs.getInt(AppConstants.keyBackupKeepCount) ??
+              AppConstants.defaultKeepCount;
+      _progressSyncEnabled =
+          prefs.getBool(AppConstants.keySyncProgress) ??
+              AppConstants.defaultSyncProgress;
+      final lastSyncMs = prefs.getInt(AppConstants.keyLastSyncTime);
+      if (lastSyncMs != null && lastSyncMs > 0) {
+        _lastSyncAt = DateTime.fromMillisecondsSinceEpoch(lastSyncMs);
+      }
+    });
+    if (_syncEnabled) _refreshCloudList();
+  }
+
   WebDavClient get _client => WebDavClient(
-        baseUrl: _urlCtrl.text.trim().isEmpty
-            ? AppConstants.defaultSyncUrl
-            : _urlCtrl.text.trim(),
+        baseUrl: _urlCtrl.text.trim(),
         username: _userCtrl.text.trim(),
         password: _passCtrl.text,
       );
 
-  void _saveConfig() {
-    final prefs = ref.read(sharedPrefsProvider);
-    prefs.setString(AppConstants.keySyncUrl, _urlCtrl.text.trim());
-    prefs.setString(AppConstants.keySyncUser, _userCtrl.text.trim());
-    prefs.setString(AppConstants.keySyncPass, _passCtrl.text);
+  Future<void> _saveConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.keySyncUrl, _urlCtrl.text.trim());
+    await prefs.setString(AppConstants.keySyncUser, _userCtrl.text.trim());
+    await prefs.setString(AppConstants.keySyncPass, _passCtrl.text);
+    await prefs.setBool(AppConstants.keySyncEnabled, _syncEnabled);
+    await prefs.setInt(AppConstants.keyBackupKeepCount, _keepCount);
+    await prefs.setBool(
+        AppConstants.keySyncProgress, _progressSyncEnabled);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('坚果云同步')),
-      body: ListView(
-        padding: pagePadding(context, bottom: 32),
-        children: [
-          _introCard(),
-          const SizedBox(height: 16),
-          _accountCard(),
-          const SizedBox(height: 16),
-          _actionCard(),
-          if (_items.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Text('云端备份',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                const SizedBox(width: 8),
-                Text('${_items.length} 个',
-                    style: Theme.of(context).textTheme.bodySmall),
-              ],
-            ),
-            const SizedBox(height: 10),
-            ..._items.map((e) => _backupTile(e)),
-          ],
-          if (_status.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: context.palette.surfaceAlt,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(_status,
-                  style: Theme.of(context).textTheme.bodySmall),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _card({required List<Widget> children}) => Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: context.palette.outline),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: children,
-        ),
-      );
-
-  Widget _introCard() {
-    final primary = Theme.of(context).colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          colors: [
-            primary.withOpacity(0.18),
-            Theme.of(context).colorScheme.secondary.withOpacity(0.10),
-          ],
-        ),
-        border: Border.all(color: context.palette.outline),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.cloud_queue, color: primary, size: 20),
-              const SizedBox(width: 8),
-              const Text('坚果云 WebDAV',
-                  style:
-                      TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '1. 登录坚果云网页版 → 账户信息 → 安全选项\n'
-            '2. 找到「第三方应用管理」→ 添加应用 → 生成应用密码\n'
-            '3. 账号填邮箱，密码填这个应用密码（不是登录密码）\n'
-            '4. 服务器地址保持默认即可',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.6),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _accountCard() {
-    return _card(
-      children: [
-        TextField(
-          controller: _urlCtrl,
-          decoration: const InputDecoration(
-            labelText: '服务器地址',
-            hintText: AppConstants.defaultSyncUrl,
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _userCtrl,
-          keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(labelText: '账号（邮箱）'),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _passCtrl,
-          obscureText: _obscure,
-          decoration: InputDecoration(
-            labelText: '应用密码',
-            suffixIcon: IconButton(
-              icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility,
-                  size: 18),
-              onPressed: () => setState(() => _obscure = !_obscure),
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _busy ? null : _test,
-                child: const Text('测试连接'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: ElevatedButton(
-                onPressed: _busy ? null : _save,
-                child: const Text('保存'),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _actionCard() {
-    return _card(
-      children: [
-        const Text('备份操作',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 4),
-        Text('上传会把当前书架/进度/收藏/书签/设置/插件打包成一个 zip 传到云端。',
-            style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _busy ? null : _upload,
-                icon: const Icon(Icons.cloud_upload_outlined, size: 18),
-                label: const Text('上传备份'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : _refresh,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('刷新列表'),
-              ),
-            ),
-          ],
-        ),
-        if (_busy) ...[
-          const SizedBox(height: 14),
-          const Center(child: CircularProgressIndicator()),
-        ],
-      ],
-    );
-  }
-
-  Widget _backupTile(WebDavItem item) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: context.cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: context.palette.outline),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.folder_zip_outlined,
-              size: 20, color: context.subtleColor),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.displayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text(
-                  '${PathUtils.formatSize(item.size)}'
-                  '${item.modified.isEmpty ? '' : ' · ${item.modified}'}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: _busy ? null : () => _restore(item),
-            child: const Text('恢复'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------- 操作
-
-  Future<void> _save() async {
-    _saveConfig();
-    _toast('已保存到本机');
-  }
-
-  /// 把报错翻译成人话，不直接甩英文原文。
-  /// 401/403 = 账号或应用密码错；404 = 地址错；连不上/超时 = 网络问题。
-  /// 注意：根目录没有可列出的文件不代表地址错——test() 只认状态码，
-  /// 207/200 就是成功，不会因为目录为空报 404。
-  String _friendlyError(Object e) {
-    final msg = '$e';
-    if (msg.contains('401') || msg.contains('403')) {
-      return '账号或应用密码不对（密码填应用密码，不是登录密码）';
-    }
-    if (msg.contains('404')) return '地址错了，服务器找不到这个地址，检查服务器地址';
-    if (msg.contains('SocketException') ||
-        msg.contains('TimeoutException') ||
-        msg.contains('timed out') ||
-        msg.contains('ClientException') ||
-        msg.contains('Connection closed') ||
-        msg.contains('Connection refused') ||
-        msg.contains('Network is unreachable') ||
-        msg.contains('Failed host lookup')) {
-      return '连不上服务器，检查网络后重试（也可能是地址里的域名打不开）';
-    }
-    final code = RegExp(r'HTTP (\d{3})').firstMatch(msg)?.group(1);
-    if (code != null) return '服务器返回了 $code，检查地址、账号和密码';
-    return '请检查地址、账号、密码和网络';
-  }
-
-  Future<void> _test() async {
-    _saveConfig();
+  Future<void> _testConnection() async {
     setState(() {
-      _busy = true;
-      _status = '正在连接...';
+      _testing = true;
+      _status = '正在测试连接…';
     });
     try {
       await _client.test();
-      setState(() => _status = '连接成功，账号可用');
-      _toast('连接成功');
+      setState(() => _status = '连接成功：账号密码都对，地址没问题');
     } catch (e) {
-      setState(() => _status = '连接失败：${_friendlyError(e)}');
+      setState(() => _status = '连接失败：${WebDavClient.friendlyError(e)}');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _testing = false);
     }
   }
 
-  Future<void> _upload() async {
-    _saveConfig();
-    setState(() {
-      _busy = true;
-      _status = '正在打包本地数据...';
-    });
-    try {
-      final file = await _backup.createBackup();
-      final size = await file.length();
-      setState(() => _status = '正在上传 ${PathUtils.formatSize(size)}...');
-      await _client.upload(file.uri.pathSegments.last, file);
-      setState(() =>
-          _status = '上传成功：${file.uri.pathSegments.last}');
-      await _refresh();
-    } catch (e) {
-      setState(() => _status = '上传失败：${_friendlyError(e)}');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _refresh() async {
-    _saveConfig();
-    setState(() => _busy = true);
+  Future<void> _refreshCloudList() async {
     try {
       final list = await _client.listBackups();
-      setState(() {
-        _items = list;
-        _status = '共 ${list.length} 个云端备份';
-      });
+      if (mounted) {
+        setState(() {
+          _cloudBackups = list;
+          _cloudError = '';
+        });
+      }
     } catch (e) {
-      setState(() => _status = '读取列表失败：${_friendlyError(e)}');
+      if (mounted) {
+        setState(() {
+          _cloudBackups = const [];
+          _cloudError = WebDavClient.friendlyError(e);
+        });
+      }
+    }
+  }
+
+  Future<void> _uploadBackup() async {
+    setState(() {
+      _busy = true;
+      _status = '正在打包并上传…';
+    });
+    try {
+      final service = BackupService(db: ref.read(databaseProvider));
+      final file = await service.createBackup();
+      await _client.ensureDir('');
+      final name = file.uri.pathSegments.last;
+      await _client.upload(name, file);
+      // 本机这份备份留着（进“本机备份”列表），不删；云端那份是另外一份
+      // 按保留份数清理旧备份（刚上传的不算）
+      if (_keepCount > 0) {
+        try {
+          final list = await _client.listBackups();
+          final keep = _keepCount;
+          final old = list.skip(keep).toList();
+          for (final item in old) {
+            await _client.delete(item.name);
+          }
+        } catch (e) {
+          appLogger.warning('云端旧备份清理失败', detail: '${WebDavClient.friendlyError(e)}');
+        }
+      }
+      setState(() => _status = '已上传到云端');
+      await _refreshCloudList();
+    } catch (e) {
+      setState(() => _status = '上传失败：${_friendly(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _restore(WebDavItem item) async {
+  String _friendly(Object e) {
+    if (e is BackupException) return e.message;
+    return WebDavClient.friendlyError(e);
+  }
+
+  Future<void> _restoreFromCloud(WebDavItem item) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('从云端恢复'),
-        content: Text('将用「${item.displayName}」覆盖本机的书架、进度、收藏、设置和插件。\n'
-            '恢复完成后需要重启 App 才会生效。'),
+        content: Text('恢复 ${item.displayName} 吗？\n'
+            '恢复前会先校验备份、再自动备一份当前数据；恢复是合并式，'
+            '只写回本机已有的书的进度；恢复完成后需要重启 App。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -400,42 +240,69 @@ class _SyncPageState extends ConsumerState<SyncPage> {
 
     setState(() {
       _busy = true;
-      _status = '正在下载...';
+      _status = '正在下载并恢复…';
     });
     try {
-      final dir = await PathUtils.backupsDir;
-      final dest = File('${dir.path}/${item.displayName}');
-      await _client.download(item.name, dest);
-
-      setState(() => _status = '正在解压覆盖...');
-      // 关闭数据库，避免 sqlite 被占用
+      final tmp = File(
+          '${PathUtils.appFilesDir.path}${Platform.pathSeparator}backups'
+          '${Platform.pathSeparator}cloud_restore.tmp.zip');
+      await tmp.parent.create(recursive: true);
+      await _client.download(item.name, tmp);
+      final service = BackupService(db: ref.read(databaseProvider));
+      try {
+        await service.verifyBackupFile(tmp);
+      } catch (e) {
+        setState(() => _status = '恢复失败：${friendlyBackupError(e)}');
+        await tmp.delete();
+        return;
+      }
       try {
         await ref.read(databaseProvider).close();
       } catch (_) {}
-
-      await _backup.restoreFromZip(dest);
-      setState(() => _status = '恢复完成，请重启 App');
-      if (mounted) _showRestartDialog();
+      final db = AppDatabase();
+      final report = await service.restoreFromZip(tmp, liveDb: db);
+      await db.close();
+      await tmp.delete();
+      setState(() => _status = '恢复完成：写回了 ${report.restoredBooks} 本书的进度'
+          '${report.missingBooks > 0 ? '，有 ${report.missingBooks} 本书还没导入进来，'
+              '需先重新添加对应书源并等扫描完成，再恢复一次才能合上进度' : ''}');
+      if (mounted) _restartDialog();
     } catch (e) {
-      setState(() => _status = '恢复失败：${_friendlyError(e)}');
+      setState(() => _status = '恢复失败：${_friendly(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  void _showRestartDialog() {
+  Future<void> _syncProgressNow() async {
+    setState(() => _syncingProgress = true);
+    try {
+      await ProgressSync.syncAll(
+        client: _client,
+        repo: ref.read(libraryRepositoryProvider),
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(AppConstants.keyLastSyncTime,
+          DateTime.now().millisecondsSinceEpoch);
+      setState(() => _lastSyncAt = DateTime.now());
+    } catch (e) {
+      setState(() =>
+          _status = '进度同步失败：${WebDavClient.friendlyError(e)}');
+    } finally {
+      if (mounted) setState(() => _syncingProgress = false);
+    }
+  }
+
+  void _restartDialog() {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: const Text('恢复完成'),
-        content: const Text('数据已覆盖。请退出并重新打开 App，'
-            '新数据会在下次启动时加载。'),
+        content: const Text('数据已合并恢复，请退出并重新打开 App。'),
         actions: [
           TextButton(
-            onPressed: () {
-              SystemNavigator.pop();
-            },
+            onPressed: () => SystemNavigator.pop(),
             child: const Text('立即退出'),
           ),
           TextButton(
@@ -447,12 +314,162 @@ class _SyncPageState extends ConsumerState<SyncPage> {
     );
   }
 
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 2),
-    ));
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('云端同步')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('云同步'),
+            subtitle: const Text('默认关。打开后才会往坚果云传备份与进度'),
+            value: _syncEnabled,
+            onChanged: (v) async {
+              await _saveConfig();
+              setState(() => _syncEnabled = v);
+              if (v) await _refreshCloudList();
+            },
+          ),
+          TextField(
+            controller: _urlCtrl,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: '服务器地址',
+              hintText: 'https://dav.jianguoyun.com/dav/',
+              helperText: '坚果云 WebDAV 地址',
+            ),
+            onChanged: (_) => _saveConfig(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _userCtrl,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(labelText: '账号（邮箱）'),
+            onChanged: (_) => _saveConfig(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _passCtrl,
+            obscureText: _obscurePass,
+            decoration: InputDecoration(
+              labelText: '应用密码',
+              helperText: '坚果云“安全选项”里的应用密码，不是登录密码',
+              suffixIcon: IconButton(
+                icon: Icon(_obscurePass
+                    ? Icons.visibility_off
+                    : Icons.visibility),
+                onPressed: () => setState(() => _obscurePass = !_obscurePass),
+              ),
+            ),
+            onChanged: (_) => _saveConfig(),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.wifi_tethering_outlined),
+                label: const Text('测试连接'),
+                onPressed: _testing ? null : _testConnection,
+              ),
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: _refreshCloudList,
+                child: const Text('刷新云端列表'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_status.isNotEmpty)
+            Text(_status, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 16),
+          const Text('备份到云端',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('保留份数'),
+              const SizedBox(width: 12),
+              DropdownButton<int>(
+                value: _keepCount,
+                items: const [0, 1, 3, 5, 10]
+                    .map((n) => DropdownMenuItem<int>(
+                          value: n,
+                          child: Text(n == 0 ? '不清' : '$n 份'),
+                        ))
+                    .toList(),
+                onChanged: (v) async {
+                  if (v == null) return;
+                  setState(() => _keepCount = v);
+                  await _saveConfig();
+                },
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.cloud_upload_outlined),
+                label: const Text('备份到云端'),
+                onPressed: _busy ? null : _uploadBackup,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text('云端备份',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          if (_cloudError.isNotEmpty)
+            Text('加载云端列表失败：$_cloudError',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.red)),
+          if (_cloudBackups.isEmpty && _cloudError.isEmpty)
+            const Text('云端暂无备份'),
+          ..._cloudBackups.map((item) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.folder_zip_outlined),
+                title: Text(item.displayName),
+                subtitle: Text(
+                    '${PathUtils.formatSize(item.size)} · ${_formatTime(item.lastModified)}'),
+                trailing: TextButton(
+                  onPressed: _busy ? null : () => _restoreFromCloud(item),
+                  child: const Text('恢复'),
+                ),
+              )),
+          const SizedBox(height: 24),
+          const Text('进度同步',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          const Text('每本书一个小文件，换机后断点跟着走。整包备份是上面那块，别混了。',
+              style: TextStyle(fontSize: 12.5)),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('同步收听进度'),
+            subtitle: Text(_lastSyncAt == null
+                ? '还没同步过'
+                : '上次同步：${_formatTime(_lastSyncAt)}'),
+            value: _progressSyncEnabled,
+            onChanged: (v) async {
+              setState(() => _progressSyncEnabled = v);
+              await _saveConfig();
+            },
+          ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.sync_outlined),
+            label: const Text('立即同步进度'),
+            onPressed: _syncingProgress ? null : _syncProgressNow,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(DateTime? t) {
+    if (t == null) return '';
+    final m = '${t.month}'.padLeft(2, '0');
+    final d = '${t.day}'.padLeft(2, '0');
+    final h = '${t.hour}'.padLeft(2, '0');
+    final min = '${t.minute}'.padLeft(2, '0');
+    return '${t.year}-$m-$d $h:$min';
   }
 }

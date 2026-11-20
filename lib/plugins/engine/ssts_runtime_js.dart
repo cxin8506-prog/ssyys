@@ -1,28 +1,34 @@
 /// 随身听书（ssts）格式的 JS 运行时引导脚本。
 ///
-/// 与旧的异步 `host` 桥不同，随身听书插件的方法是**同步**的：
-/// `this.host.getJson(url)` 必须直接返回 JSON 值，不能返回 Promise。
-/// flutter_js 的宿主调用是异步消息通道，JS 里没法同步等 Dart，
+/// 随身听书插件的方法是**同步**的：`this.host.getJson(url)` 必须直接返回值，
+/// 不能返回 Promise。flutter_js 的宿主调用是异步消息通道，JS 里没法同步等 Dart，
 /// 所以这里用「挂起 + 重放」实现同步宿主调用：
 /// - JS 里 `__hostSync(method, payload)` 查缓存，命中直接返回；
-///   未命中就抛一个 `__SSTS_SUSPEND__` 错误，Dart 侧捕获后执行
-///   真正的宿主操作（HTTP、偏好、加密等），把结果写进 `__syncCache`，
-///   再从头重跑一遍源方法。每次重跑都多命中一个缓存，直到跑完。
+///   未命中就抛一个 `__SSTS_SUSPEND__` 错误，Dart 侧捕获后执行真正的宿主操作
+///  （HTTP、偏好、加密等），把结果写进 `__syncCache`，再从头重跑一遍源方法。
+///   每次重跑都多命中一个缓存，直到跑完。
 /// - 纯计算（DOM 解析、base64、uuid 等）直接在 JS 里做，不挂起。
-/// - render / sniff / AES 这三个要 WebView 或原生加密的，暂不支持，
+/// - render / sniff / aesEcbDecrypt 这三个要 WebView 或原生加密的，暂不支持，
 ///   抛人话错误，不静默返回空。
-
-/// 拼出完整的引导脚本。ua 是当前源的 UA（可空），cfg 是运行配置。
-String buildSstsBootstrap(String? ua, Map<String, dynamic> cfg) {
+///
+/// [buildSstsBootstrap] 拼出完整的引导脚本：[ua] 是当前源的手机版 UA（可空，
+/// 用内置默认顶上），[desktopUa] 是电脑版 UA（可空），[cfg] 是运行配置
+/// （源声明的配置值 + voiceId / lineId 等，见 SourceConfigRepository）。
+String buildSstsBootstrap(String? ua, Map<String, dynamic> cfg,
+    {String? desktopUa}) {
   final uaJson = ua == null ? 'null' : _jsonStr(ua);
+  final desktopJson =
+      desktopUa == null ? 'null' : _jsonStr(desktopUa);
   final cfgJson = _jsonEncode(cfg);
   return sstsBootstrapJs
       .replaceAll('__BOOT_UA__', uaJson)
+      .replaceAll('__BOOT_DESKTOP_UA__', desktopJson)
       .replaceAll('__BOOT_CFG__', cfgJson);
 }
 
-String _jsonStr(String s) =>
-    '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n').replaceAll('\r', '\\r')}"';
+String _jsonStr(String s) {
+  return '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n').replaceAll('\r', '\\r')}"';
+}
 
 String _jsonEncode(Map<String, dynamic> m) {
   final parts = <String>[];
@@ -36,12 +42,8 @@ String _jsonValue(dynamic v) {
   if (v == null) return 'null';
   if (v is num || v is bool) return '$v';
   if (v is String) return _jsonStr(v);
-  if (v is Map) {
-    return _jsonEncode(Map<String, dynamic>.from(v));
-  }
-  if (v is List) {
-    return '[${v.map(_jsonValue).join(',')}]';
-  }
+  if (v is Map) return _jsonEncode(Map<String, dynamic>.from(v));
+  if (v is List) return '[${v.map(_jsonValue).join(',')}]';
   return _jsonStr('$v');
 }
 
@@ -49,8 +51,20 @@ String _jsonValue(dynamic v) {
 const String sstsBootstrapJs = r'''
 (function () {
   // ============================================================ 同步宿主调用
+  // __syncCache: key 是 JSON.stringify([method, payload])，值是
+  // {ok: true, data} 或 {ok: false, error, status}。
   globalThis.__syncCache = {};
   globalThis.__sstsCurrentUrl = '';
+
+  // 异步消息（log / toast / progress 这类不用等结果的）：发给 Dart，不挂起。
+  globalThis.__hostCall = function (method, data) {
+    try {
+      if (typeof sendMessage === 'function') {
+        sendMessage('__host_call', JSON.stringify({ method: method, data: data }));
+      }
+    } catch (e) { /* 发不出去就算了，不影响源执行 */ }
+  };
+
   globalThis.__hostSync = function (method, payload) {
     var key = JSON.stringify([method, payload]);
     if (Object.prototype.hasOwnProperty.call(globalThis.__syncCache, key)) {
@@ -66,12 +80,18 @@ const String sstsBootstrapJs = r'''
   function _opt(o) { return o && typeof o === 'object' ? o : {}; }
   function _headers(o) { return _opt(o).headers || null; }
 
+  var _defaultMobileUa = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+  var _defaultDesktopUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
   globalThis.__sstsHost = {
     ua: __BOOT_UA__,
-    desktopUa: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    desktopUa: __BOOT_DESKTOP_UA__,
     config: __BOOT_CFG__,
     getConfig: function (key) { return key === undefined ? this.config : this.config[key]; },
-    userAgent: function (desktop) { return desktop ? this.desktopUa : (this.ua || this.desktopUa); },
+    userAgent: function (desktop) {
+      if (desktop) return this.desktopUa || _defaultDesktopUa;
+      return this.ua || _defaultMobileUa;
+    },
     getString: function (url, options) {
       var o = _opt(options);
       return __hostSync('getString', { url: url, desktop: !!o.desktop, headers: _headers(o), encoding: o.encoding || null });
@@ -79,6 +99,7 @@ const String sstsBootstrapJs = r'''
     getHtml: function (url, options) {
       var o = _opt(options);
       var html = __hostSync('getString', { url: url, desktop: !!o.desktop, headers: _headers(o), encoding: o.encoding || null });
+      globalThis.__sstsCurrentUrl = url;
       return __parseHtml(html, url);
     },
     getJson: function (url, options) {
@@ -115,7 +136,7 @@ const String sstsBootstrapJs = r'''
       return (v === null || v === undefined) ? (def === undefined ? null : def) : v;
     },
     setPref: function (key, value) { __hostSync('setPref', { key: String(key), value: value == null ? null : String(value) }); },
-    toast: function (msg) { __hostSync('toast', { msg: String(msg) }); },
+    toast: function (msg) { __hostCall('toast', String(msg)); },
     log: function (msg) { __hostCall('log', String(msg)); },
     progress: function (info) { __hostCall('progress', info == null ? null : String(info)); },
     sleep: function (ms) { __hostSync('sleep', { ms: Number(ms) || 0 }); },
@@ -148,7 +169,8 @@ const String sstsBootstrapJs = r'''
     globalThis.__sstsById[String(obj.id)] = obj;
     return obj;
   };
-  // 安装时读注册表元数据（不含函数，只取展示用字段）
+
+  // 安装时读注册表元数据（不含函数，只取展示用字段）。
   globalThis.__sstsMeta = function () {
     return JSON.stringify(globalThis.__sstsRegistry.map(function (s) {
       return {
@@ -160,371 +182,393 @@ const String sstsBootstrapJs = r'''
         config: Array.isArray(s.config) ? s.config : [],
         multipleEpisodePages: !!s.multipleEpisodePages,
         enabledByDefault: s.enabledByDefault !== false,
-        hasSearch: typeof s.search === 'function',
-        hasCategoryMenus: typeof s.categoryMenus === 'function',
-        hasBookDetail: typeof s.bookDetail === 'function',
-        hasAudio: typeof s.audio === 'function',
-        hasCheckLogin: typeof s.checkLogin === 'function',
-        hasSearchVerificationUrl: typeof s.searchVerificationUrl === 'function'
+        searchVerificationDesktop: s.searchVerificationDesktop !== false,
+        searchDelaySeconds: Number(s.searchDelaySeconds) || 0
       };
     }));
   };
 
-  // ============================================================ JSON 辅助
-  function _atPath(obj, path) {
-    var cur = obj, parts = String(path || '').split('.');
-    for (var i = 0; i < parts.length; i++) {
-      if (cur === null || cur === undefined) return undefined;
-      cur = cur[parts[i]];
-    }
-    return cur;
-  }
-  globalThis.str = function (obj, path) {
-    var v = _atPath(obj, path);
-    return (v === null || v === undefined) ? '' : String(v);
-  };
-  globalThis.int = function (obj, path, def) {
-    var v = _atPath(obj, path), n = Number(v);
-    if (v === null || v === undefined || isNaN(n)) return (def === undefined ? 0 : def);
-    return Math.floor(n);
-  };
-  globalThis.items = function (obj, path) {
-    var v = _atPath(obj, path);
-    return Array.isArray(v) ? v : [];
-  };
-  globalThis.at = function (obj, path) {
-    var v = _atPath(obj, path);
-    return (v === undefined) ? null : v;
-  };
-  globalThis.regexInt = function (text, re, def) {
+  // ============================================================ 调源方法包装
+  // Dart 侧调这个函数：返回值一定是 JSON 字符串，三种形态：
+  // {__ok: true, data} / {__error: '...'} / {__suspend: {method, payload}}。
+  // 源方法里的 this 绑到源对象上，所以 this.host 能用。
+  globalThis.__sstsCall = function (sstsId, method, argsJson) {
+    var src = globalThis.__sstsById[String(sstsId)];
+    if (!src) return JSON.stringify({ __error: '源不存在：' + sstsId });
+    var fn = src[method];
+    if (typeof fn !== 'function') return JSON.stringify({ __error: '源没有实现方法：' + method });
+    var args = [];
+    try { args = JSON.parse(argsJson || '[]'); } catch (e) { args = []; }
+    if (!Array.isArray(args)) args = [args];
     try {
-      var m = re.exec(String(text || ''));
-      if (m && m[1] !== undefined) { var n = parseInt(m[1], 10); if (!isNaN(n)) return n; }
-    } catch (e) {}
-    return (def === undefined ? 0 : def);
-  };
-  globalThis.parseJson = function (text) {
-    try { return JSON.parse(String(text || '')); } catch (e) { return null; }
+      var data = fn.apply(src, args);
+      var text;
+      try {
+        text = JSON.stringify({ __ok: true, data: data }, function (k, v) {
+          if (k === 'parent') return undefined;
+          if (typeof v === 'function') return undefined;
+          return v;
+        });
+      } catch (e) {
+        text = JSON.stringify({ __ok: true, data: data == null ? null : String(data) });
+      }
+      return text;
+    } catch (e) {
+      var msg = (e && e.message) ? String(e.message) : String(e);
+      if (msg.indexOf('__SSTS_SUSPEND__') === 0) {
+        try {
+          var req = JSON.parse(msg.substring('__SSTS_SUSPEND__'.length));
+          return JSON.stringify({ __suspend: req });
+        } catch (e2) {
+          return JSON.stringify({ __error: msg });
+        }
+      }
+      return JSON.stringify({ __error: msg });
+    }
   };
 
-  // ============================================================ base64
-  var __B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  globalThis.__b64enc = function (s) {
+  // ============================================================ base64 / 实体
+  var __b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function __b64enc(input) {
+    var str = unescape(encodeURIComponent(input));
     var out = '', i = 0;
-    var bytes = [];
-    for (var k = 0; k < s.length; k++) {
-      var c = s.charCodeAt(k);
-      if (c < 128) bytes.push(c);
-      else if (c < 2048) { bytes.push(192 | (c >> 6), 128 | (c & 63)); }
-      else { bytes.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63)); }
-    }
-    for (i = 0; i < bytes.length; i += 3) {
-      var b0 = bytes[i], b1 = (i + 1 < bytes.length) ? bytes[i + 1] : 0, b2 = (i + 2 < bytes.length) ? bytes[i + 2] : 0;
-      out += __B64[b0 >> 2] + __B64[((b0 & 3) << 4) | (b1 >> 4)] + ((i + 1 < bytes.length) ? __B64[((b1 & 15) << 2) | (b2 >> 6)] : '=') + ((i + 2 < bytes.length) ? __B64[b2 & 63] : '=');
+    while (i < str.length) {
+      var a = str.charCodeAt(i++), b = i < str.length ? str.charCodeAt(i++) : NaN, c = i < str.length ? str.charCodeAt(i++) : NaN;
+      var n = (a << 16) | ((isNaN(b) ? 0 : b) << 8) | (isNaN(c) ? 0 : c);
+      out += __b64chars[(n >> 18) & 63] + __b64chars[(n >> 12) & 63] + (isNaN(b) ? '=' : __b64chars[(n >> 6) & 63]) + (isNaN(c) ? '=' : __b64chars[n & 63]);
     }
     return out;
-  };
-  globalThis.__b64dec = function (s) {
-    s = String(s || '').replace(/[^A-Za-z0-9+/=]/g, '');
+  }
+  function __b64dec(input) {
+    var clean = String(input).replace(/[^A-Za-z0-9+/=]/g, '');
     var out = '', i = 0;
-    while (i < s.length) {
-      var e0 = __B64.indexOf(s.charAt(i++)), e1 = __B64.indexOf(s.charAt(i++)),
-          e2 = __B64.indexOf(s.charAt(i++)), e3 = __B64.indexOf(s.charAt(i++));
-      var n = (e0 << 18) | (e1 << 12) | ((e2 & 63) << 6) | (e3 & 63);
+    while (i < clean.length) {
+      var e1 = __b64chars.indexOf(clean.charAt(i++));
+      var e2 = __b64chars.indexOf(clean.charAt(i++));
+      var e3 = __b64chars.indexOf(clean.charAt(i++));
+      var e4 = __b64chars.indexOf(clean.charAt(i++));
+      var n = (e1 << 18) | (e2 << 12) | ((e3 & 63) << 6) | (e4 & 63);
       out += String.fromCharCode((n >> 16) & 255);
-      if (e2 !== 64 && s.charAt(i - 2) !== '=') out += String.fromCharCode((n >> 8) & 255);
-      if (e3 !== 64 && s.charAt(i - 1) !== '=') out += String.fromCharCode(n & 255);
+      if (e3 !== 64 && e3 !== -1) out += String.fromCharCode((n >> 8) & 255);
+      if (e4 !== 64 && e4 !== -1) out += String.fromCharCode(n & 255);
     }
     try { return decodeURIComponent(escape(out)); } catch (e) { return out; }
-  };
-
-  // ============================================================ HTML 实体
-  var __ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-  globalThis.__decodeEntities = function (s) {
-    return String(s || '').replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, function (m, body) {
+  }
+  var __entityMap = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', copy: '©', reg: '®', hellip: '…' };
+  function __decodeEntities(s) {
+    return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, function (m, body) {
       if (body.charAt(0) === '#') {
         var code = body.charAt(1) === 'x' || body.charAt(1) === 'X' ? parseInt(body.substring(2), 16) : parseInt(body.substring(1), 10);
         return isNaN(code) ? m : String.fromCharCode(code);
       }
-      return (__ENT[body] !== undefined) ? __ENT[body] : m;
+      return __entityMap.hasOwnProperty(body) ? __entityMap[body] : m;
     });
-  };
+  }
 
-  // ============================================================ URL 解析
-  globalThis.__resolveUrl = function (rel, base) {
-    rel = String(rel || '');
-    if (!rel) return '';
-    if (/^(https?:|data:|javascript:|mailto:|tel:)/i.test(rel)) return rel;
-    base = String(base || '');
-    if (rel.indexOf('//') === 0) {
-      var proto = /^([a-z]+:)/i.exec(base);
-      return (proto ? proto[1] : 'https:') + rel;
-    }
-    var m = /^([a-z]+:\/\/[^\/]*)(.*)$/i.exec(base);
-    var origin = m ? m[1] : '', basePath = m ? m[2] : '';
-    if (rel.charAt(0) === '/') return origin + rel;
-    if (rel.charAt(0) === '#') return base.split('#')[0] + rel;
-    var dir = basePath.substring(0, basePath.lastIndexOf('/') + 1);
-    var merged = (dir + rel).split('/');
-    var out = [];
-    for (var i = 0; i < merged.length; i++) {
-      var seg = merged[i];
-      if (seg === '.' || seg === '') continue;
-      if (seg === '..') { out.pop(); continue; }
-      out.push(seg);
-    }
-    return origin + '/' + out.join('/');
-  };
-
-  // ============================================================ HTML 解析
-  var __VOID = { area: 1, base: 1, br: 1, col: 1, embed: 1, hr: 1, img: 1, input: 1, link: 1, meta: 1, param: 1, source: 1, track: 1, wbr: 1 };
-  function __parseHtmlToTree(html) {
-    var root = { tag: '#root', attrs: {}, children: [], parent: null };
-    var stack = [root], pos = 0, len = html.length;
-    function pushText(t) {
-      if (!t) return;
-      stack[stack.length - 1].children.push({ tag: '#text', text: __decodeEntities(t), children: [], parent: stack[stack.length - 1] });
-    }
-    while (pos < len) {
-      var lt = html.indexOf('<', pos);
-      if (lt < 0) { pushText(html.substring(pos)); break; }
-      if (lt > pos) pushText(html.substring(pos, lt));
-      if (html.substring(lt, lt + 4) === '<!--') {
-        var end = html.indexOf('-->', lt + 4);
-        pos = end < 0 ? len : end + 3;
-        continue;
-      }
-      if (html.substring(lt, lt + 2) === '<!') {
-        var gt = html.indexOf('>', lt + 2);
-        pos = gt < 0 ? len : gt + 1;
-        continue;
-      }
-      var close = html.charAt(lt + 1) === '/';
-      var gt2 = html.indexOf('>', lt + (close ? 2 : 1));
-      if (gt2 < 0) { pos = len; break; }
-      var inside = html.substring(lt + (close ? 2 : 1), gt2);
-      if (close) {
-        var cname = inside.replace(/[^a-zA-Z0-9-].*$/, '').toLowerCase();
-        for (var s = stack.length - 1; s > 0; s--) {
-          if (stack[s].tag === cname) { stack.length = s; break; }
-        }
-        pos = gt2 + 1;
-        continue;
-      }
-      var selfClose = /\/\s*$/.test(inside);
-      var m = /^([a-zA-Z][a-zA-Z0-9-]*)/.exec(inside);
-      if (!m) { pos = gt2 + 1; continue; }
-      var tag = m[1].toLowerCase();
-      var attrs = {}, rest = inside.substring(m[1].length);
-      var am = /([a-zA-Z_:][a-zA-Z0-9_:\-.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g, am2;
-      while ((am2 = am.exec(rest)) !== null) {
-        var an = am2[1].toLowerCase();
-        var av = am2[2] !== undefined ? am2[2] : (am2[3] !== undefined ? am2[3] : (am2[4] !== undefined ? am2[4] : ''));
-        attrs[an] = __decodeEntities(av);
-      }
-      var node = { tag: tag, attrs: attrs, children: [], parent: stack[stack.length - 1] };
-      stack[stack.length - 1].children.push(node);
-      if (!selfClose && !__VOID[tag]) {
-        stack.push(node);
-        if (tag === 'script' || tag === 'style') {
-          var endTag = '</' + tag;
-          var endPos = html.toLowerCase().indexOf(endTag, gt2 + 1);
-          if (endPos >= 0) {
-            var raw = html.substring(gt2 + 1, endPos);
-            if (raw) node.children.push({ tag: '#text', text: raw, children: [], parent: node });
-            stack.pop();
-            var gt3 = html.indexOf('>', endPos);
-            pos = gt3 < 0 ? len : gt3 + 1;
-            continue;
-          }
-        }
-      }
-      pos = gt2 + 1;
-    }
-    return root;
-  }
-  function __nodeText(n, own) {
-    var out = '';
-    for (var i = 0; i < n.children.length; i++) {
-      var c = n.children[i];
-      if (c.tag === '#text') out += c.text;
-      else if (!own) out += __nodeText(c, false);
-    }
-    return out.replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
-  }
-  function __escapeHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-  function __serialize(n) {
-    if (n.tag === '#text') return __escapeHtml(n.text);
-    if (n.tag === '#root') {
-      var s = '';
-      for (var i = 0; i < n.children.length; i++) s += __serialize(n.children[i]);
-      return s;
-    }
-    var a = '';
-    for (var k in n.attrs) a += ' ' + k + '="' + __escapeHtml(n.attrs[k]) + '"';
-    if (__VOID[n.tag]) return '<' + n.tag + a + '>';
-    var inner = '';
-    for (var j = 0; j < n.children.length; j++) inner += __serialize(n.children[j]);
-    return '<' + n.tag + a + '>' + inner + '</' + n.tag + '>';
-  }
-  // ---- 选择器：tag / .class / #id / [attr] / [attr=v] / 后代（空格）/ 逗号分组
-  function __parseCompound(part) {
-    var c = { tag: null, id: null, classes: [], attrs: [] }, rest = part;
-    var tm = /^(\*|[a-zA-Z][a-zA-Z0-9-]*)/.exec(rest);
-    if (tm) { c.tag = tm[1].toLowerCase(); rest = rest.substring(tm[1].length); }
-    while (rest.length > 0) {
-      var ch = rest.charAt(0);
-      if (ch === '#') { var im = /^#([a-zA-Z0-9_-]+)/.exec(rest); if (!im) break; c.id = im[1]; rest = rest.substring(im[0].length); }
-      else if (ch === '.') { var cm = /^\.([a-zA-Z0-9_-]+)/.exec(rest); if (!cm) break; c.classes.push(cm[1]); rest = rest.substring(cm[0].length); }
-      else if (ch === '[') {
-        var am = /^\[\s*([a-zA-Z0-9_:-]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\]]*?))\s*)?\]/.exec(rest);
-        if (!am) break;
-        c.attrs.push({ name: am[1].toLowerCase(), op: am[2] || null, value: am[3] !== undefined ? am[3] : (am[4] !== undefined ? am[4] : (am[5] !== undefined ? am[5] : null)) });
-        rest = rest.substring(am[0].length);
-      } else break;
-    }
-    return c;
-  }
-  function __parseSelector(sel) {
-    var groups = [];
-    var parts = String(sel || '').split(',');
+  // ============================================================ JSON 辅助
+  // str(json, 'data.list.0.name') / int(...) / items(...) / at(...) /
+  // regexInt(...) / parseJson(text)，照随身听书文档提供。
+  function __pathGet(root, path) {
+    if (path == null || path === '') return root;
+    var cur = root;
+    var parts = String(path).split('.');
     for (var i = 0; i < parts.length; i++) {
-      var chain = [], segs = parts[i].replace(/^\s+|\s+$/g, '').split(/\s+/);
-      for (var j = 0; j < segs.length; j++) { if (segs[j]) chain.push(__parseCompound(segs[j])); }
-      if (chain.length > 0) groups.push(chain);
+      if (cur == null) return undefined;
+      cur = cur[parts[i]];
     }
-    return groups;
+    return cur;
   }
-  function __matchesCompound(el, c) {
-    if (el.tag === '#text' || el.tag === '#root') return false;
-    if (c.tag && c.tag !== '*' && el.tag !== c.tag) return false;
-    if (c.id && (el.attrs.id || '') !== c.id) return false;
-    if (c.classes.length > 0) {
-      var cl = (' ' + (el.attrs['class'] || '') + ' ').replace(/\s+/g, ' ');
-      for (var i = 0; i < c.classes.length; i++) { if (cl.indexOf(' ' + c.classes[i] + ' ') < 0) return false; }
+  globalThis.str = function (json, path) {
+    var v = __pathGet(json, path);
+    return v == null ? '' : String(v);
+  };
+  globalThis.int = function (json, path) {
+    var v = __pathGet(json, path);
+    var n = parseInt(v, 10);
+    return isNaN(n) ? 0 : n;
+  };
+  globalThis.items = function (json, path) {
+    var v = __pathGet(json, path);
+    return Array.isArray(v) ? v : [];
+  };
+  globalThis.at = function (json, path) { return __pathGet(json, path); };
+  globalThis.regexInt = function (text, re) {
+    if (text == null) return 0;
+    var m = String(text).match(re instanceof RegExp ? re : new RegExp(re));
+    if (!m) return 0;
+    var n = parseInt(m[1] || m[0], 10);
+    return isNaN(n) ? 0 : n;
+  };
+  globalThis.parseJson = function (text) {
+    if (text == null) return null;
+    var t = String(text).trim();
+    if (t === '') return null;
+    try { return JSON.parse(t); } catch (e) { return null; }
+  };
+
+  // ============================================================ 纯 JS HTML 解析
+  var __voidTags = { area: 1, base: 1, br: 1, col: 1, embed: 1, hr: 1, img: 1, input: 1, link: 1, meta: 1, param: 1, source: 1, track: 1, wbr: 1 };
+  var __rawTags = { script: 1, style: 1 };
+
+  function __parseAttrs(text) {
+    var attrs = {};
+    var re = /([^\s=\/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g, m;
+    while ((m = re.exec(text)) !== null) {
+      var name = m[1].toLowerCase();
+      var val = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : (m[4] !== undefined ? m[4] : ''));
+      attrs[name] = __decodeEntities(val);
     }
-    for (var j = 0; j < c.attrs.length; j++) {
-      var a = c.attrs[j], v = el.attrs[a.name];
-      if (v === undefined) return false;
-      if (a.op === null) continue;
-      if (a.op === '=') { if (v !== a.value) return false; }
-      else if (a.op === '^=') { if (v.indexOf(a.value) !== 0) return false; }
-      else if (a.op === '$=') { if (v.length < a.value.length || v.substring(v.length - a.value.length) !== a.value) return false; }
-      else if (a.op === '*=') { if (v.indexOf(a.value) < 0) return false; }
-      else if (a.op === '~=') { if ((' ' + v + ' ').indexOf(' ' + a.value + ' ') < 0) return false; }
-    }
-    return true;
+    return attrs;
   }
-  function __matchesChain(el, chain) {
-    var idx = chain.length - 1, cur = el;
-    if (!__matchesCompound(cur, chain[idx])) return false;
-    idx--;
-    cur = cur.parent;
-    while (idx >= 0) {
-      var found = false;
-      while (cur) {
-        if (__matchesCompound(cur, chain[idx])) { found = true; idx--; cur = cur.parent; break; }
-        cur = cur.parent;
-      }
-      if (!found) return false;
-    }
-    return true;
-  }
-  function __findAll(from, groups) {
-    var out = [];
-    function walk(n) {
-      for (var i = 0; i < n.children.length; i++) {
-        var c = n.children[i];
-        if (c.tag !== '#text') {
-          for (var g = 0; g < groups.length; g++) { if (__matchesChain(c, groups[g])) { out.push(c); break; } }
-          walk(c);
-        }
-      }
-    }
-    walk(from);
-    return out;
-  }
-  function __findById(root, id) {
-    var found = null;
-    function walk(n) {
-      if (found) return;
-      for (var i = 0; i < n.children.length; i++) {
-        var c = n.children[i];
-        if (c.tag !== '#text' && c.attrs.id === id) { found = c; return; }
-        walk(c);
-        if (found) return;
-      }
-    }
-    walk(root);
-    return found;
-  }
-  function __wrapEl(node, baseUrl, docRoot) {
-    if (!node) return __emptyEl(baseUrl, docRoot);
+
+  function __escapeAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  function __escapeText(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  function __makeEl(tag, attrs, parent, baseUrl) {
     var el = {
-      select: function (sel) {
-        var nodes = __findAll(node, __parseSelector(sel));
-        return nodes.map(function (n) { return __wrapEl(n, baseUrl, docRoot); });
+      __isEl: true, tag: tag, attrs: attrs || {}, children: [], parent: parent || null,
+      baseUrl: baseUrl || '', _empty: false,
+      exists: function () { return !this._empty; },
+      text: function () {
+        var out = '';
+        var walk = function (node) {
+          for (var i = 0; i < node.children.length; i++) {
+            var c = node.children[i];
+            if (typeof c === 'string') out += c;
+            else walk(c);
+          }
+        };
+        walk(this);
+        return __decodeEntities(out).replace(/\s+/g, ' ').trim();
       },
-      first: function (sel) {
-        var nodes = __findAll(node, __parseSelector(sel));
-        return nodes.length > 0 ? __wrapEl(nodes[0], baseUrl, docRoot) : __emptyEl(baseUrl, docRoot);
+      ownText: function () {
+        var out = '';
+        for (var i = 0; i < this.children.length; i++) {
+          if (typeof this.children[i] === 'string') out += this.children[i];
+        }
+        return __decodeEntities(out).replace(/\s+/g, ' ').trim();
       },
-      exists: function () { return true; },
-      text: function () { return __nodeText(node, false); },
-      ownText: function () { return __nodeText(node, true); },
-      attr: function (name) { var v = node.attrs[String(name).toLowerCase()]; return v === undefined ? '' : v; },
-      absUrl: function (name) { var v = this.attr(name); return v ? __resolveUrl(v, baseUrl) : ''; },
+      attr: function (name) {
+        var v = this.attrs[String(name).toLowerCase()];
+        return v === undefined ? '' : v;
+      },
+      absUrl: function (name) { return __resolveUrl(this.attr(name), this.baseUrl); },
       html: function () {
-        if (node.tag === '#root') return __serialize(node);
-        var s = '';
-        for (var i = 0; i < node.children.length; i++) s += __serialize(node.children[i]);
-        return s;
+        var out = '';
+        for (var i = 0; i < this.children.length; i++) {
+          var c = this.children[i];
+          out += typeof c === 'string' ? __escapeText(c) : c.outerHtml();
+        }
+        return out;
       },
-      outerHtml: function () { return __serialize(node); },
-      tag: function () { return node.tag === '#root' ? '' : node.tag; },
+      outerHtml: function () {
+        if (this._empty) return '';
+        var a = '';
+        for (var k in this.attrs) a += ' ' + k + '="' + __escapeAttr(this.attrs[k]) + '"';
+        if (__voidTags[this.tag]) return '<' + this.tag + a + '>';
+        return '<' + this.tag + a + '>' + this.html() + '</' + this.tag + '>';
+      },
+      tag: function () { return this.tag; },
       hasClass: function (name) {
-        var cl = (' ' + (node.attrs['class'] || '') + ' ').replace(/\s+/g, ' ');
-        return cl.indexOf(' ' + name + ' ') >= 0;
+        var cls = (this.attrs['class'] || '').split(/\s+/);
+        return cls.indexOf(name) >= 0;
       },
       children: function () {
         var out = [];
-        for (var i = 0; i < node.children.length; i++) { if (node.children[i].tag !== '#text') out.push(__wrapEl(node.children[i], baseUrl, docRoot)); }
+        for (var i = 0; i < this.children.length; i++) {
+          if (typeof this.children[i] !== 'string') out.push(this.children[i]);
+        }
         return out;
       },
-      parent: function () {
-        if (!node.parent || node.parent.tag === '#root') return __emptyEl(baseUrl, docRoot);
-        return __wrapEl(node.parent, baseUrl, docRoot);
-      },
+      parent: function () { return this.parent || __emptyEl(this.baseUrl); },
       byId: function (id) {
-        var n = __findById(docRoot, String(id));
-        return n ? __wrapEl(n, baseUrl, docRoot) : __emptyEl(baseUrl, docRoot);
+        var found = this.select('#' + id);
+        return found.length > 0 ? found[0] : __emptyEl(this.baseUrl);
+      },
+      select: function (selector) { return __selectAll(this, selector); },
+      first: function (selector) {
+        var found = this.select(selector);
+        return found.length > 0 ? found[0] : __emptyEl(this.baseUrl);
       }
     };
     return el;
   }
-  function __emptyEl(baseUrl, docRoot) {
-    return {
-      select: function () { return []; },
-      first: function () { return __emptyEl(baseUrl, docRoot); },
-      exists: function () { return false; },
-      text: function () { return ''; },
-      ownText: function () { return ''; },
-      attr: function () { return ''; },
-      absUrl: function () { return ''; },
-      html: function () { return ''; },
-      outerHtml: function () { return ''; },
-      tag: function () { return ''; },
-      hasClass: function () { return false; },
-      children: function () { return []; },
-      parent: function () { return __emptyEl(baseUrl, docRoot); },
-      byId: function () { return __emptyEl(baseUrl, docRoot); }
-    };
+
+  function __emptyEl(baseUrl) {
+    var el = __makeEl('', {}, null, baseUrl || '');
+    el._empty = true;
+    el.tag = function () { return ''; };
+    return el;
   }
-  globalThis.__parseHtml = function (html, baseUrl) {
-    var root = __parseHtmlToTree(String(html || ''));
-    return __wrapEl(root, String(baseUrl || ''), root);
-  };
+
+  function __resolveUrl(href, base) {
+    if (!href) return '';
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) return href;
+    if (href.indexOf('//') === 0) {
+      var m = String(base || '').match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+      return (m ? m[1] + ':' : 'https:') + href;
+    }
+    if (!base) return href;
+    var bm = String(base).match(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/);
+    if (!bm) return href;
+    var origin = bm[1], path = bm[2] || '/';
+    if (href.charAt(0) === '/') return origin + href;
+    if (href.charAt(0) === '?') return origin + path + href;
+    if (href.charAt(0) === '#') return origin + path + (bm[3] || '') + href;
+    var dir = path.substring(0, path.lastIndexOf('/') + 1);
+    var merged = dir + href;
+    var parts = merged.split('/'), out = [];
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i] === '.') continue;
+      if (parts[i] === '..') { out.pop(); continue; }
+      out.push(parts[i]);
+    }
+    return origin + out.join('/');
+  }
+
+  // 选择器：tag / .class / #id / [attr] / [attr=v] / [attr*=v] /
+  // 后代（空格）/ 子代（>）/ 逗号分组；支持 tag.class / tag#id 组合。
+  function __parseSimple(sel) {
+    var s = sel.trim();
+    var out = { tag: '', id: '', classes: [], attrs: [] };
+    var m = s.match(/^([a-zA-Z][a-zA-Z0-9-]*)?/);
+    if (m && m[1]) { out.tag = m[1].toLowerCase(); s = s.substring(m[1].length); }
+    else if (s.charAt(0) === '*') { s = s.substring(1); }
+    var re = /([.#])([a-zA-Z0-9_-]+)|\[([^\]=\s~|^$*]+)(?:([~|^$*]?=)["']?([^\]"']*)["']?)?\]/g, mm;
+    while ((mm = re.exec(s)) !== null) {
+      if (mm[1] === '.') out.classes.push(mm[2]);
+      else if (mm[1] === '#') out.id = mm[2];
+      else if (mm[3]) out.attrs.push({ name: mm[3].toLowerCase(), op: mm[4] || '', value: mm[5] || '' });
+    }
+    return out;
+  }
+  function __matchSimple(el, simple) {
+    if (!el || !el.__isEl || el._empty) return false;
+    if (simple.tag && el.tag !== simple.tag) return false;
+    if (simple.id && (el.attrs.id || '') !== simple.id) return false;
+    for (var i = 0; i < simple.classes.length; i++) {
+      if (!el.hasClass(simple.classes[i])) return false;
+    }
+    for (var j = 0; j < simple.attrs.length; j++) {
+      var a = simple.attrs[j];
+      var v = el.attrs[a.name];
+      if (v === undefined) return false;
+      if (a.op === '=' && v !== a.value) return false;
+      if (a.op === '*=' && v.indexOf(a.value) < 0) return false;
+      if (a.op === '^=' && v.indexOf(a.value) !== 0) return false;
+      if (a.op === '$=' && v.slice(-a.value.length) !== a.value) return false;
+      if (a.op === '~=' && (' ' + v + ' ').indexOf(' ' + a.value + ' ') < 0) return false;
+    }
+    return true;
+  }
+  function __descendants(el, out) {
+    for (var i = 0; i < el.children.length; i++) {
+      var c = el.children[i];
+      if (typeof c === 'string') continue;
+      out.push(c);
+      __descendants(c, out);
+    }
+  }
+  function __selectGroup(root, group) {
+    // 先按 '>' 切子代，再按空格切后代。
+    var tokens = [];
+    var buf = '', i = 0;
+    while (i < group.length) {
+      var ch = group.charAt(i);
+      if (ch === '>' ) { if (buf.trim()) tokens.push(buf.trim()); tokens.push('>'); buf = ''; i++; continue; }
+      if (ch === ' ' || ch === '\t' || ch === '\n') {
+        if (buf.trim()) { tokens.push(buf.trim()); buf = ''; }
+        i++;
+        while (i < group.length && /\s/.test(group.charAt(i))) i++;
+        continue;
+      }
+      buf += ch; i++;
+    }
+    if (buf.trim()) tokens.push(buf.trim());
+    var current = [root];
+    var childOnly = false;
+    for (var t = 0; t < tokens.length; t++) {
+      var tok = tokens[t];
+      if (tok === '>') { childOnly = true; continue; }
+      var simple = __parseSimple(tok);
+      var next = [];
+      for (var c = 0; c < current.length; c++) {
+        var scope = current[c];
+        var pool = [];
+        if (childOnly) {
+          for (var k = 0; k < scope.children.length; k++) {
+            if (typeof scope.children[k] !== 'string') pool.push(scope.children[k]);
+          }
+        } else {
+          __descendants(scope, pool);
+        }
+        for (var p = 0; p < pool.length; p++) {
+          if (__matchSimple(pool[p], simple)) next.push(pool[p]);
+        }
+      }
+      current = next;
+      childOnly = false;
+      if (current.length === 0) break;
+    }
+    return current;
+  }
+  function __selectAll(root, selector) {
+    var out = [], seen = [];
+    if (!selector) return out;
+    var groups = String(selector).split(',');
+    for (var g = 0; g < groups.length; g++) {
+      var found = __selectGroup(root, groups[g]);
+      for (var i = 0; i < found.length; i++) {
+        if (seen.indexOf(found[i]) < 0) { seen.push(found[i]); out.push(found[i]); }
+      }
+    }
+    return out;
+  }
+
+  function __parseHtml(html, baseUrl) {
+    var root = __makeEl('#document', {}, null, baseUrl || '');
+    var stack = [root];
+    var top = function () { return stack[stack.length - 1]; };
+    var re = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<(\/?)([A-Za-z][A-Za-z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>|([^<]+)/g;
+    var m;
+    while ((m = re.exec(html)) !== null) {
+      if (m[5] !== undefined) {
+        // 文本
+        var text = __decodeEntities(m[5]);
+        if (text) top().children.push(text);
+        continue;
+      }
+      if (m[1] !== undefined) {
+        var isClose = m[1] === '/';
+        var tagName = m[2].toLowerCase();
+        var attrText = m[3] || '';
+        var selfClose = m[4] === '/';
+        if (isClose) {
+          for (var s = stack.length - 1; s > 0; s--) {
+            if (stack[s].tag === tagName) { stack.length = s; break; }
+          }
+          continue;
+        }
+        var el = __makeEl(tagName, __parseAttrs(attrText), top(), baseUrl || '');
+        top().children.push(el);
+        if (__rawTags[tagName]) {
+          var closeRe = new RegExp('</' + tagName + '\\s*>', 'i');
+          var rest = html.substring(re.lastIndex);
+          var cm = closeRe.exec(rest);
+          if (cm) {
+            var raw = rest.substring(0, cm.index);
+            if (raw) el.children.push(raw);
+            re.lastIndex += cm.index + cm[0].length;
+          }
+          continue;
+        }
+        if (!__voidTags[tagName] && !selfClose) stack.push(el);
+      }
+      // 注释 / DOCTYPE / CDATA 直接跳过
+    }
+    return root;
+  }
+  globalThis.__parseHtml = __parseHtml;
+  globalThis.parseHtml = __parseHtml;
 })();
 ''';

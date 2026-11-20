@@ -1,66 +1,62 @@
 import 'package:drift/drift.dart';
 
-/// 媒体条目表：听书和视频共用，用 type 字段区分（严格隔离靠查询过滤实现）
+/// 媒体条目表：听书和视频共用一张表，type 字段区分（audio | video）。
+/// 断点/历史/收藏统一走这张表 + Progress/History/Favorites，不另开表。
 class MediaItems extends Table {
   TextColumn get id => text()();
-  TextColumn get type => text()(); // audio | video
   TextColumn get title => text()();
   TextColumn get author => text().nullable()();
-  TextColumn get path => text()(); // 文件夹或文件路径
-  TextColumn get coverPath => text().nullable()();
-  TextColumn get sourceType =>
-      text().withDefault(const Constant('folder'))(); // folder|single|archive
-  IntColumn get chapterCount => integer().withDefault(const Constant(0))();
-  IntColumn get durationMs => integer().nullable()();
-  IntColumn get sizeBytes => integer().withDefault(const Constant(0))();
-  TextColumn get description => text().nullable()();
-  TextColumn get status => text().withDefault(const Constant('unread'))();
-  RealColumn get progress =>
-      real().withDefault(const Constant(0))(); // 0.0 ~ 1.0
-  DateTimeColumn get addedAt => dateTime()();
-  DateTimeColumn get lastReadAt => dateTime().nullable()();
-  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  TextColumn get coverUrl => text().nullable()();
+  TextColumn get sourceId => text()();
+  TextColumn get sourceName => text()();
+  TextColumn get type => text()(); // audio | video
+  TextColumn get lastChapterUrl => text().nullable()();
+  IntColumn get lastPositionMs => integer().withDefault(const Constant(0))();
+  IntColumn get lastDurationMs => integer().withDefault(const Constant(0))();
+  BoolColumn get isFinished => boolean().withDefault(const Constant(false))();
+  BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get lastPlayedAt => dateTime().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// 章节表（自然排序后写入 sortOrder）
+/// 章节表：一本书的章节列表（插件详情页取到的章节可缓存于此）。
 class Chapters extends Table {
   TextColumn get id => text()();
   TextColumn get itemId =>
       text().references(MediaItems, #id, onDelete: KeyAction.cascade)();
   TextColumn get title => text()();
-  TextColumn get path => text().nullable()(); // 本地路径或源 URL
+  TextColumn get url => text().nullable()();
   IntColumn get orderIndex => integer()();
   IntColumn get durationMs => integer().nullable()();
-  BoolColumn get isCorrupted => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// 播放/阅读进度（每条媒体一份）
+/// 播放进度：每本书每章一份（bookId + chapterUrl 联合主键）。
 class Progress extends Table {
   TextColumn get itemId =>
       text().references(MediaItems, #id, onDelete: KeyAction.cascade)();
-  TextColumn get chapterId => text().nullable()();
+  TextColumn get chapterUrl => text()();
   IntColumn get positionMs => integer().withDefault(const Constant(0))();
-  RealColumn get speed => real().withDefault(const Constant(1.0))();
+  IntColumn get durationMs => integer().withDefault(const Constant(0))();
+  BoolColumn get isFinished => boolean().withDefault(const Constant(false))();
   DateTimeColumn get updatedAt => dateTime()();
 
   @override
-  Set<Column> get primaryKey => {itemId};
+  Set<Column> get primaryKey => {itemId, chapterUrl};
 }
 
-/// 书签（时间点/页码）
+/// 书签：某本书某章某个时间点的标记。
 class Bookmarks extends Table {
   TextColumn get id => text()();
   TextColumn get itemId =>
       text().references(MediaItems, #id, onDelete: KeyAction.cascade)();
-  TextColumn get chapterId => text().nullable()();
+  TextColumn get chapterUrl => text().nullable()();
   IntColumn get positionMs => integer().withDefault(const Constant(0))();
-  IntColumn get page => integer().nullable()();
   TextColumn get note => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
 
@@ -68,41 +64,41 @@ class Bookmarks extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-/// 收藏（type 字段区分听书/视频，互不干扰）
+/// 收藏：type 字段区分听书/视频，互不干扰。
 class Favorites extends Table {
   TextColumn get id => text()();
   TextColumn get itemId =>
       text().references(MediaItems, #id, onDelete: KeyAction.cascade)();
   TextColumn get type => text()(); // audio | video
-  TextColumn get groupName => text().withDefault(const Constant('默认'))();
   DateTimeColumn get createdAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// 历史记录（与收藏分开）
+/// 历史记录：一次播放/打开记一行，带时间；与 Progress 按时间合并成统一时间线。
 class History extends Table {
   TextColumn get id => text()();
   TextColumn get itemId =>
       text().references(MediaItems, #id, onDelete: KeyAction.cascade)();
-  TextColumn get type => text()();
+  TextColumn get type => text()(); // audio | video
+  TextColumn get chapterUrl => text().nullable()();
   DateTimeColumn get visitedAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// 日志表（关键操作与错误）
+/// 运行日志：只存数据库 Logs 表，最新 500 条；不写本地文件。
 class Logs extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get level => text()(); // info|warning|error
+  TextColumn get level => text()(); // info | warning | error
   TextColumn get message => text()();
   TextColumn get detail => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
 }
 
-/// 设置项（kv）
+/// 设置项（kv）：UA 配置、源配置以外的轻量设置也走这里。
 class KvSettings extends Table {
   TextColumn get key => text()();
   TextColumn get value => text()();
@@ -111,11 +107,11 @@ class KvSettings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-/// 源配置中心（二期预留：登录态/音色/线路）
+/// 源配置中心：登录态 / 音色 / 线路 / 额外 JSON，按源 id 一行。
 class SourceConfigs extends Table {
   TextColumn get sourceId => text()();
   TextColumn get type => text()(); // audio | video
-  TextColumn get enabled => text().withDefault(const Constant('true'))();
+  BoolColumn get enabled => boolean().withDefault(const Constant(true))();
   TextColumn get loginState => text().nullable()(); // JSON
   TextColumn get voiceList => text().nullable()(); // JSON 数组
   TextColumn get selectedVoiceId => text().nullable()();

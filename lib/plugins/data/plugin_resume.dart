@@ -1,347 +1,244 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/constants/app_constants.dart';
-import '../../features/audio/data/repository_providers.dart';
-import '../../features/audio/domain/media_item.dart' as domain;
-import '../../features/audio/presentation/audio_player_page.dart';
-import '../../features/video/presentation/video_player_page.dart';
-import '../presentation/network_audio_page.dart';
-import '../presentation/source_search_page.dart';
-import 'auto_cache.dart';
-import 'plugin_providers.dart';
-
-/// 插件源（JAR/JS）的一条断点记录：播的是哪个源的哪本书/视频、播到第几集/第几章、播到第几分第几秒。
-///
-/// 本地书库的断点走 LibraryRepository（数据库）；插件源不进书库，
-/// 断点单独存在 SharedPreferences 里，一本书/一个视频只记一条。
+/// 断点续播记录（插件源的书 / 视频）。
 class PluginResume {
-  final String key; // sourceId|bookUrl
+  /// 书的唯一键：`sourceId|bookUrl`。
+  final String bookKey;
+
+  /// 源 id。
   final String sourceId;
-  final String sourceName;
-  final String bookTitle;
-  final String bookUrl;
-  final String coverUrl;
-  final String chapterName;
-  final String chapterUrl;
+
+  /// 书名（没有就留空）。
+  final String title;
+
+  /// 当前章节下标。
   final int chapterIndex;
+
+  /// 当前章节名（没有就留空）。
+  final String chapterTitle;
+
+  /// 当前播放位置（毫秒）。
   final int positionMs;
+
+  /// 当前章节总时长（毫秒，0 表示未知）。
   final int durationMs;
+
+  /// 源类型：audio / video。
+  final String type;
+
+  /// 当前线路 id（视频源切线续播用；没有线路的源留空）。
   final String lineId;
+
+  /// 当前线路名（续播时显示 / 按线名恢复，没有留空）。
   final String lineName;
+
+  /// 当前音色 id（听书源切音色用；没有留空）。
   final String voiceId;
-  final String type; // audio | video
-  final int updatedAt; // epoch ms
+
+  /// 上次保存时间（毫秒时间戳）。
+  final int updatedAt;
 
   const PluginResume({
-    required this.key,
+    required this.bookKey,
     required this.sourceId,
-    required this.sourceName,
-    required this.bookTitle,
-    required this.bookUrl,
-    this.coverUrl = '',
-    required this.chapterName,
-    required this.chapterUrl,
+    required this.title,
     required this.chapterIndex,
+    required this.chapterTitle,
     required this.positionMs,
     required this.durationMs,
+    this.type = 'audio',
     this.lineId = '',
     this.lineName = '',
     this.voiceId = '',
-    required this.type,
     required this.updatedAt,
   });
 
-  double get progress =>
-      durationMs > 0 ? (positionMs / durationMs).clamp(0.0, 1.0) : 0.0;
+  /// 播完的进度（>=95% 视为播完，保存时删记录）。
+  bool get isFinished => durationMs > 0 && positionMs >= durationMs * 0.95;
 
-  bool get isAudio => type == AppConstants.typeAudio;
-
-  /// 播完（进度 >= 95%）就不算断点了
-  bool get finished => progress >= 0.95;
-
-  Map<String, dynamic> toJson() => {
-        'key': key,
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'bookKey': bookKey,
         'sourceId': sourceId,
-        'sourceName': sourceName,
-        'bookTitle': bookTitle,
-        'bookUrl': bookUrl,
-        'coverUrl': coverUrl,
-        'chapterName': chapterName,
-        'chapterUrl': chapterUrl,
+        'title': title,
         'chapterIndex': chapterIndex,
+        'chapterTitle': chapterTitle,
         'positionMs': positionMs,
         'durationMs': durationMs,
+        'type': type,
         'lineId': lineId,
         'lineName': lineName,
         'voiceId': voiceId,
-        'type': type,
         'updatedAt': updatedAt,
       };
 
-  static PluginResume? fromJson(Map<String, dynamic> j) {
-    try {
-      return PluginResume(
-        key: '${j['key'] ?? ''}',
-        sourceId: '${j['sourceId'] ?? ''}',
-        sourceName: '${j['sourceName'] ?? ''}',
-        bookTitle: '${j['bookTitle'] ?? ''}',
-        bookUrl: '${j['bookUrl'] ?? ''}',
-        coverUrl: '${j['coverUrl'] ?? ''}',
-        chapterName: '${j['chapterName'] ?? ''}',
-        chapterUrl: '${j['chapterUrl'] ?? ''}',
-        chapterIndex: (j['chapterIndex'] as num?)?.toInt() ?? 0,
-        positionMs: (j['positionMs'] as num?)?.toInt() ?? 0,
-        durationMs: (j['durationMs'] as num?)?.toInt() ?? 0,
-        lineId: '${j['lineId'] ?? ''}',
-        lineName: '${j['lineName'] ?? ''}',
-        voiceId: '${j['voiceId'] ?? ''}',
-        type: '${j['type'] ?? AppConstants.typeAudio}',
-        updatedAt: (j['updatedAt'] as num?)?.toInt() ?? 0,
+  factory PluginResume.fromJson(Map<String, dynamic> m) => PluginResume(
+        bookKey: '${m['bookKey'] ?? ''}',
+        sourceId: '${m['sourceId'] ?? ''}',
+        title: '${m['title'] ?? ''}',
+        chapterIndex: int.tryParse('${m['chapterIndex']}') ?? 0,
+        chapterTitle: '${m['chapterTitle'] ?? ''}',
+        positionMs: int.tryParse('${m['positionMs']}') ?? 0,
+        durationMs: int.tryParse('${m['durationMs']}') ?? 0,
+        type: '${m['type'] ?? 'audio'}',
+        lineId: '${m['lineId'] ?? ''}',
+        lineName: '${m['lineName'] ?? ''}',
+        voiceId: '${m['voiceId'] ?? ''}',
+        updatedAt: int.tryParse('${m['updatedAt']}') ??
+            DateTime.now().millisecondsSinceEpoch,
       );
-    } catch (_) {
-      return null;
-    }
-  }
+
+  PluginResume copyWith({
+    String? title,
+    int? chapterIndex,
+    String? chapterTitle,
+    int? positionMs,
+    int? durationMs,
+    String? type,
+    String? lineId,
+    String? lineName,
+    String? voiceId,
+    int? updatedAt,
+  }) =>
+      PluginResume(
+        bookKey: bookKey,
+        sourceId: sourceId,
+        title: title ?? this.title,
+        chapterIndex: chapterIndex ?? this.chapterIndex,
+        chapterTitle: chapterTitle ?? this.chapterTitle,
+        positionMs: positionMs ?? this.positionMs,
+        durationMs: durationMs ?? this.durationMs,
+        type: type ?? this.type,
+        lineId: lineId ?? this.lineId,
+        lineName: lineName ?? this.lineName,
+        voiceId: voiceId ?? this.voiceId,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
 }
 
+/// 断点续播键：`sourceId|bookUrl`（播放器组和这里必须用同一格式）。
 String resumeKey(String sourceId, String bookUrl) => '$sourceId|$bookUrl';
 
-/// 断点存储（SharedPreferences，最多记 10 条，按更新时间倒序）
+/// 断点续播存取（SharedPreferences，最多存 10 条，超了删最旧的）。
 class PluginResumeStore {
-  static Future<List<PluginResume>> loadAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(AppConstants.keyPluginResumeList) ?? [];
-    final out = <PluginResume>[];
-    for (final s in raw) {
-      try {
-        final r = PluginResume.fromJson(
-            jsonDecode(s) as Map<String, dynamic>);
-        if (r != null && !r.finished) out.add(r);
-      } catch (_) {}
+  static const String _key = 'plugin_resume_list';
+  static const int maxItems = 10;
+
+  final SharedPreferences _prefs;
+
+  PluginResumeStore(this._prefs);
+
+  Map<String, PluginResume> _loadAll() {
+    final raw = _prefs.getString(_key);
+    if (raw == null || raw.isEmpty) return <String, PluginResume>{};
+    try {
+      final list = jsonDecode(raw);
+      if (list is! List) return <String, PluginResume>{};
+      final out = <String, PluginResume>{};
+      for (final e in list) {
+        if (e is Map) {
+          final r = PluginResume.fromJson(Map<String, dynamic>.from(e));
+          if (r.bookKey.isNotEmpty) out[r.bookKey] = r;
+        }
+      }
+      return out;
+    } catch (_) {
+      return <String, PluginResume>{};
     }
-    out.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return out;
   }
 
-  static Future<PluginResume?> load(String key) async {
-    final all = await loadAll();
-    for (final r in all) {
-      if (r.key == key) return r;
-    }
-    return null;
+  Future<void> _saveAll(Map<String, PluginResume> map) async {
+    final list = map.values.toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final trimmed = list.length > maxItems ? list.sublist(0, maxItems) : list;
+    await _prefs.setString(
+        _key, jsonEncode(trimmed.map((e) => e.toJson()).toList()));
   }
 
-  /// 保存一条断点（同 key 的旧记录被盖掉；播完的记录直接删掉）
-  static Future<void> save(PluginResume r) async {
-    final prefs = await SharedPreferences.getInstance();
-    final all = await loadAll();
-    final next = <PluginResume>[];
-    for (final e in all) {
-      if (e.key != r.key) next.add(e);
-    }
-    if (!r.finished) {
-      next.insert(0, r);
-    }
-    final trimmed = next.take(10).toList();
-    await prefs.setStringList(
-      AppConstants.keyPluginResumeList,
-      trimmed.map((e) => jsonEncode(e.toJson())).toList(),
-    );
-  }
+  Future<PluginResume?> get(String bookKey) async => _loadAll()[bookKey];
 
-  static Future<void> remove(String key) async {
-    final prefs = await SharedPreferences.getInstance();
-    final all = await loadAll();
-    final next = all.where((e) => e.key != key).toList();
-    await prefs.setStringList(
-      AppConstants.keyPluginResumeList,
-      next.map((e) => jsonEncode(e.toJson())).toList(),
-    );
-  }
-
-  /// 清空全部断点（历史页“清空历史记录”时一起清）
-  static Future<void> clearAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(AppConstants.keyPluginResumeList);
-  }
-}
-
-// ---------------------------------------------------------------- 续播入口
-
-/// 点“继续”卡片：直接从断点接着播（先向源要播放地址，再进播放页）
-Future<void> openResume(
-    BuildContext context, WidgetRef ref, PluginResume r) async {
-  final source = await ref.read(sourceRepositoryProvider).byId(r.sourceId);
-  if (source == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('这个源已经被删除了')));
-    return;
-  }
-  try {
-    final engine = engineForSource(ref, source);
-    await engine.attach(source);
-    final raw = await engine.invoke('content', params: {
-      'url': r.chapterUrl,
-      'voiceId': r.voiceId,
-      'lineId': r.lineId,
-    });
-    final url = extractMediaUrl(raw);
-    if (url.isEmpty) throw Exception('源没有返回可播放地址');
-    final headers = extractMediaHeaders(raw);
-    if (r.isAudio) {
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => NetworkAudioPage(
-          url: url,
-          headers: headers,
-          title: r.chapterName,
-          subtitle: r.bookTitle,
-          sourceId: r.sourceId,
-          bookName: r.bookTitle,
-          coverUrl: r.coverUrl,
-          startAt: Duration(milliseconds: r.positionMs),
-          playlist: const [],
-          startIndex: 0,
-        ),
-      ));
+  /// 保存进度。播完（>=95%）时删记录，不留“已播完”的残条目。
+  Future<void> save(PluginResume resume) async {
+    final all = _loadAll();
+    if (resume.isFinished) {
+      all.remove(resume.bookKey);
     } else {
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => VideoPlayerPage(
-          path: url,
-          network: true,
-          headers: headers,
-          title: '${r.bookTitle} · ${r.chapterName}',
-          startAtMs: r.positionMs,
-          currentLineId: r.lineId.isEmpty ? null : r.lineId,
-        ),
-      ));
+      all[resume.bookKey] = resume;
     }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('续播失败：$e')));
+    await _saveAll(all);
+  }
+
+  Future<void> clear(String bookKey) async {
+    final all = _loadAll();
+    all.remove(bookKey);
+    await _saveAll(all);
+  }
+
+  /// 全部记录（最近的在前，首页“继续收听”用）。
+  Future<List<PluginResume>> listAll() async {
+    final list = _loadAll().values.toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return list;
   }
 }
 
-/// 中间大播放键 / 顶栏播放键：打开最近在播的那一条；什么都没播过就进空播放页
-Future<void> openMostRecentResume(BuildContext context, WidgetRef ref) async {
-  // 插件源断点（最新一条）
-  final plugin = await PluginResumeStore.loadAll();
-  // 本地书库断点（最新一条）
-  domain.MediaItem? local;
-  try {
-    final audio = await ref
-        .read(continueListProvider(AppConstants.typeAudio).future)
-        .catchError((_) => <domain.MediaItem>[]);
-    final video = await ref
-        .read(continueListProvider(AppConstants.typeVideo).future)
-        .catchError((_) => <domain.MediaItem>[]);
-    final all = <domain.MediaItem>[...audio, ...video]..sort((a, b) {
-        final x = a.lastReadAt ?? a.addedAt;
-        final y = b.lastReadAt ?? b.addedAt;
-        return y.compareTo(x);
-      });
-    if (all.isNotEmpty) local = all.first;
-  } catch (_) {}
+/// 播放器组调用的顶层函数（三个必填参数的签名按契约一字不差；
+/// type/lineId/lineName/voiceId 是后加的可选命名参数，不传时沿用旧记录）。
+/// 注意：这里每次都重新拿 SharedPreferences 实例——播放器在后台
+/// 隔离区（audio_service）里也可能调，Riverpod 的 provider 不一定在。
+Future<SharedPreferences> _resumePrefs() =>
+    SharedPreferences.getInstance();
 
-  final pluginAt =
-      plugin.isEmpty ? 0 : plugin.first.updatedAt;
-  final localAt = local == null
-      ? 0
-      : (local.lastReadAt ?? local.addedAt).millisecondsSinceEpoch;
-
-  if (plugin.isEmpty && local == null) {
-    await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const EmptyPlayerPage()));
-    return;
-  }
-  if (pluginAt >= localAt) {
-    await openResume(context, ref, plugin.first);
-    return;
-  }
-  await openLocalItem(context, ref, local!);
+/// 取一条断点记录，没有返回 null。
+/// [bookKey] 格式：`sourceId|bookUrl`。
+Future<Map<String, dynamic>?> getPluginResume(String bookKey) async {
+  final store = PluginResumeStore(await _resumePrefs());
+  final r = await store.get(bookKey);
+  return r?.toJson();
 }
 
-/// 打开本地书库的一条（按保存的断点接着播）
-Future<void> openLocalItem(
-    BuildContext context, WidgetRef ref, domain.MediaItem item) async {
-  final chapters =
-      await ref.read(libraryRepositoryProvider).chapters(item.id);
-  if (chapters.isEmpty) return;
-  final progress =
-      await ref.read(libraryRepositoryProvider).getProgress(item.id);
-  if (item.isAudio) {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => AudioPlayerPage(
-        item: item,
-        initialChapterId: progress?.chapterId,
-        initialPositionMs: progress?.positionMs,
-      ),
-    ));
-  } else {
-    final paths = chapters.map((c) => c.path!).toList();
-    var startIndex = 0;
-    if (progress?.chapterId != null) {
-      final idx =
-          chapters.indexWhere((c) => c.id == progress!.chapterId);
-      if (idx >= 0) startIndex = idx;
-    }
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => VideoPlayerPage(
-        path: paths[startIndex],
-        playlist: paths,
-        initialIndex: startIndex,
-        title: item.title,
-        startAtMs: progress?.positionMs ?? 0,
-      ),
-    ));
-  }
+/// 保存断点。没有旧记录时建一条新记录（标题/章节名/源 id 不传就留空）。
+/// 播完（>=95%）时删记录。
+/// [type]：新记录的类型（'audio'/'video'）。只凭 bookKey 认不出是视频还是
+/// 音频，调用方知道类型时请传进来；不传时沿用旧记录的 type，再没有才默认 audio。
+/// [title]/[chapterTitle]/[sourceId]/[lineId]/[lineName]/[voiceId]：不传时
+/// 沿用旧记录的值。
+/// [bookKey] 格式：`sourceId|bookUrl`。
+Future<void> savePluginResume(String bookKey,
+    {required int chapterIndex,
+    required int positionMs,
+    required int durationMs,
+    String? type,
+    String? title,
+    String? chapterTitle,
+    String? sourceId,
+    String? lineId,
+    String? lineName,
+    String? voiceId}) async {
+  final store = PluginResumeStore(await _resumePrefs());
+  final old = await store.get(bookKey);
+  final now = DateTime.now().millisecondsSinceEpoch;
+  final parts = bookKey.split('|');
+  final resume = PluginResume(
+    bookKey: bookKey,
+    sourceId: sourceId ?? old?.sourceId ?? (parts.isNotEmpty ? parts.first : ''),
+    title: title ?? old?.title ?? '',
+    chapterIndex: chapterIndex,
+    chapterTitle: chapterTitle ?? old?.chapterTitle ?? '',
+    positionMs: positionMs,
+    durationMs: durationMs,
+    type: type ?? old?.type ?? 'audio',
+    lineId: lineId ?? old?.lineId ?? '',
+    lineName: lineName ?? old?.lineName ?? '',
+    voiceId: voiceId ?? old?.voiceId ?? '',
+    updatedAt: now,
+  );
+  await store.save(resume);
 }
 
-/// 什么都没播过时打开的空播放页
-class EmptyPlayerPage extends StatelessWidget {
-  const EmptyPlayerPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('播放器')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.play_circle_outline,
-                  size: 72,
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withOpacity(0.6)),
-              const SizedBox(height: 18),
-              const Text('还没有在播的内容',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Text('搜一部喜欢的书或视频，播一半退出后会记在这里',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pushReplacement(MaterialPageRoute(
-                    builder: (_) => const SourceSearchPage(
-                        type: AppConstants.typeAudio),
-                  ));
-                },
-                icon: const Icon(Icons.search, size: 18),
-                label: const Text('去找'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+/// 清掉一条断点记录。
+Future<void> clearPluginResume(String bookKey) async {
+  final store = PluginResumeStore(await _resumePrefs());
+  await store.clear(bookKey);
 }

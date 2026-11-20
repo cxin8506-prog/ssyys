@@ -1,233 +1,195 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/log/app_logger.dart';
 import '../../core/utils/path_utils.dart';
+import '../engine/plugin_engine.dart';
 import '../model/plugin_source.dart';
-import 'plugin_providers.dart';
 
-/// 从 content 返回里取播放地址（与详情页同一套规则）
-String extractMediaUrl(dynamic r) {
-  if (r == null) return '';
-  if (r is String) return r.startsWith('http') ? r : '';
-  if (r is Map) {
-    for (final k in ['url', 'audioUrl', 'playUrl', 'src', 'mp3']) {
-      final v = r[k];
-      if (v != null && '$v'.startsWith('http')) return '$v';
-    }
-    for (final k in ['data', 'result', 'content']) {
-      final v = r[k];
-      if (v is Map) {
-        final inner = extractMediaUrl(v);
-        if (inner.isNotEmpty) return inner;
-      }
-    }
+/// 从源返回的播放结果里取出真实媒体地址（mp3/m4a/mp4 直链）。
+/// 源返回的可能是纯字符串，也可能是 {url, headers, ...}。
+String? extractMediaUrl(dynamic content) {
+  if (content is String) {
+    final u = content.trim();
+    return u.isEmpty ? null : u;
   }
-  return '';
+  if (content is Map) {
+    for (final key in const <String>['url', 'audioUrl', 'playUrl', 'src']) {
+      final v = content[key];
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    }
+    // {url: {url: ...}} 这种嵌套也处理一下。
+    final nested = content['url'];
+    if (nested is Map) return extractMediaUrl(nested);
+  }
+  return null;
 }
 
-/// 从 content 返回里取播放请求头（没有就是空）
-Map<String, String> extractMediaHeaders(dynamic r) {
-  if (r is Map) {
-    final h = r['headers'];
-    if (h is Map) {
-      return {for (final e in h.entries) '${e.key}': '${e.value}'};
-    }
+/// 从源返回的播放结果里取出请求头（有些站要带 Referer / Cookie 才给下）。
+Map<String, String> extractMediaHeaders(dynamic content) {
+  if (content is! Map) return <String, String>{};
+  final out = <String, String>{};
+  final headers = content['headers'];
+  if (headers is Map) {
+    headers.forEach((k, v) {
+      if (v != null) out['$k'] = '$v';
+    });
   }
-  return const {};
+  return out;
 }
 
-/// 自动缓存：播完当前一集，自动把后面几集下载到本地。
-/// 只下直链 mp4/mp3/m4a，m3u8（分段流）不下。默认关，不打开不偷偷缓存。
+/// 自动缓存（只下直链音频，m3u8 不下；视频源与 isCacheable()==false 的源不下）。
+/// 默认关，用户在设置里开；只在 WiFi 下才下（默认），下满上限删最旧的。
 class AutoCache {
-  static Future<Map<String, String>> _loadMap() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(AppConstants.keyAutoCacheMap) ?? '{}';
-    try {
-      final m = jsonDecode(raw) as Map<String, dynamic>;
-      return {for (final e in m.entries) e.key: '${e.value}'};
-    } catch (_) {
-      return {};
-    }
+  final SharedPreferences _prefs;
+
+  AutoCache(this._prefs);
+
+  bool get enabled => _prefs.getBool(AppConstants.keyAutoCache) ?? false;
+
+  /// 每本书最多缓存几集（默认 3）。
+  int get countLimit =>
+      _prefs.getInt(AppConstants.keyAutoCacheCount) ?? 3;
+
+  /// 只在 WiFi 下缓存（默认开）。
+  bool get wifiOnly =>
+      _prefs.getBool(AppConstants.keyAutoCacheWifiOnly) ?? true;
+
+  /// 缓存上限（MB，默认 500，超了删最旧的）。
+  int get sizeLimitMb =>
+      _prefs.getInt(AppConstants.keyAutoCleanLimit) ?? 500;
+
+  Future<Directory> _cacheDir() async {
+    final dir = Directory(
+        p.join((await PathUtils.appFilesDir).path, 'audio_cache'));
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
   }
 
-  static Future<void> _saveMap(Map<String, String> map) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.keyAutoCacheMap, jsonEncode(map));
+  String _fileName(String bookUrl, int chapterIndex) {
+    final slug = bookUrl
+        .replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+    final short =
+        slug.length > 40 ? slug.substring(slug.length - 40) : slug;
+    return 'audio_${short}_$chapterIndex.mp3';
   }
 
-  static String cacheKey(String sourceId, String bookUrl, String chapterUrl) =>
-      '$sourceId|$bookUrl|$chapterUrl';
-
-  /// 这一集有没有缓存（文件还在才算）
-  static Future<String?> cachedPathFor(
-      String sourceId, String bookUrl, String chapterUrl) async {
-    final map = await _loadMap();
-    final key = cacheKey(sourceId, bookUrl, chapterUrl);
-    final p = map[key];
-    if (p == null || p.isEmpty) return null;
-    if (!File(p).existsSync()) {
-      map.remove(key);
-      await _saveMap(map);
-      return null;
-    }
-    return p;
+  /// 某集的本地缓存路径（没下完返回 null）。
+  Future<String?> cachedPathFor(String bookUrl, int chapterIndex) async {
+    final f = File(p.join((await _cacheDir()).path,
+        _fileName(bookUrl, chapterIndex)));
+    return await f.exists() ? f.path : null;
   }
 
-  /// 这本书已经缓存了哪些集（章节地址集合，供选集列表标下载图标）
-  static Future<Set<String>> cachedChapterUrls(
-      String sourceId, String bookUrl) async {
-    final map = await _loadMap();
-    final prefix = '$sourceId|$bookUrl|';
-    final out = <String>{};
-    for (final k in map.keys) {
-      if (k.startsWith(prefix)) out.add(k.substring(prefix.length));
+  /// 已缓存的章节地址（播放器播之前先问这里，有缓存直接播本地）。
+  Future<List<String>> cachedChapterUrls(
+      String bookUrl, List<Map<String, dynamic>> chapters) async {
+    final out = <String>[];
+    for (var i = 0; i < chapters.length; i++) {
+      final path = await cachedPathFor(bookUrl, i);
+      if (path != null) out.add(path);
     }
     return out;
   }
 
-  /// 缓存频率对应的进度阈值：播到这个比例才触发缓存（暂停时不触发）
-  /// standard 标准 30% / fast 较快 15% / slow 较慢 50%
-  static double thresholdFor(String freq) {
-    switch (freq) {
-      case 'fast':
-        return 0.15;
-      case 'slow':
-        return 0.5;
-      default:
-        return 0.3;
+  /// 已缓存的集数。
+  Future<int> cachedCount(String bookUrl) async {
+    var n = 0;
+    final dir = await _cacheDir();
+    await for (final e in dir.list(followLinks: false)) {
+      if (e is File && p.basename(e.path).contains('_')) n++;
     }
-  }
-
-  /// 当前缓存的集数（文件个数）
-  static Future<int> cachedCount() async {
-    final map = await _loadMap();
-    return map.length;
-  }
-
-  /// 清除所有音频缓存：删文件 + 清记录，返回删掉的个数
-  static Future<int> clearAllAudioCache() async {
-    final map = await _loadMap();
-    final n = map.length;
-    for (final p in map.values) {
-      try {
-        final f = File(p);
-        if (f.existsSync()) f.deleteSync();
-      } catch (_) {}
-    }
-    await _saveMap({});
-    try {
-      final dir = await PathUtils.cacheDir;
-      final cacheDir = Directory('${dir.path}/autocache');
-      if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
-    } catch (_) {}
     return n;
   }
 
-  /// 按个数上限清理：超过上限时按文件时间从最老的开始删，直到不超
-  /// limit <= 0 表示不清理
-  static Future<void> enforceCountLimit(int limit) async {
-    if (limit <= 0) return;
-    final map = await _loadMap();
-    if (map.length <= limit) return;
-    final entries = <MapEntry<String, DateTime>>[];
-    for (final e in map.entries) {
-      DateTime t;
-      try {
-        t = File(e.value).lastModifiedSync();
-      } catch (_) {
-        t = DateTime.fromMillisecondsSinceEpoch(0);
-      }
-      entries.add(MapEntry(e.key, t));
+  /// 缓存总大小（字节）。
+  Future<int> totalCacheSize() async {
+    var total = 0;
+    final dir = await _cacheDir();
+    await for (final e in dir.list(recursive: true, followLinks: false)) {
+      if (e is File) total += await e.length();
     }
-    entries.sort((a, b) => a.value.compareTo(b.value));
-    final over = map.length - limit;
-    for (var i = 0; i < over && i < entries.length; i++) {
-      final key = entries[i].key;
+    return total;
+  }
+
+  /// 清掉全部音频缓存。
+  Future<void> clearAllAudioCache() async {
+    final dir = await _cacheDir();
+    if (!await dir.exists()) return;
+    await for (final e in dir.list(followLinks: false)) {
       try {
-        final f = File(map[key]!);
-        if (f.existsSync()) f.deleteSync();
+        await e.delete(recursive: true);
       } catch (_) {}
-      map.remove(key);
     }
-    await _saveMap(map);
   }
-  static Future<bool> isWifi() async {
+
+  /// 超过上限删最旧的（按修改时间）。
+  Future<void> enforceCountLimit() async {
+    final dir = await _cacheDir();
+    final files = <File>[];
+    await for (final e in dir.list(followLinks: false)) {
+      if (e is File) files.add(e);
+    }
+    files.sort((a, b) =>
+        a.statSync().modified.compareTo(b.statSync().modified));
+    var total = 0;
+    for (final f in files) {
+      total += await f.length();
+    }
+    final limitBytes = sizeLimitMb * 1024 * 1024;
+    var i = 0;
+    while ((files.length - i > countLimit || total > limitBytes) &&
+        i < files.length) {
+      final f = files[i];
+      try {
+        total -= await f.length();
+        await f.delete();
+      } catch (_) {}
+      i++;
+    }
+  }
+
+  /// 当前是不是 WiFi（用网络类型判断，拿不到就当不是）。
+  Future<bool> isWifi() async {
     try {
-      final ifs = await NetworkInterface.list();
-      return ifs.any((i) => i.name.startsWith('wlan'));
-    } catch (_) {
-      return true;
-    }
-  }
-
-  static String? _extOf(String url) {
-    final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
-    if (path.endsWith('.mp4')) return '.mp4';
-    if (path.endsWith('.mp3')) return '.mp3';
-    if (path.endsWith('.m4a')) return '.m4a';
-    return null; // m3u8 / 未知格式不下
-  }
-
-  static int _stableHash(String s) {
-    var h = 0;
-    for (final c in s.codeUnits) {
-      h = ((h * 31) + c) & 0x7fffffff;
-    }
-    return h;
-  }
-
-  static Future<String?> _download(
-      String url, Map<String, String> headers, Directory dir, String name) async {
-    try {
-      final client = HttpClient();
-      final req = await client.getUrl(Uri.parse(url));
-      headers.forEach(req.headers.set);
-      final resp = await req.close();
-      if (resp.statusCode != 200) return null;
-      final file = File('${dir.path}/$name');
-      final sink = file.openWrite();
-      await resp.pipe(sink);
-      await sink.close();
-      return file.path;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 问源这本书能不能缓存（我的听书 isCacheable）：
-  /// 源没实现这个方法、或调用失败，一律按“能缓存”处理（默认可缓存），
-  /// 绝不因为问不出来就把整本书的缓存都禁掉；
-  /// 源明确返回 false 才不下。失败也不抛错、不在集数上留任何标记。
-  static Future<bool> _sourceAllowsCache(
-      dynamic engine, PluginSource source, String bookUrl) async {
-    try {
-      await engine.attach(source);
-      final has = await engine.hasMethod('isCacheable');
-      if (has != true) return true;
-      final r = await engine.invoke('isCacheable', params: {'url': bookUrl});
-      if (r is bool) return r;
-      if (r is Map) {
-        for (final k in const ['isCacheable', 'cacheable', 'ok', 'value']) {
-          if (r[k] is bool) return r[k] as bool;
+      final interfaces = await NetworkInterface.list();
+      for (final i in interfaces) {
+        if (i.name.toLowerCase().contains('wlan') ||
+            i.name.toLowerCase().contains('wifi')) {
+          return true;
         }
       }
-      if (r is String) {
-        final t = r.trim().toLowerCase();
-        if (t == 'false' || t == '0') return false;
-      }
-      return true;
-    } catch (_) {
-      return true;
-    }
+    } catch (_) {}
+    return false;
   }
 
-  /// 播完当前一集后，后台预取后面 count 集（不阻塞播放，失败就跳过）
-  static Future<void> prefetch({
+  /// 某集该不该预取：开关开着、是音频源、源允许缓存、还没下过、
+  /// 不是 m3u8、WiFi 条件满足。
+  Future<bool> shouldPrefetch({
+    required PluginSource source,
+    required String bookUrl,
+    required int chapterIndex,
+    required bool sourceCacheable,
+  }) async {
+    if (!enabled) return false;
+    if (!source.isAudio) return false;
+    if (!sourceCacheable) return false;
+    if (await cachedPathFor(bookUrl, chapterIndex) != null) return false;
+    if (wifiOnly && !await isWifi()) return false;
+    return true;
+  }
+
+  /// 预取下一集（播放器在当前集播到一半时调）。
+  /// [engine] 用来调源的 content 取真实地址；[lineId]/[voiceId] 传给源。
+  Future<void> prefetch({
     required WidgetRef ref,
+    required PluginEngine engine,
     required PluginSource source,
     required String bookUrl,
     required List<Map<String, dynamic>> chapters,
@@ -235,50 +197,43 @@ class AutoCache {
     String? lineId,
     String? voiceId,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!(prefs.getBool(AppConstants.keyAutoCache) ?? false)) return;
-    // 视频源不缓存：isCacheable() 是 false 的源一律不下，App 层不绕过
-    if (source.type != AppConstants.typeAudio) return;
-    final engine = engineForSource(ref, source);
-    if (!await _sourceAllowsCache(engine, source, bookUrl)) return;
-    final count = prefs.getInt(AppConstants.keyAutoCacheCount) ?? 3;
-    final wifiOnly = prefs.getBool(AppConstants.keyAutoCacheWifiOnly) ?? true;
-    if (wifiOnly && !await isWifi()) return;
-    final dir = await PathUtils.cacheDir;
-    final cacheDir = Directory('${dir.path}/autocache');
-    if (!cacheDir.existsSync()) cacheDir.createSync(recursive: true);
-
-    final map = await _loadMap();
-    for (var i = currentIndex + 1;
-        i <= currentIndex + count && i < chapters.length;
-        i++) {
-      final chapterUrl = '${chapters[i]['url']}';
-      if (chapterUrl.isEmpty) continue;
-      final key = cacheKey(source.id, bookUrl, chapterUrl);
-      if (map.containsKey(key)) continue;
-      try {
-        await engine.attach(source);
-        final raw = await engine.invoke('content', params: {
-          'url': chapterUrl,
-          'voiceId': voiceId,
-          'lineId': lineId,
-        });
-        final url = extractMediaUrl(raw);
-        if (url.isEmpty) continue;
-        final ext = _extOf(url);
-        if (ext == null) continue;
-        final name = '${_stableHash(chapterUrl)}$ext';
-        final path = await _download(
-            url, extractMediaHeaders(raw), cacheDir, name);
-        if (path != null) map[key] = path;
-      } catch (_) {
-        // 某一集下不下来就跳过，不影响播放
-      }
+    if (!enabled) return;
+    if (!source.isAudio) return;
+    try {
+      final cacheable = await engine.isCacheable();
+      if (!cacheable) return;
+    } catch (_) {
+      return;
     }
-    await _saveMap(map);
-    // 下完按个数上限清理（默认 40 个，0=不清理）
-    final cleanLimit =
-        prefs.getInt(AppConstants.keyAutoCleanLimit) ?? 40;
-    await enforceCountLimit(cleanLimit);
+    final next = currentIndex + 1;
+    if (next < 0 || next >= chapters.length) return;
+    final chapter = chapters[next];
+    final url = '${chapter['url'] ?? ''}';
+    if (url.isEmpty) return;
+    if (await cachedPathFor(bookUrl, next) != null) return;
+    if (wifiOnly && !await isWifi()) return;
+    try {
+      final content = await engine.content(
+          url: url, lineId: lineId, voiceId: voiceId);
+      final mediaUrl = extractMediaUrl(content);
+      if (mediaUrl == null) return;
+      // m3u8 是分片流，下不了整文件，不预取。
+      if (mediaUrl.toLowerCase().contains('.m3u8')) return;
+      final headers = extractMediaHeaders(content);
+      final resp = await http
+          .get(Uri.parse(mediaUrl), headers: headers)
+          .timeout(const Duration(seconds: 120));
+      if (resp.statusCode != 200) return;
+      final file = File(p.join((await _cacheDir()).path,
+          _fileName(bookUrl, next)));
+      await file.writeAsBytes(resp.bodyBytes);
+      await enforceCountLimit();
+      appLogger.info('自动缓存完成', detail: '${source.name} 第 ${next + 1} 集');
+    } catch (e) {
+      appLogger.warning('自动缓存失败', detail: '$e');
+    }
   }
+
+  /// 某本书的缓存阈值（MB）：默认按上限来，播放器组可按需改。
+  int thresholdFor(String bookUrl) => sizeLimitMb;
 }
