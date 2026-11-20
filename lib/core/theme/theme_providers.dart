@@ -17,12 +17,13 @@ final themeModeProvider = StateProvider<int>((ref) {
   return v;
 });
 
-/// 主题色：0 暖阳橙 #FF6B4A（默认）/ 1 海蓝 / 2 青竹绿 / 3 樱花粉。
-/// 墨夜（旧下标 4）不开放：读到旧存量 4 时迁移回 0，不再提供入口。
+/// 主题色：0 暖阳橙 / 1 海蓝 / 2 青竹绿 / 3 樱花粉（默认）。
+/// 默认改成樱花粉：这是二次元向 App，第一眼就应该是粉而不是橙。
+/// 墨夜（旧下标 4）不开放：读到旧存量 4 时迁移回 3，不再提供入口。
 final themeColorProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);
-  final v = prefs.getInt('theme_color') ?? 0;
-  if (v < 0 || v > 3) return 0;
+  final v = prefs.getInt('theme_color') ?? 3;
+  if (v < 0 || v > 3) return 3;
   return v;
 });
 
