@@ -36,6 +36,13 @@ class PluginSource {
   final int installedAt;
   final int sizeBytes;
 
+  /// 随身听书多源插件：所属插件包的目录 id（多个源共用一份解压目录）。
+  /// 单脚本旧写法里它就等于源自己的 id。
+  final String? pluginId;
+
+  /// 随身听书格式：registerSource 的 id。旧写法为空。
+  final String? sstsId;
+
   PluginSource({
     required this.id,
     required this.name,
@@ -53,12 +60,15 @@ class PluginSource {
     this.enabled = true,
     required this.installedAt,
     this.sizeBytes = 0,
+    this.pluginId,
+    this.sstsId,
   });
 
   bool get isAudio => type == 'audio';
   bool get isJar => format == 'jar';
   bool get isJsZip => format == 'jsZip';
   bool get isTingShu => format == 'tingShu';
+  bool get isSsts => sstsId != null && sstsId!.isNotEmpty;
 
   String get formatLabel => isTingShu
       ? 'JAR 源包'
@@ -82,6 +92,8 @@ class PluginSource {
         enabled: enabled ?? this.enabled,
         installedAt: installedAt,
         sizeBytes: sizeBytes,
+        pluginId: pluginId,
+        sstsId: sstsId,
       );
 
   Map<String, dynamic> toJson() => {
@@ -101,6 +113,8 @@ class PluginSource {
         'enabled': enabled,
         'installedAt': installedAt,
         'sizeBytes': sizeBytes,
+        'pluginId': pluginId,
+        'sstsId': sstsId,
       };
 
   factory PluginSource.fromJson(Map<String, dynamic> j) => PluginSource(
@@ -120,6 +134,8 @@ class PluginSource {
         enabled: j['enabled'] == null ? true : j['enabled'] == true,
         installedAt: int.tryParse('${j['installedAt']}') ?? 0,
         sizeBytes: int.tryParse('${j['sizeBytes']}') ?? 0,
+        pluginId: j['pluginId']?.toString(),
+        sstsId: j['sstsId']?.toString(),
       );
 }
 

@@ -89,9 +89,9 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
       try {
         var entry = LoginEntry.parse(await repo.readManifest(s));
         // JAR 源没有 manifest，问引擎的 ILogin
-        if ((entry == null || !entry.valid) && s.isTingShu) {
+        if ((entry == null || !entry.valid) && (s.isTingShu || s.isSsts)) {
           try {
-            final engine = ref.read(tingShuEngineProvider);
+            final engine = engineForSource(ref, s);
             await engine.attach(s);
             final info = await engine.loginInfo();
             final url = '${info?['url'] ?? ''}'.trim();
@@ -434,7 +434,15 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
       // 类型交给仓储自动识别，不再让用户选听书/视频
       final list = ext == 'jar'
           ? await repo.installJar(path)
-          : [await repo.installZip(path)];
+          : await repo.installZip(path);
+      // 重装时把旧的 JS 会话放掉，下次打开按新脚本重新加载，
+      // 不然内存里的旧脚本还会继续用。
+      if (ext != 'jar') {
+        final jsEngine = ref.read(jsPluginEngineProvider);
+        for (final s in list) {
+          jsEngine.dropSession(s.id);
+        }
+      }
       ref.invalidate(sourceListProvider);
       if (list.isEmpty) {
         _toast('这个包没有可用的源');

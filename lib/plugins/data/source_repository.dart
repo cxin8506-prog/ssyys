@@ -2,13 +2,22 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter_js/flutter_js.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/log/app_logger.dart';
+import '../engine/ssts_runtime_js.dart';
 import '../model/plugin_source.dart';
 import 'ting_shu_bridge.dart';
+
+/// 插件包里的一个脚本文件（安装时按 manifest 的 scripts 顺序读）。
+class PluginScriptFile {
+  final String name;
+  final String text;
+  const PluginScriptFile(this.name, this.text);
+}
 
 /// 插件源安装与索引管理。
 ///
@@ -65,10 +74,22 @@ class SourceRepository {
   Future<String> sourceDirPath(String id) async =>
       p.join((await pluginsRoot()).path, id);
 
+  /// 插件包的解压目录：多源插件的多个源共用一份（pluginId），
+  /// 单源插件就是源自己的目录。
+  Future<String> pluginDirPath(PluginSource s) async =>
+      p.join((await pluginsRoot()).path, s.pluginId ?? s.id);
+
+  /// 脚本清单的根目录：manifest 所在目录（可能比插件目录深一层）。
+  Future<Directory> _pluginScriptRoot(PluginSource s) async {
+    final dir = Directory(await pluginDirPath(s));
+    final m = await _findManifest(dir);
+    return m?.parent ?? dir;
+  }
+
   /// 读取源目录里的 manifest.json（JAR 源可能没有，返回空表）
   Future<Map<String, dynamic>> readManifest(PluginSource s) async {
     try {
-      final dir = Directory(await sourceDirPath(s.id));
+      final dir = Directory(await pluginDirPath(s));
       if (!await dir.exists()) return {};
       final direct = File(p.join(dir.path, 'manifest.json'));
       final file = await direct.exists()
@@ -85,7 +106,7 @@ class SourceRepository {
 
   /// 读取入口脚本内容（源声明/诊断用）
   Future<String> readEntryScriptText(PluginSource s) async {
-    final dir = await sourceDirPath(s.id);
+    final dir = await pluginDirPath(s);
     for (final name in [s.entry, 'main.js', 'index.js', 'source.js']) {
       if (name.isEmpty) continue;
       final f = File(p.join(dir, name));
@@ -98,7 +119,9 @@ class SourceRepository {
 
   /// 安装 JS/ZIP 插件包。
   /// 包内可含 manifest.json（根目录或单层子目录），缺失时按文件名兜底。
-  Future<PluginSource> installZip(String filePath,
+  /// 随身听书格式（manifest 有 scripts，或脚本里有 registerSource）会拆成
+  /// 多个源，一次返回多条；旧写法仍按单个源安装。
+  Future<List<PluginSource>> installZip(String filePath,
       {String? typeOverride}) async {
     final bytes = await File(filePath).readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
@@ -129,6 +152,13 @@ class SourceRepository {
     var id = _pickString(manifest, ['id', 'key', 'package']) ??
         _slug('${baseName}_${DateTime.now().millisecondsSinceEpoch % 100000}');
     id = _slug(id);
+
+    // 随身听书格式：先看脚本清单，再决定走哪条安装路
+    final scriptNames = await _sstsScriptNames(root, manifest);
+    if (await _looksLikeSsts(root, manifest, scriptNames)) {
+      return _installSstsZip(
+          tmp, root, manifest, id, name, baseName, scriptNames, typeOverride);
+    }
 
     var entry = _pickString(manifest, ['entry', 'script', 'main', 'entryFile']) ?? '';
     if (entry.isEmpty) entry = await _guessEntryScript(root);
@@ -170,6 +200,7 @@ class SourceRepository {
       // 分组名用包名（manifest 声明的分组，没有就用 ZIP 文件名），
       // 书源页按这个分组，不要再出现「其他」。
       group: _pickString(manifest, ['group', '分组']) ?? baseName,
+      pluginId: id,
       installedAt: DateTime.now().millisecondsSinceEpoch,
       sizeBytes: size,
     );
@@ -180,7 +211,197 @@ class SourceRepository {
     await _saveIndex(all);
     appLogger.info('安装 JS/ZIP 源成功',
         detail: '${source.name} ($id) entry=$entry');
-    return source;
+    return [source];
+  }
+
+  /// 随身听书插件的脚本清单：manifest 的 scripts 数组优先，
+  /// 没有就按文件名顺序取包里所有 .js。
+  Future<List<String>> _sstsScriptNames(
+      Directory root, Map<String, dynamic> manifest) async {
+    final scripts = manifest['scripts'];
+    if (scripts is List && scripts.isNotEmpty) {
+      return scripts.map((e) => '$e').where((e) => e.isNotEmpty).toList();
+    }
+    final files = <String>[];
+    await for (final e in root.list(recursive: true, followLinks: false)) {
+      if (e is File && e.path.toLowerCase().endsWith('.js')) {
+        files.add(p.relative(e.path, from: root.path).replaceAll('\\', '/'));
+      }
+    }
+    files.sort();
+    return files;
+  }
+
+  /// 是不是随身听书格式：manifest 声明了 scripts，或者脚本里有 registerSource。
+  Future<bool> _looksLikeSsts(Directory root,
+      Map<String, dynamic> manifest, List<String> scriptNames) async {
+    final scripts = manifest['scripts'];
+    if (scripts is List && scripts.isNotEmpty) return true;
+    for (final name in scriptNames) {
+      final f = File(p.join(root.path, name));
+      if (!await f.exists()) continue;
+      try {
+        final text = await f.readAsString();
+        if (text.contains('registerSource')) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  /// 安装随身听书插件：先在临时 QuickJS 里跑一遍脚本读注册表，
+  /// 再把注册出来的每个源拆成一条记录，共用一份解压目录。
+  Future<List<PluginSource>> _installSstsZip(
+      Directory tmp,
+      Directory root,
+      Map<String, dynamic> manifest,
+      String pluginId,
+      String name,
+      String baseName,
+      List<String> scriptNames,
+      String? typeOverride) async {
+    final meta = await _collectSstsMeta(root, scriptNames);
+
+    // 落到正式目录（同 id 覆盖安装）
+    final target = Directory(p.join((await pluginsRoot()).path, pluginId));
+    if (await target.exists()) await target.delete(recursive: true);
+    await root.rename(target.path);
+    if (await tmp.exists()) await tmp.delete(recursive: true);
+
+    if (meta.isEmpty) {
+      throw Exception('这个插件没有注册任何源（registerSource 未执行），请检查插件包');
+    }
+    final size = await _dirSize(target);
+    final each = (size / meta.length).round();
+    final version =
+        _pickString(manifest, ['version', 'ver', '版本']) ?? '1.0.0';
+    final author = _pickString(manifest, ['author', '作者']) ?? '';
+    final manifestDesc =
+        _pickString(manifest, ['description', 'desc', '简介']) ?? '';
+
+    final all = await loadAll();
+    // 重装同一个包：清掉这个插件的旧条目，以及旧版把它当成单源的那条。
+    // 旧单源条目的目录也要清（别清到刚落盘的新目录）。
+    final removedIds = <String>[];
+    all.removeWhere((e) {
+      final samePlugin = e.pluginId == pluginId;
+      final legacySingle = e.isJsZip &&
+          (e.pluginId == null || e.pluginId!.isEmpty) &&
+          (e.group == name || e.group == baseName);
+      if (samePlugin || legacySingle) {
+        removedIds.add(e.id);
+        return true;
+      }
+      return false;
+    });
+    for (final oldId in removedIds) {
+      if (oldId == pluginId) continue;
+      final d = Directory(await sourceDirPath(oldId));
+      if (await d.exists()) await d.delete(recursive: true);
+    }
+
+    final list = <PluginSource>[];
+    for (final m in meta) {
+      final sid = '${m['id'] ?? ''}'.trim();
+      if (sid.isEmpty) continue;
+      var sname = '${m['name'] ?? ''}'.trim();
+      if (sname.isEmpty) sname = name;
+      final url = '${m['url'] ?? ''}';
+      final desc = '${m['description'] ?? ''}'.trim();
+      final type = typeOverride ?? _detectType('$sname\n$desc\n$url');
+      list.add(PluginSource(
+        id: sid,
+        name: sname,
+        type: type,
+        format: 'jsZip',
+        version: version,
+        author: author,
+        description: desc.isNotEmpty ? desc : manifestDesc,
+        entry: '',
+        group: name,
+        pluginId: pluginId,
+        sstsId: sid,
+        enabled: m['enabledByDefault'] != false,
+        installedAt: DateTime.now().millisecondsSinceEpoch,
+        sizeBytes: each,
+      ));
+    }
+    if (list.isEmpty) {
+      throw Exception('这个插件没有注册任何源');
+    }
+    all.addAll(list);
+    await _saveIndex(all);
+    appLogger.info('安装随身听书插件成功',
+        detail: '$name 共 ${list.length} 个源');
+    return list;
+  }
+
+  /// 安装时跑一遍脚本，读 registerSource 注册表（只取元数据，不联网）。
+  /// 脚本在导入时不该联网，host 方法调了就抛错；注册本身不受影响。
+  /// 单个脚本中途抛错只记日志，不让它拖垮整包（已注册的源照常装）。
+  Future<List<Map<String, dynamic>>> _collectSstsMeta(
+      Directory root, List<String> scriptNames) async {
+    final rt = getJavascriptRuntime();
+    try {
+      rt.evaluate('''
+        globalThis.__hostCall = function() { return Promise.reject(new Error('安装时不能联网')); };
+      ''');
+      rt.evaluate(buildSstsBootstrap(null, {}));
+      // 装包时不联网：host 的同步调用直接抛错，不挂起。
+      rt.evaluate(
+          "globalThis.__hostSync = function() { throw new Error('安装时不能联网'); };");
+      for (final name in scriptNames) {
+        final f = File(p.join(root.path, name));
+        if (!await f.exists()) continue;
+        final text = await f.readAsString();
+        final r = rt.evaluate(text);
+        if (r.isError) {
+          appLogger.warning('插件脚本安装时执行出错',
+              detail: '$name: ${r.stringResult}');
+        }
+      }
+      final metaRes = rt.evaluate('globalThis.__sstsMeta()');
+      if (metaRes.isError) return [];
+      final decoded = jsonDecode(metaRes.stringResult);
+      if (decoded is List) {
+        return decoded
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      appLogger.warning('随身听书插件注册表读取失败', detail: '$e');
+      return [];
+    } finally {
+      try {
+        rt.dispose();
+      } catch (_) {}
+    }
+  }
+
+  /// 按 manifest 的 scripts 顺序读插件脚本（引擎 attach 时用）。
+  Future<List<PluginScriptFile>> readPluginScripts(PluginSource s) async {
+    final dir = await _pluginScriptRoot(s);
+    final manifest = await readManifest(s);
+    final names = await _sstsScriptNames(dir, manifest);
+    final out = <PluginScriptFile>[];
+    for (final name in names) {
+      final f = File(p.join(dir.path, name));
+      if (await f.exists()) {
+        out.add(PluginScriptFile(name, await f.readAsString()));
+      }
+    }
+    if (out.isEmpty) {
+      // 兜底：目录里所有 .js 按文件名顺序
+      final fallback = await _sstsScriptNames(dir, {});
+      for (final name in fallback) {
+        final f = File(p.join(dir.path, name));
+        if (await f.exists()) {
+          out.add(PluginScriptFile(name, await f.readAsString()));
+        }
+      }
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------- 安装 JAR
@@ -451,10 +672,22 @@ class SourceRepository {
 
   Future<void> remove(String id) async {
     final all = await loadAll();
+    final target = all.where((e) => e.id == id).toList();
     all.removeWhere((e) => e.id == id);
     await _saveIndex(all);
-    final dir = Directory(await sourceDirPath(id));
-    if (await dir.exists()) await dir.delete(recursive: true);
+    if (target.isEmpty) return;
+    final pid = target.first.pluginId;
+    if (pid != null && pid.isNotEmpty) {
+      // 多源插件共用一个目录：还有同插件的源在用，别删目录
+      final stillUsed = all.any((e) => e.pluginId == pid);
+      if (!stillUsed) {
+        final dir = Directory(p.join((await pluginsRoot()).path, pid));
+        if (await dir.exists()) await dir.delete(recursive: true);
+      }
+    } else {
+      final dir = Directory(await sourceDirPath(id));
+      if (await dir.exists()) await dir.delete(recursive: true);
+    }
     appLogger.info('已移除源', detail: id);
   }
 
@@ -479,7 +712,7 @@ class SourceRepository {
 
   /// 读取 JS 入口脚本内容
   Future<String> readEntryScript(PluginSource s) async {
-    final dir = await sourceDirPath(s.id);
+    final dir = await pluginDirPath(s);
     var rel = s.entry;
     if (rel.isEmpty) rel = await _guessEntryScript(Directory(dir));
     final f = File(p.join(dir, rel));

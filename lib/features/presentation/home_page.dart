@@ -145,9 +145,9 @@ class _HomePageState extends ConsumerState<HomePage> {
         final manifest = await repo.readManifest(s);
         final entry = LoginEntry.parse(manifest);
         var has = entry != null && entry.valid;
-        if (!has && s.isTingShu) {
+        if (!has && (s.isTingShu || s.isSsts)) {
           try {
-            final engine = ref.read(tingShuEngineProvider);
+            final engine = engineForSource(ref, s);
             await engine.attach(s);
             final info = await engine.loginInfo();
             has = '${info?['url'] ?? ''}'.trim().isNotEmpty;

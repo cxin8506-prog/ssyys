@@ -286,7 +286,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
             padding: pagePadding(context, bottom: _dirty ? 96 : 40),
             children: [
               _infoCard(s),
-              if (s.isTingShu) ...[
+              if (s.isTingShu || s.isSsts) ...[
                 const SizedBox(height: 16),
                 _tingShuLoginCard(s),
               ],
@@ -931,7 +931,7 @@ class _SourceDetailPageState extends ConsumerState<SourceDetailPage> {
 
   Future<Map<String, dynamic>?> _tingShuLoginInfo(PluginSource s) async {
     try {
-      final engine = ref.read(tingShuEngineProvider);
+      final engine = _engineFor(s);
       await engine.attach(s);
       return engine.loginInfo();
     } catch (_) {

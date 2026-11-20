@@ -18,6 +18,15 @@ abstract class PluginEngine {
   /// 源是否实现了某个方法：true/false，null 表示无法判断
   Future<bool?> hasMethod(String method) async => null;
 
+  /// 源有没有登录入口（ILogin / loginUrl），没有返回 null，
+  /// 有返回 {url, desktop}
+  Future<Map<String, dynamic>?> loginInfo() async => null;
+
+  /// 搜索验证（ISearchVerification / searchVerificationUrl），没有返回 null，
+  /// 有返回 {url, ua, delayMs, validated}
+  Future<Map<String, dynamic>?> verificationInfo(String keyword) async =>
+      null;
+
   Future<void> dispose();
 }
 

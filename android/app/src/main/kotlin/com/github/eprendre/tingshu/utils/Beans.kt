@@ -25,6 +25,11 @@ data class Book(
     var isShowBriefChapterTitle: Boolean = false
     var sourceId: String? = null
     var status: String = ""
+    // 原版 SDK 里还有这三个字段（宿主播放状态），源本身不用，
+    // 但补齐可免得以后有源调用时链接失败。
+    var episodesUpdateTime: Long = 0
+    var isTransientEpisodes: Boolean = false
+    var isCompleted: Boolean = false
 
     fun copyFrom(book: Book) {
         coverUrl = book.coverUrl
@@ -40,6 +45,9 @@ data class Episode(val title: String, val url: String) {
     var isFree: Boolean = true
     var isCached: Boolean = false
     var progress: Int = 0
+    // 原版 SDK 里还有这两个字段，补齐免得以后有源调用时链接失败。
+    var coverUrl: String = ""
+    var transcript: String = ""
 }
 
 interface IMenu {

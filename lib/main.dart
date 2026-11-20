@@ -50,20 +50,10 @@ Future<void> main() async {
   // 初始化音频后台服务（通知栏 / 后台播放）。
   // 加超时与降级：部分设备（尤其旧安卓）绑定前台服务可能失败或卡住，
   // 这里保证无论如何都能进入主界面，避免启动一直白屏。
-  try {
-    audioHandler = await AudioService.init(
-      builder: () => MyAudioHandler(),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.localreader.channel.audio',
-        androidNotificationChannelName: '随意听书播放',
-        androidNotificationOngoing: true,
-      ),
-    ).timeout(const Duration(seconds: 8));
-  } catch (e, st) {
-    appLogger.error('音频后台服务初始化失败，已降级为无通知栏模式',
-        error: e, stack: st);
-    audioHandler = MyAudioHandler();
-  }
+  // 2026-11-20 手机实测：init 常在 main() 里失败，报错 Activity 没提供
+  // FlutterEngine 或直接超时——平台侧 Activity 贴上引擎有先后，失败就等
+  // 800ms 再试一次，还不行才降级为无通知栏模式。
+  audioHandler = await _initAudioHandler();
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -82,6 +72,33 @@ Future<void> main() async {
     ],
     child: const MyApp(),
   ));
+}
+
+/// 初始化音频后台服务：失败等 800ms 再试一次（Activity 贴上引擎有先后），
+/// 两次都不行才降级为直连播放（无通知栏）。总是最坏多等约 11 秒，只发生在
+/// 后台服务本身就起不来的设备上；正常设备第一次就成功，不多等。
+Future<MyAudioHandler> _initAudioHandler() async {
+  const config = AudioServiceConfig(
+    androidNotificationChannelId: 'com.localreader.channel.audio',
+    androidNotificationChannelName: '随意听书播放',
+    androidNotificationOngoing: true,
+  );
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await AudioService.init(
+        builder: () => MyAudioHandler(),
+        config: config,
+      ).timeout(Duration(seconds: attempt == 0 ? 6 : 4));
+    } catch (e, st) {
+      appLogger.error('音频后台服务初始化失败（第 ${attempt + 1} 次）',
+          error: e, stack: st);
+      if (attempt == 0) {
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
+    }
+  }
+  appLogger.error('音频后台服务初始化失败，已降级为无通知栏模式');
+  return MyAudioHandler();
 }
 
 class MyApp extends ConsumerWidget {

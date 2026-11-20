@@ -873,9 +873,9 @@ class _SourceSearchPageState extends ConsumerState<SourceSearchPage> {
           msg.contains('429') ||
           msg.contains('验证') ||
           msg.contains('challenge');
-      if (source.isTingShu && blocked) {
+      if ((source.isTingShu || source.isSsts) && blocked) {
         try {
-          final engine = ref.read(tingShuEngineProvider);
+          final engine = engineForSource(ref, source);
           await engine.attach(source);
           final info = await engine.verificationInfo(kw);
           if (info != null && info['validated'] != true) {
