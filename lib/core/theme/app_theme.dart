@@ -60,6 +60,9 @@ class AppScheme {
   final Color lightSurface;
   final Color lightSurfaceAlt;
 
+  /// 只走深色（淡紫夜这类夜间配色，浅色模式下也保持深底）。
+  final bool forceDark;
+
   const AppScheme({
     required this.name,
     required this.primary,
@@ -70,6 +73,7 @@ class AppScheme {
     required this.lightBg,
     required this.lightSurface,
     required this.lightSurfaceAlt,
+    this.forceDark = false,
   });
 }
 
@@ -89,76 +93,50 @@ extension AppThemeContext on BuildContext {
 class AppTheme {
   AppTheme._();
 
-  /// 内置配色：暖阳橙（默认）/ 海蓝 / 青竹绿 / 樱花粉 / 墨夜。
-  /// 墨夜已禁用（不开放选择）：只保留定义，供旧存量值迁移回落时
-  /// 强制走深色；主题选择页不提供墨夜入口。
+  /// 内置配色：樱花粉（默认）/ 淡紫夜（只走深色）/ 清透青。
+  /// 下标 0/1/2 参与选择，老版本存下的 0..4 由 theme_providers 迁移。
   static const List<AppScheme> schemes = [
     AppScheme(
-      name: '暖阳橙',
-      primary: Color(0xFFFF6B4A),
-      accent: Color(0xFFFFB877),
-      darkBg: Color(0xFF14100C),
-      darkSurface: Color(0xFF1F1913),
-      darkSurfaceAlt: Color(0xFF2B231A),
-      lightBg: Color(0xFFFBF6F0),
+      name: '梦幻紫樱',
+      primary: Color(0xFFA88BE6),
+      accent: Color(0xFFF6B9D4),
+      darkBg: Color(0xFF120E1C),
+      darkSurface: Color(0xFF1A1426),
+      darkSurfaceAlt: Color(0xFF241B36),
+      lightBg: Color(0xFFF7F2FD),
       lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFF6EADF),
+      lightSurfaceAlt: Color(0xFFF0E8FA),
     ),
     AppScheme(
-      name: '海蓝',
-      primary: Color(0xFF5AA9FF),
-      accent: Color(0xFF7DE2D1),
-      darkBg: Color(0xFF0C1220),
-      darkSurface: Color(0xFF161F33),
-      darkSurfaceAlt: Color(0xFF202C46),
-      lightBg: Color(0xFFF2F6FD),
-      lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFE6EEFB),
+      name: '淡紫夜',
+      primary: Color(0xFFA78BFA),
+      accent: Color(0xFFE9D5FF),
+      darkBg: Color(0xFF0D0A16),
+      darkSurface: Color(0xFF161126),
+      darkSurfaceAlt: Color(0xFF231A38),
+      lightBg: Color(0xFF0D0A16),
+      lightSurface: Color(0xFF161126),
+      lightSurfaceAlt: Color(0xFF231A38),
+      forceDark: true,
     ),
     AppScheme(
-      name: '青竹绿',
-      primary: Color(0xFF3E9B6E),
-      accent: Color(0xFF8FD0A8),
-      darkBg: Color(0xFF0E130F),
-      darkSurface: Color(0xFF171F19),
-      darkSurfaceAlt: Color(0xFF222C24),
-      lightBg: Color(0xFFF3F8F4),
+      name: '清透青',
+      primary: Color(0xFF2FB6C4),
+      accent: Color(0xFF7CF0E4),
+      darkBg: Color(0xFF071314),
+      darkSurface: Color(0xFF0F2022),
+      darkSurfaceAlt: Color(0xFF173032),
+      lightBg: Color(0xFFF3FCFD),
       lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFE4F0E8),
-    ),
-    AppScheme(
-      name: '樱花粉',
-      primary: Color(0xFFFF7FA8),
-      accent: Color(0xFFFFC46B),
-      darkBg: Color(0xFF150F14),
-      darkSurface: Color(0xFF231A21),
-      darkSurfaceAlt: Color(0xFF32252E),
-      lightBg: Color(0xFFFDF4F7),
-      lightSurface: Color(0xFFFFFFFF),
-      lightSurfaceAlt: Color(0xFFFBE6EE),
-    ),
-    AppScheme(
-      name: '墨夜',
-      primary: Color(0xFFB8BEC9),
-      accent: Color(0xFF7E8694),
-      darkBg: Color(0xFF000000),
-      darkSurface: Color(0xFF0B0B0B),
-      darkSurfaceAlt: Color(0xFF161616),
-      // 注意：墨夜的浅色值也是黑的（一直保持黑色）。配色卡上的文字
-      // 颜色必须按卡片实际底色选，不能按明暗模式选，否则浅色模式下
-      // 深字压黑底看不见（审计 A 补充第 1 项）。主题选择页里墨夜卡
-      // 已禁用，展示时强制用浅色字。
-      lightBg: Color(0xFF000000),
-      lightSurface: Color(0xFF0B0B0B),
-      lightSurfaceAlt: Color(0xFF161616),
+      lightSurfaceAlt: Color(0xFFDFF5F7),
     ),
   ];
 
-  /// 开放选择的配色数量（0..3）。下标 4（墨夜）不开放。
-  static const int openSchemeCount = 4;
+  /// 开放选择的配色数量：樱花粉 / 淡紫夜 / 清透青。
+  static const int openSchemeCount = 3;
 
-  /// 墨夜主题的下标（独立一套，一直保持黑色）
-  static const int nightSchemeIndex = 4;
+  /// 夜间配色的下标（淡紫夜，始终深底）。
+  static const int nightSchemeIndex = 1;
 
   static AppScheme schemeAt(int index) {
     if (index < 0 || index >= schemes.length) return schemes.first;
@@ -210,7 +188,7 @@ class AppTheme {
   static ThemeData light([int schemeIndex = 0]) {
     final s = schemeAt(schemeIndex);
     // 墨夜强制走深色：浅色值也是黑的，浅色主题下整页会全黑。
-    if (schemeIndex == nightSchemeIndex) return dark(schemeIndex);
+    if (s.forceDark) return dark(schemeIndex);
     // 浅色主题下主色按 HSL 亮度压暗，否则按钮上的白字对比度不够。
     final primary = _darkenForLight(s.primary);
     final palette = AppPalette(
@@ -270,15 +248,27 @@ class AppTheme {
       cardColor: surface,
       dividerColor: palette.outline,
       extensions: <ThemeExtension<dynamic>>[palette],
-      appBarTheme: AppBarTheme(
-        backgroundColor: primary,
-        iconTheme: const IconThemeData(color: Colors.white),
-        titleTextStyle: TextStyle(
-          color: Colors.white,
-          fontSize: 17,
-          fontWeight: FontWeight.w600,
+      // 卡片统一 18 圆角 + 极细描边、无阴影（二次元要平、要干净）。
+      cardTheme: CardTheme(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: palette.outline),
         ),
-        toolbarTextStyle: TextStyle(color: Colors.white, fontSize: 15),
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: surface,
+        foregroundColor: text,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        iconTheme: IconThemeData(color: text),
+        titleTextStyle: TextStyle(
+          color: text,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+        toolbarTextStyle: TextStyle(color: text, fontSize: 15),
       ),
       // 底栏：贴底标准栏，图标与文字都跟主题走，不写死颜色。
       bottomNavigationBarTheme: BottomNavigationBarThemeData(

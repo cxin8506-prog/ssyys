@@ -47,39 +47,61 @@ class _MainShellState extends ConsumerState<MainShell> {
       body: IndexedStack(index: safeIndex, children: pages),
       bottomNavigationBar: SafeArea(
         top: false,
-        child: BottomNavigationBar(
-          currentIndex: safeIndex,
-          onTap: (i) => _onTap(i),
-          items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: '书源',
-            ),
-            BottomNavigationBarItem(
-              icon: const Icon(Icons.explore_outlined),
-              activeIcon: const Icon(Icons.explore),
-              label: _shortSourceName(sourceName),
-            ),
-            BottomNavigationBarItem(
-              icon: _CenterPlayButton(
-                handler: handler,
-                onTap: () => _onPlayPressed(handler),
-                onLongPress: () => _showListenStats(context),
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.16),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
               ),
-              label: '播放',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.favorite_outline),
-              activeIcon: Icon(Icons.favorite),
-              label: '收藏',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.history_outlined),
-              activeIcon: Icon(Icons.history),
-              label: '历史',
-            ),
-          ],
+            ],
+          ),
+          child: Row(
+            children: [
+              _NavItem(
+                icon: Icons.home_outlined,
+                activeIcon: Icons.home_rounded,
+                label: '书源',
+                selected: safeIndex == 0,
+                onTap: () => _onTap(0),
+              ),
+              _NavItem(
+                icon: Icons.explore_outlined,
+                activeIcon: Icons.explore_rounded,
+                label: _shortSourceName(sourceName),
+                selected: safeIndex == 1,
+                onTap: () => _onTap(1),
+              ),
+              Expanded(
+                child: Center(
+                  child: _CenterPlayButton(
+                    handler: handler,
+                    onTap: () => _onPlayPressed(handler),
+                    onLongPress: () => _showListenStats(context),
+                  ),
+                ),
+              ),
+              _NavItem(
+                icon: Icons.favorite_outline,
+                activeIcon: Icons.favorite_rounded,
+                label: '收藏',
+                selected: safeIndex == 2,
+                onTap: () => _onTap(2),
+              ),
+              _NavItem(
+                icon: Icons.history_outlined,
+                activeIcon: Icons.history_rounded,
+                label: '历史',
+                selected: safeIndex == 3,
+                onTap: () => _onTap(3),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -275,6 +297,56 @@ class EmptyPlayerPage extends StatelessWidget {
                 onPressed: () => context.push('/search'),
                 icon: const Icon(Icons.search, size: 18),
                 label: const Text('去找'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 底栏单项：圆角高亮选中态，图标 + 小字。
+class _NavItem extends StatelessWidget {
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _NavItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final subtle = Theme.of(context).textTheme.bodySmall?.color;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(selected ? activeIcon : icon,
+                  size: 22, color: selected ? primary : subtle),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  color: selected ? primary : subtle,
+                ),
               ),
             ],
           ),

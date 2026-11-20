@@ -287,6 +287,7 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   }
 
   Future<void> _initController({Duration? startAt}) async {
+    _runtimeFallbackDone = false;
     final paths = widget.playlist.isNotEmpty ? widget.playlist : <String>[widget.path];
     final safeIndex = _index.clamp(0, paths.length - 1);
     Duration? start;
@@ -302,7 +303,15 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
   /// 用某个地址起播。startAt 为空时从当前进度续播。
   /// 起播失败：自动按顺序试下一条线（autoFallback），都失败才报
   /// “所有线路都无法播放”，不直接退出。
-  Future<void> _openUrl(String url,
+  /// 起播超时：限时签名/防盗链地址会一直挂着不报错，不设超时自动切线
+  /// 永远等不到（行业 8–12 秒，取 10 秒）。
+  static const Duration _mediaTimeout = Duration(seconds: 10);
+
+  /// 播到一半报错只自动切一次，避免来回跳线。
+  bool _runtimeFallbackDone = false;
+
+  /// 返回 true 表示这个地址真的起来了（自动切线靠它判断，别把失败当成功）。
+  Future<bool> _openUrl(String url,
       {Duration? startAt, bool autoFallback = true}) async {
     final old = _controller;
     if (old != null) {
@@ -324,17 +333,23 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     _controller = ctrl;
     ctrl.addListener(_onControllerUpdate);
     try {
-      await ctrl.initialize();
+      await ctrl.initialize().timeout(_mediaTimeout);
     } catch (e) {
-      if (autoFallback && await _fallbackLine()) return;
-      if (!mounted) return;
+      try {
+        await ctrl.dispose();
+      } catch (_) {}
+      if (_controller == ctrl) _controller = null;
+      if (autoFallback && await _fallbackLine()) return true;
+      if (!mounted) return false;
       setState(() {
         _failedUrl = url;
-        _error = _allLinesFailed ? '所有线路都无法播放' : '播放失败：$e';
+        _error = _allLinesFailed
+            ? '所有线路都无法播放'
+            : (e is TimeoutException ? '这条线路加载超时（10 秒）' : '播放失败：$e');
       });
-      return;
+      return false;
     }
-    if (!mounted) return;
+    if (!mounted) return false;
     final keep = startAt ?? _lastPosition;
     await ctrl.setVolume(_volume);
     await ctrl.setPlaybackSpeed(_speed);
@@ -348,8 +363,10 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       setState(() {
         _error = null;
         _allLinesFailed = false;
+        _runtimeFallbackDone = false;
       });
     }
+    return true;
   }
 
   void _onControllerUpdate() {
@@ -360,6 +377,11 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
     if (v.hasError && _error == null) {
       _failedUrl = _currentUrl;
       setState(() => _error = '播放失败：${v.errorDescription ?? '未知错误'}');
+      // 播到一半才报错（403 / 签名过期 / 断流）也换一次线，不能停黑屏。
+      if (!_runtimeFallbackDone) {
+        _runtimeFallbackDone = true;
+        _fallbackLine();
+      }
       return;
     }
     // 播完：按“自动播放下一集”设置进下一集，否则显示“已播完”。
@@ -416,8 +438,20 @@ class _VideoPlayerPageState extends ConsumerState<VideoPlayerPage> {
       _toast('正在切换线路至「${cand['name'] ?? id}」');
       try {
         final url = await resolver(id);
-        if (url.isEmpty) continue;
-        await _openUrl(url, startAt: _lastPosition, autoFallback: false);
+        if (url.isEmpty) {
+          _failedLineIds.add(id);
+          await _persistFailedLines();
+          continue;
+        }
+        // _openUrl 起播失败也会正常返回（内部已报错），不看返回值会把
+        // 失败当成"已切换成功"，其实画面是黑的。
+        final opened =
+            await _openUrl(url, startAt: _lastPosition, autoFallback: false);
+        if (!opened) {
+          _failedLineIds.add(id);
+          await _persistFailedLines();
+          continue;
+        }
         if (!mounted) return true;
         setState(() {
           _lineId = id;

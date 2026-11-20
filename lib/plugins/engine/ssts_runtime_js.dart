@@ -77,6 +77,142 @@ const String sstsBootstrapJs = r'''
     throw new Error('__SSTS_SUSPEND__' + JSON.stringify({ method: method, payload: payload }));
   };
 
+  // ============================================================ 兼容垫片
+  // 插件脚本从浏览器/Node 环境搬过来，普遍直接用 console、setTimeout、
+  // btoa/atob、TextEncoder、window。QuickJS 没有这些，缺一个就在加载阶段
+  // ReferenceError，后面 registerSource 直接跑不到（"导入后一个源都没有"）。
+  globalThis.window = globalThis;
+  globalThis.self = globalThis;
+
+  function __logLine(args) {
+    var parts = [];
+    for (var i = 0; i < args.length; i++) {
+      var a = args[i];
+      if (typeof a === 'string') {
+        parts.push(a);
+      } else {
+        try {
+          parts.push(JSON.stringify(a));
+        } catch (e) {
+          parts.push(String(a));
+        }
+      }
+    }
+    return parts.join(' ');
+  }
+
+  if (typeof globalThis.console === 'undefined') {
+    var __consoleObj = {};
+    ['log', 'info', 'warn', 'error', 'debug', 'trace'].forEach(function (k) {
+      __consoleObj[k] = function () {
+        try {
+          __hostCall('log', k + ': ' + __logLine(arguments));
+        } catch (e) {}
+      };
+    });
+    globalThis.console = __consoleObj;
+  }
+
+  // setTimeout 只能立即执行（JS 侧没有事件循环，宿主调用靠挂起重放），
+  // 限制嵌套层数，防止插件用 setTimeout 自递归把 JS 卡死。
+  var __timerDepth = 0;
+  globalThis.setTimeout = function (fn) {
+    if (typeof fn !== 'function' || __timerDepth > 8) return 0;
+    __timerDepth++;
+    try {
+      fn();
+    } catch (e) {
+    } finally {
+      __timerDepth--;
+    }
+    return 0;
+  };
+  globalThis.setInterval = globalThis.setTimeout;
+  globalThis.clearTimeout = function () {};
+  globalThis.clearInterval = function () {};
+  globalThis.requestAnimationFrame = function (fn) {
+    return globalThis.setTimeout(fn);
+  };
+
+  var __B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  // btoa 按 UTF-8 走：插件常拿它编码带中文的 Cookie/参数。
+  function __utf8Bytes(str) {
+    var enc = encodeURIComponent(String(str));
+    var bytes = [];
+    for (var i = 0; i < enc.length; i++) {
+      if (enc.charAt(i) === '%') {
+        bytes.push(parseInt(enc.substr(i + 1, 2), 16));
+        i += 2;
+      } else {
+        bytes.push(enc.charCodeAt(i));
+      }
+    }
+    return bytes;
+  }
+
+  globalThis.btoa = function (s) {
+    var bytes = __utf8Bytes(s), out = '', i = 0;
+    for (; i + 2 < bytes.length; i += 3) {
+      var n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+      out += __B64[(n >> 18) & 63] + __B64[(n >> 12) & 63] +
+        __B64[(n >> 6) & 63] + __B64[n & 63];
+    }
+    var left = bytes.length - i;
+    if (left === 1) {
+      var n1 = bytes[i] << 16;
+      out += __B64[(n1 >> 18) & 63] + __B64[(n1 >> 12) & 63] + '==';
+    } else if (left === 2) {
+      var n2 = (bytes[i] << 16) | (bytes[i + 1] << 8);
+      out += __B64[(n2 >> 18) & 63] + __B64[(n2 >> 12) & 63] +
+        __B64[(n2 >> 6) & 63] + '=';
+    }
+    return out;
+  };
+  globalThis.atob = function (s) {
+    var str = String(s).replace(/[^A-Za-z0-9+/]/g, '');
+    var buf = 0, bits = 0, bytes = [];
+    for (var i = 0; i < str.length; i++) {
+      buf = (buf << 6) | __B64.indexOf(str[i]);
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        bytes.push((buf >> bits) & 0xff);
+      }
+    }
+    var esc = '';
+    for (var k = 0; k < bytes.length; k++) {
+      esc += '%' + (bytes[k] < 16 ? '0' : '') + bytes[k].toString(16);
+    }
+    try {
+      return decodeURIComponent(esc);
+    } catch (e) {
+      return esc;
+    }
+  };
+
+  if (typeof globalThis.TextDecoder === 'undefined') {
+    globalThis.TextDecoder = function (label) { this.encoding = label || 'utf-8'; };
+    globalThis.TextDecoder.prototype.decode = function (buf) {
+      var arr = (buf && buf.byteLength !== undefined) ? buf : new Uint8Array(buf || 0);
+      if (arr.buffer) arr = new Uint8Array(arr.buffer, arr.byteOffset || 0, arr.byteLength);
+      var s = '';
+      for (var i = 0; i < arr.length; i++) {
+        s += '%' + (arr[i] < 16 ? '0' : '') + arr[i].toString(16);
+      }
+      try {
+        return decodeURIComponent(s);
+      } catch (e) {
+        return s;
+      }
+    };
+  }
+  if (typeof globalThis.TextEncoder === 'undefined') {
+    globalThis.TextEncoder = function () { this.encoding = 'utf-8'; };
+    globalThis.TextEncoder.prototype.encode = function (str) {
+      return new Uint8Array(__utf8Bytes(str));
+    };
+  }
+
   function _opt(o) { return o && typeof o === 'object' ? o : {}; }
   function _headers(o) { return _opt(o).headers || null; }
 
@@ -157,17 +293,51 @@ const String sstsBootstrapJs = r'''
     aesEcbDecrypt: function () { throw new Error('这个源要用 AES 解密，当前版本暂不支持'); }
   };
 
+  // 插件用裸 host / CONFIG 而不是 __sstsHost：引导里不给别名，安装期
+  // 跑脚本时第一行 host.getString 就 ReferenceError，后面 registerSource
+  // 永远执行不到 —— 「导入成功但一个源都没有」的首要原因。
+  globalThis.host = globalThis.__sstsHost;
+  globalThis.CONFIG = globalThis.__sstsHost.config;
+
   // ============================================================ 注册表
   globalThis.__sstsRegistry = [];
   globalThis.__sstsById = {};
+  // 注册必须可重入：脚本加载期调 host 会「挂起 + 从头重放」，
+  // registerSource 会被执行多次，同一 id 只能留一条，否则源翻倍。
   globalThis.registerSource = function (obj) {
     if (!obj || typeof obj !== 'object') throw new Error('registerSource 参数无效');
-    if (!obj.id) throw new Error('registerSource 缺少 id');
-    if (!obj.name) obj.name = String(obj.id);
+    var id = obj.id ? String(obj.id) : '';
+    if (!id) throw new Error('registerSource 缺少 id');
+    if (!obj.name) obj.name = id;
     obj.host = globalThis.__sstsHost;
+    globalThis.__sstsById[id] = obj;
+    for (var i = 0; i < globalThis.__sstsRegistry.length; i++) {
+      if (String(globalThis.__sstsRegistry[i].id) === id) {
+        globalThis.__sstsRegistry[i] = obj;
+        return obj;
+      }
+    }
     globalThis.__sstsRegistry.push(obj);
-    globalThis.__sstsById[String(obj.id)] = obj;
     return obj;
+  };
+
+  // 执行插件脚本，支持「挂起 + 重放」：脚本加载期调 host 时抛
+  // __SSTS_SUSPEND__，宿主请求回来后从头整段重跑，不会执行到一半中断。
+  globalThis.__sstsLoadScript = function (code) {
+    try {
+      (0, eval)(String(code));
+      return JSON.stringify({ __ok: true });
+    } catch (e) {
+      var msg = (e && e.message) ? String(e.message) : String(e);
+      if (msg.indexOf('__SSTS_SUSPEND__') === 0) {
+        try {
+          return JSON.stringify({ __suspend: JSON.parse(msg.substring('__SSTS_SUSPEND__'.length)) });
+        } catch (e2) {
+          return JSON.stringify({ __error: msg });
+        }
+      }
+      return JSON.stringify({ __error: msg });
+    }
   };
 
   // 安装时读注册表元数据（不含函数，只取展示用字段）。

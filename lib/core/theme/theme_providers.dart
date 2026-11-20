@@ -17,12 +17,13 @@ final themeModeProvider = StateProvider<int>((ref) {
   return v;
 });
 
-/// 主题色：0 暖阳橙 #FF6B4A（默认）/ 1 海蓝 / 2 青竹绿 / 3 樱花粉。
-/// 墨夜（旧下标 4）不开放：读到旧存量 4 时迁移回 0，不再提供入口。
+/// 主题色：0 樱花粉（默认）/ 1 淡紫夜（只走深色）/ 2 清透青。
+/// 老版本的 0 暖阳橙 / 1 海蓝 / 2 青竹绿 / 3 樱花粉在这里按
+/// theme_remap_v3 一次性迁移：暖阳橙→樱花粉、海蓝/青竹绿→清透青。
 final themeColorProvider = StateProvider<int>((ref) {
   final prefs = ref.read(sharedPrefsProvider);
   final v = prefs.getInt('theme_color') ?? 0;
-  if (v < 0 || v > 3) return 0;
+  if (v < 0 || v >= 3) return 0;
   return v;
 });
 
@@ -128,11 +129,22 @@ Future<void> saveWallpaperFollow(WidgetRef ref, bool value) async {
   await prefs.setBool('wallpaper_follow', value);
 }
 
-/// 旧存量迁移：主题色 4（墨夜）→ 0（暖阳橙），模式越界 → 0。
+/// 旧存量迁移：主题色老下标按新三套配色重映射，模式越界 → 0。
 Future<void> migrateLegacyTheme(SharedPreferences prefs) async {
+  // 一次性把老四套配色重映射到新三套（老下标语义已变，不重映射会串色）。
+  final remapped = prefs.getBool('theme_remap_v3') ?? false;
   final color = prefs.getInt('theme_color');
-  if (color != null && (color < 0 || color > 3)) {
-    await prefs.setInt('theme_color', 0);
+  if (!remapped) {
+    if (color != null) {
+      const remap = <int, int>{0: 0, 1: 2, 2: 2, 3: 0, 4: 1};
+      await prefs.setInt('theme_color', remap[color] ?? 0);
+    }
+    await prefs.setBool('theme_remap_v3', true);
+  }
+  if (color != null && (color < 0 || color > 2)) {
+    // 老下标：0 暖阳橙→0 樱花粉，1 海蓝/2 青竹绿→2 清透青，3 樱花粉→0，4 墨夜→1
+    const legacyMap = <int, int>{0: 0, 1: 2, 2: 2, 3: 0, 4: 1};
+    await prefs.setInt('theme_color', legacyMap[color] ?? 0);
   }
   final mode = prefs.getInt('theme_mode');
   if (mode != null && (mode < 0 || mode > 2)) {

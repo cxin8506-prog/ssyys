@@ -504,6 +504,25 @@ object TingShuRuntime {
         return hits
     }
 
+
+    /** 把异常链展开成一行，找真正的根因（反射调用尤其需要）。 */
+    private fun rootCauseChain(t: Throwable): String {
+        val sb = StringBuilder()
+        var c: Throwable? = t
+        var depth = 0
+        while (c != null && depth < 6) {
+            if (depth > 0) sb.append(" <- ")
+            sb.append(c.javaClass.simpleName)
+            val m = c.message
+            if (!m.isNullOrBlank()) sb.append(": ").append(m)
+            val next = c.cause
+            if (next == null || next === c) break
+            c = next
+            depth++
+        }
+        return sb.toString()
+    }
+
     private fun sourcesOf(path: String, entryClass: String): List<Any> {
         val loader = loaderFor(path)
         val cls = Class.forName(entryClass, true, loader)
@@ -520,8 +539,11 @@ object TingShuRuntime {
         val raw = try {
             m.invoke(receiver) as? List<*> ?: emptyList<Any>()
         } catch (t: Throwable) {
-            val cause = (t.cause ?: t).message ?: t.toString()
-            throw RuntimeException("调用 $entryClass.getSources() 失败：$cause", t)
+            // InvocationTargetException 的 message 常常是 null，只打它等于没信息。
+            // 这里把整条 cause 链展开，例如
+            //   InvocationTargetException <- NoClassDefFoundError: com/tinyshu/host/HostApi
+            // 才能看出到底缺的是哪个宿主类。
+            throw RuntimeException("调用 $entryClass.getSources() 失败：${rootCauseChain(t)}", t)
         }
         return raw.filterNotNull()
     }

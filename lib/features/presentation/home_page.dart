@@ -69,10 +69,10 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('随意听书'),
+        title: const Text('我的书架'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.search),
+            icon: const Icon(Icons.search_rounded),
             tooltip: '搜索',
             onPressed: () => context.push('/search'),
           ),
@@ -141,11 +141,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                         ref.read(shellTabProvider.notifier).state = 1,
                   )
                 else
-                  ...sorted.map((e) => _BookRow(
-                        item: e,
-                        onTap: () => _openBook(e),
-                        onHide: () => _hide(e),
-                      )),
+                  _BookGrid(
+                    items: sorted,
+                    onTap: _openBook,
+                    onHide: _hide,
+                  ),
                 const SectionTitle(title: '源'),
                 sourcesAsync.when(
                   loading: () => const Padding(
@@ -453,34 +453,61 @@ class _SegmentBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _seg(context, 'listening', '在听 ($listeningCount)'),
-        const SizedBox(width: 8),
-        _seg(context, 'finished', '听完 ($finishedCount)'),
-      ],
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: context.palette.surfaceAlt,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: context.palette.outline),
+      ),
+      child: Row(
+        children: [
+          _seg(context, 'listening', '正在听 $listeningCount', primary),
+          _seg(context, 'finished', '已听完 $finishedCount', primary),
+        ],
+      ),
     );
   }
 
-  Widget _seg(BuildContext context, String key, String label) {
+  Widget _seg(BuildContext context, String key, String label, Color primary) {
     final selected = value == key;
-    final primary = Theme.of(context).colorScheme.primary;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      selectedColor: primary.withOpacity(0.16),
-      labelStyle: TextStyle(
-        color: selected
-            ? primary
-            : Theme.of(context).textTheme.bodyMedium?.color,
-        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => onChanged(key),
+        child: Container(
+          alignment: Alignment.center,
+          decoration: selected
+              ? BoxDecoration(
+                  color: Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: primary.withOpacity(0.18),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                )
+              : null,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected
+                  ? primary
+                  : Theme.of(context).textTheme.bodySmall?.color,
+            ),
+          ),
+        ),
       ),
-      onSelected: (_) => onChanged(key),
     );
   }
 }
 
-/// 书架排序 5 档：最近阅读 / 最新更新 / 书名拼音 / 手动 / 最近阅读或更新。
 class _SortMenu extends StatelessWidget {
   final String value;
   final ValueChanged<String> onChanged;
@@ -676,6 +703,124 @@ class _SourceCard extends ConsumerWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 书架三列网格：封面 + 标题 + 进度，参考「My Library」布局。
+class _BookGrid extends StatelessWidget {
+  final List<MediaItem> items;
+  final void Function(MediaItem) onTap;
+  final void Function(MediaItem) onHide;
+
+  const _BookGrid({
+    required this.items,
+    required this.onTap,
+    required this.onHide,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 3,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 14,
+      crossAxisSpacing: 12,
+      childAspectRatio: 0.52,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      children: items
+          .map((e) => _BookCard(
+                item: e,
+                onTap: () => onTap(e),
+                onLongPress: () => onHide(e),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _BookCard extends StatelessWidget {
+  final MediaItem item;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  const _BookCard({
+    required this.item,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  String _listened(int ms) {
+    if (ms <= 0) return '未开始';
+    final m = (ms / 60000).round();
+    if (m < 60) return '已听 $m 分钟';
+    return '已听 ${m ~/ 60} 小时 ${m % 60} 分';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final subtle = context.subtleColor;
+    final ratio = item.lastDurationMs > 0
+        ? (item.lastPositionMs / item.lastDurationMs).clamp(0.0, 1.0)
+        : 0.0;
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: AspectRatio(
+              aspectRatio: 3 / 4,
+              child: CoverImage(
+                url: item.coverUrl,
+                title: item.title,
+                width: double.infinity,
+                height: double.infinity,
+                radius: 14,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            item.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            [
+              if ((item.author ?? '').isNotEmpty) item.author!,
+              item.sourceName,
+            ].join(' · '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: subtle),
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: item.isFinished ? 1 : ratio.toDouble(),
+              minHeight: 4,
+              backgroundColor: context.palette.surfaceAlt,
+              valueColor: AlwaysStoppedAnimation<Color>(primary),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            item.isFinished ? '已听完' : '${(ratio * 100).round()}% · ${_listened(item.lastPositionMs)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 10, color: subtle),
+          ),
+        ],
       ),
     );
   }

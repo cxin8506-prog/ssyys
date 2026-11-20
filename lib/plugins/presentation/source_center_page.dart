@@ -619,8 +619,6 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
   /// 安装一个本地插件文件。返回新装的源；失败报人话错，不只报异常名。
   Future<void> _installFile(String path) async {
     final repo = ref.read(sourceRepositoryProvider);
-    final before = await repo.loadAll();
-    final beforeIds = before.map((s) => s.id).toSet();
     setState(() {
       _busy = true;
       _stage = '正在安装插件…';
@@ -638,14 +636,8 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
       if (installed.isEmpty) {
         throw Exception('这个包里没有读出任何源，包可能不对或已损坏');
       }
-      // 同名重导 = 升级：先清旧条目再装（引擎组 install 里做）。
-      // 新装的源默认不在勾选里：先停用，在卡片上打勾才出现。
-      final fresh = installed.where((s) => !beforeIds.contains(s.id)).toList();
-      for (final s in fresh) {
-        try {
-          await repo.setEnabled(s.id, false);
-        } catch (_) {}
-      }
+      // 导入后立刻可用：源自己声明的 enabledByDefault 就是默认值。
+      // 旧版在这里把新源一律停用，用户导完搜不到东西，误以为导入失败。
       ref.invalidate(sourceListProvider);
       if (!mounted) return;
       setState(() {
@@ -655,7 +647,7 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '已导入 ${installed.length} 个源，默认未启用，在卡片上打勾即可使用。',
+            '已导入 ${installed.length} 个源，现在就能搜索和播放（可在卡片里停用）。',
           ),
         ),
       );

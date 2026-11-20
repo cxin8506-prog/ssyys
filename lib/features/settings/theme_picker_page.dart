@@ -5,10 +5,10 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_providers.dart';
 import '../../shared/widgets/common.dart';
 
-/// 主题选择页：4 套配色 + 明暗模式 + 纯黑 + 封面取色 + 字体大小。
+/// 主题选择页：3 套配色（樱花粉 / 淡紫夜 / 清透青）+ 明暗模式 + 纯黑 +
+/// 封面取色 + 字体大小。
 ///
-/// - 墨夜不开放：只展示一张灰掉的卡片（字用浅色，写在深底上看得见），
-///   不可点。浅色模式下深字压黑底看不见是审计 A 的颜色 bug。
+/// - 淡紫夜只走深色，选了它明暗模式不再改变底色。
 /// - 纯黑开关只在深色下显示（浅色下藏掉）。
 /// - 换主题立即生效，不重启。
 class ThemePickerPage extends ConsumerWidget {
@@ -41,16 +41,13 @@ class ThemePickerPage extends ConsumerWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
+              crossAxisCount: 3,
               mainAxisSpacing: 10,
               crossAxisSpacing: 10,
-              mainAxisExtent: 84,
+              mainAxisExtent: 96,
             ),
-            itemCount: AppTheme.openSchemeCount + 1,
+            itemCount: AppTheme.openSchemeCount,
             itemBuilder: (_, i) {
-              if (i == AppTheme.openSchemeCount) {
-                return const _DisabledNightCard();
-              }
               final scheme = AppTheme.schemes[i];
               final selected = themeColor == i;
               return _SchemeCard(
@@ -201,32 +198,28 @@ class _SchemeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 卡片底色按配色自身的 lightSurface 取，字色必须按卡片实际底色选，
-    // 不能按明暗模式选（墨夜 lightSurface 本来就是黑的，旧 bug）。
     final bg = scheme.lightSurface;
-    final isBgDark =
-        bg.computeLuminance() < 0.3;
+    final isBgDark = bg.computeLuminance() < 0.3;
     final fg = isBgDark ? Colors.white : AppTheme.lightText;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: selected
-                ? scheme.primary
-                : Theme.of(context).dividerColor,
+            color: selected ? scheme.primary : Theme.of(context).dividerColor,
             width: selected ? 2 : 1,
           ),
         ),
-        child: Row(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 34,
-              height: 34,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: LinearGradient(
@@ -236,18 +229,18 @@ class _SchemeCard extends StatelessWidget {
                 ),
               ),
               child: selected
-                  ? const Icon(Icons.check, size: 18, color: Colors.white)
+                  ? const Icon(Icons.check, size: 20, color: Colors.white)
                   : null,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                scheme.name,
-                style: TextStyle(
-                  color: selected ? scheme.primary : fg,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+            const SizedBox(height: 8),
+            Text(
+              scheme.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: selected ? scheme.primary : fg,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -256,8 +249,6 @@ class _SchemeCard extends StatelessWidget {
     );
   }
 }
-
-/// 墨夜卡片：已禁用，不可点；深底配浅字，保证看得见。
 class _DisabledNightCard extends StatelessWidget {
   const _DisabledNightCard();
 

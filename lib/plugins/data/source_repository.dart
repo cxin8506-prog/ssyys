@@ -219,12 +219,17 @@ class SourceRepository {
     }
 
     // ZIP 里只有一个顶层目录时去掉这一层。
-    final root = _stripSingleTopDir(tmp);
+    var root = _stripSingleTopDir(tmp);
 
-    // 2) 定位 manifest。
+    // 2) 定位 manifest，并把「manifest 所在目录」定为插件根：
+    // 脚本路径都是相对 manifest 写的，多一层时会全部读错。
     final manifestFile = await _findManifest(root);
     Map<String, dynamic> manifest = <String, dynamic>{};
     if (manifestFile != null) {
+      final manifestDir = manifestFile.parent;
+      if (manifestDir.absolute.path != root.absolute.path) {
+        root = manifestDir;
+      }
       try {
         final m = jsonDecode(await manifestFile.readAsString());
         if (m is Map) manifest = Map<String, dynamic>.from(m);
@@ -260,18 +265,53 @@ class SourceRepository {
   /// 没有就按文件名顺序取包里所有 .js。
   Future<List<String>> _sstsScriptNames(
       Directory root, Map<String, dynamic> manifest) async {
-    final scripts = manifest['scripts'];
-    if (scripts is List && scripts.isNotEmpty) {
-      return scripts.map((e) => '$e').where((e) => e.isNotEmpty).toList();
+    final out = <String>[];
+    void add(String name) {
+      var n = name.trim().replaceAll('\\', '/');
+      while (n.startsWith('./')) {
+        n = n.substring(2);
+      }
+      if (n.isEmpty || out.contains(n)) return;
+      if (!File(p.join(root.path, n)).existsSync()) return;
+      out.add(n);
     }
-    final files = <String>[];
-    await for (final e in root.list(recursive: true, followLinks: false)) {
-      if (e is File && e.path.toLowerCase().endsWith('.js')) {
-        files.add(p.relative(e.path, from: root.path).replaceAll('\\', '/'));
+
+    final scripts = manifest['scripts'];
+    if (scripts is List) {
+      for (final e in scripts) {
+        add('$e');
+      }
+    } else if (scripts is String) {
+      for (final part in scripts.split(RegExp(r'[;,]'))) {
+        add(part);
       }
     }
+    if (out.isNotEmpty) return out;
+
+    // scripts 没写或全写错：用 entry 顶上，再不济扫全部 .js。
+    final entry = _pickString(manifest, const <String>[
+      'entry',
+      'script',
+      'main',
+      'entryFile',
+    ]);
+    if (entry != null && entry.toLowerCase().endsWith('.js')) add(entry);
+
+    final files = <String>[];
+    try {
+      await for (final e in root.list(recursive: true, followLinks: false)) {
+        if (e is File && e.path.toLowerCase().endsWith('.js')) {
+          final rel = p.relative(e.path, from: root.path).replaceAll('\\', '/');
+          if (rel.startsWith('__MACOSX')) continue;
+          files.add(rel);
+        }
+      }
+    } catch (_) {}
     files.sort();
-    return files;
+    for (final f in files) {
+      if (!out.contains(f)) out.add(f);
+    }
+    return out;
   }
 
   /// 是不是随身听书格式：manifest 声明了 scripts，或者脚本里有 registerSource。
@@ -302,7 +342,11 @@ class SourceRepository {
       String baseName,
       List<String> scriptNames,
       String? typeOverride) async {
-    final meta = await _collectSstsMeta(root, scriptNames);
+    final errors = <String>[];
+    var meta = await _collectSstsMeta(root, scriptNames, errors: errors);
+    if (meta.isEmpty) {
+      meta = _metaFromManifest(manifest, name, baseName);
+    }
 
     // 落到正式目录（同 id 覆盖安装）。
     final target = Directory(p.join((await pluginsRoot()).path, pluginId));
@@ -314,7 +358,12 @@ class SourceRepository {
       try {
         await target.delete(recursive: true);
       } catch (_) {}
-      throw Exception('这个插件没有注册任何源（registerSource 未执行），请检查插件包');
+      final brief = errors.isEmpty
+          ? ''
+          : '（${errors.first}${errors.length > 1 ? '，另有 ${errors.length - 1} 个脚本出错' : ''}）';
+      throw Exception('这个插件包里的脚本没有注册出任何源$brief。'
+          '常见原因：包不是随身听书格式、manifest 写的脚本路径不对，'
+          '或者脚本在注册前就要联网。请换一个包，或把包发开发者看日志。');
     }
     final size = await _dirSize(target);
     final each = (size / meta.length).round();
@@ -404,26 +453,34 @@ class SourceRepository {
   /// 脚本在导入时不该联网，host 方法调了就抛错；注册本身不受影响。
   /// 单个脚本中途抛错只记日志，不让它拖垮整包（已注册的源照常装）。
   Future<List<Map<String, dynamic>>> _collectSstsMeta(
-      Directory root, List<String> scriptNames) async {
+      Directory root, List<String> scriptNames,
+      {List<String>? errors}) async {
     final rt = getJavascriptRuntime();
     try {
       rt.evaluate(buildSstsBootstrap(null, <String, dynamic>{}));
-      // 装包时不联网：host 的同步调用直接抛错，不挂起。
-      rt.evaluate(
-          'globalThis.__hostSync = function() { throw new Error(\'安装时不能联网\'); };');
-      rt.evaluate(
-          'globalThis.__hostCall = function() { throw new Error(\'安装时不能联网\'); };');
+      // 安装时不该联网：日志类调用直接丢弃。
+      rt.evaluate('globalThis.__hostCall = function() { return null; };');
       for (final name in scriptNames) {
         final f = File(p.join(root.path, name));
         if (!await f.exists()) continue;
-        final text = await f.readAsString();
-        final r = rt.evaluate(text);
-        if (r.isError) {
-          appLogger.warning('插件脚本安装时执行出错', detail: '$name: ${r.stringResult}');
+        String text;
+        try {
+          text = await f.readAsString();
+        } catch (e) {
+          errors?.add('$name 读取失败');
+          continue;
+        }
+        final err = await _evalScriptReplay(rt, text);
+        if (err != null) {
+          errors?.add('$name：$err');
+          appLogger.warning('插件脚本安装时执行出错', detail: '$name: $err');
         }
       }
       final metaRes = rt.evaluate('globalThis.__sstsMeta()');
-      if (metaRes.isError) return <Map<String, dynamic>>[];
+      if (metaRes.isError) {
+        errors?.add('注册表读取失败：${metaRes.stringResult}');
+        return <Map<String, dynamic>>[];
+      }
       final decoded = jsonDecode(metaRes.stringResult);
       if (decoded is List) {
         return decoded
@@ -433,6 +490,7 @@ class SourceRepository {
       }
       return <Map<String, dynamic>>[];
     } catch (e) {
+      errors?.add('注册表读取异常：$e');
       appLogger.warning('随身听书插件注册表读取失败', detail: '$e');
       return <Map<String, dynamic>>[];
     } finally {
@@ -440,6 +498,74 @@ class SourceRepository {
         rt.dispose();
       } catch (_) {}
     }
+  }
+
+  /// 在运行时装执行一段脚本，支持挂起重放。返回 null 表示跑完，
+  /// 否则是错误原因。安装期的网络调用不回填真实数据，只回填错误，
+  /// 让脚本继续往下跑（registerSource 不会被第一个网络调用截断）。
+  Future<String?> _evalScriptReplay(JavascriptRuntime rt, String code) async {
+    try {
+      rt.evaluate('globalThis.__sstsScriptText = ${jsonEncode(code)};');
+    } catch (e) {
+      return '脚本装载失败：$e';
+    }
+    var guard = 0;
+    while (true) {
+      if (++guard > 300) return '脚本调用次数过多（可能陷入死循环）';
+      final res = rt
+          .evaluate('globalThis.__sstsLoadScript(globalThis.__sstsScriptText)');
+      if (res.isError) {
+        return res.stringResult.isEmpty ? '脚本执行失败' : res.stringResult;
+      }
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(res.stringResult);
+      } catch (_) {
+        return null;
+      }
+      if (decoded is! Map) return null;
+      if (decoded['__ok'] == true) return null;
+      if (decoded['__error'] != null) return '${decoded['__error']}';
+      final susp = decoded['__suspend'];
+      if (susp is Map) {
+        final method = '${susp['method'] ?? ''}';
+        final key = jsonEncode(<dynamic>[method, susp['payload']]);
+        final entry = <String, dynamic>{
+          'ok': false,
+          'error': '安装阶段不联网（$method）',
+        };
+        try {
+          rt.evaluate(
+              'globalThis.__syncCache[${jsonEncode(key)}] = ${jsonEncode(entry)};');
+        } catch (_) {}
+        continue;
+      }
+      return null;
+    }
+  }
+
+  /// manifest 里直接声明 sources 时的兜底（不跑脚本也能列出源）。
+  List<Map<String, dynamic>> _metaFromManifest(
+      Map<String, dynamic> manifest, String name, String baseName) {
+    for (final key in const <String>['sources', 'sourceList']) {
+      final raw = manifest[key];
+      if (raw is! List) continue;
+      final out = <Map<String, dynamic>>[];
+      for (final e in raw) {
+        if (e is! Map) continue;
+        final id = '${e['id'] ?? e['key'] ?? ''}'.trim();
+        if (id.isEmpty) continue;
+        out.add(<String, dynamic>{
+          'id': id,
+          'name': '${e['name'] ?? e['title'] ?? id}',
+          'url': '${e['url'] ?? ''}',
+          'description': '${e['description'] ?? e['desc'] ?? ''}',
+          'enabledByDefault': e['enabledByDefault'] != false,
+        });
+      }
+      if (out.isNotEmpty) return out;
+    }
+    return const <Map<String, dynamic>>[];
   }
 
   /// 安装旧式单源 ZIP（全局函数写法，没有 registerSource）。
@@ -1159,17 +1285,33 @@ class SourceRepository {
     return tmp;
   }
 
+  /// 找 manifest.json：根目录优先，再逐层往下（最多 3 层）。
+  /// 只找 1 层会把 `<包名>/<子目录>/manifest.json` 当成没有 manifest，
+  /// 于是脚本路径全算错，最后报“没有注册任何源”。
   Future<File?> _findManifest(Directory dir) async {
     final direct = File(p.join(dir.path, 'manifest.json'));
     if (await direct.exists()) return direct;
-    try {
-      await for (final e in dir.list(followLinks: false)) {
-        if (e is Directory) {
-          final inner = File(p.join(e.path, 'manifest.json'));
-          if (await inner.exists()) return inner;
-        }
+    final queue = <MapEntry<Directory, int>>[MapEntry(dir, 0)];
+    while (queue.isNotEmpty) {
+      final cur = queue.removeAt(0);
+      if (cur.value >= 3) continue;
+      List<FileSystemEntity> entries;
+      try {
+        entries = cur.key.listSync(followLinks: false);
+      } catch (_) {
+        continue;
       }
-    } catch (_) {}
+      for (final e in entries) {
+        if (e is! Directory) continue;
+        final name = p.basename(e.path);
+        if (name.startsWith('.') || name == '__MACOSX' || name == 'cache') {
+          continue;
+        }
+        final inner = File(p.join(e.path, 'manifest.json'));
+        if (await inner.exists()) return inner;
+        queue.add(MapEntry(e, cur.value + 1));
+      }
+    }
     return null;
   }
 

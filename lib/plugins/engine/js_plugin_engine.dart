@@ -114,7 +114,11 @@ class JsPluginEngine extends PluginEngine {
     await _loadPrefs(source.id, source.type);
     session.bindBridge();
     session.eval(_bootstrapScript(uas.mobile, uas.desktop, cfgMap));
-    session.eval(script, label: '${source.name}/entry');
+    final loadErr =
+        await _evalPluginScript(session, script, '${source.name}/entry');
+    if (loadErr != null) {
+      appLogger.warning('JS 入口脚本部分执行失败', detail: loadErr);
+    }
     // 有些插件把配置挂在 config 变量上，统一暴露一次。
     session.eval(
         'if (typeof config === "undefined" && typeof source !== "undefined") { var config = source; }');
@@ -172,17 +176,25 @@ class JsPluginEngine extends PluginEngine {
         desktopUa: uas.desktop), label: 'ssts 引导');
 
     final scripts = await _repo.readPluginScripts(source);
+    final loadErrors = <String>[];
     for (var i = 0; i < scripts.length; i++) {
-      session.eval(scripts[i].text, label: '${source.group}/${scripts[i].name}');
+      final err = await _evalPluginScript(
+          session, scripts[i].text, '${source.group}/${scripts[i].name}');
+      if (err != null) loadErrors.add('${scripts[i].name}：$err');
     }
     // 确认这个源真的注册上了（脚本可能在中途抛错导致只注册了一部分）。
     final ok = session.evalBool(
         'typeof globalThis.__sstsById[${jsonEncode(source.sstsId)}] === "object"');
     if (!ok) {
+      final brief = loadErrors.isEmpty
+          ? ''
+          : '（${loadErrors.first}${loadErrors.length > 1 ? '，另有 ${loadErrors.length - 1} 个脚本出错' : ''}）';
       try {
         session.rt.dispose();
       } catch (_) {}
-      throw Exception('这个源没有注册成功（registerSource 未执行）');
+      throw Exception('这个源没有注册成功$brief。'
+          '如果重导还是这样，说明插件脚本在注册前就要联网或依赖别的脚本，'
+          '可以把插件包的 manifest 和脚本名发开发者排查');
     }
     try {
       final ids = session.evalJson('Object.keys(globalThis.__sstsById)');
@@ -194,6 +206,20 @@ class JsPluginEngine extends PluginEngine {
     appLogger.info('JS 源已加载',
         detail:
             '${source.name} ssts=${source.sstsId} 插件=$key 共 ${session.sstsIds.length} 个源');
+  }
+
+  /// 执行一段插件脚本（走挂起重放），返回 null 表示正常。
+  Future<String?> _evalPluginScript(_JsSession session, String text,
+      String label) async {
+    try {
+      await session.evalScript(text);
+      return null;
+    } catch (e) {
+      final msg = '$e'.replaceFirst('Exception: ', '');
+      final brief = msg.length > 140 ? '${msg.substring(0, 140)}…' : msg;
+      appLogger.warning('脚本执行出错（$label）', detail: brief);
+      return brief;
+    }
   }
 
   Future<void> _loadPrefs(String sourceId, String type) async {
@@ -1003,6 +1029,24 @@ class _JsSession {
 
   final WebSession _web = WebSession();
 
+  /// 同一会话的调用串行化：挂起重放要整段重跑，两个调用交错会互相污染
+  /// __syncCache，甚至拿到对方的结果。
+  Future<void>? _tail;
+
+  Future<T> _exclusive<T>(Future<T> Function() body) {
+    final prev = _tail ?? Future<void>.value();
+    final done = Completer<void>();
+    _tail = done.future;
+    return prev.then((_) => body()).whenComplete(() => done.complete());
+  }
+
+  /// 执行插件脚本：脚本加载期调 host 也不会执行到一半被中断。
+  Future<void> evalScript(String text) => _exclusive(() async {
+        rt.evaluate('globalThis.__sstsScriptText = ${jsonEncode(text)};');
+        await _runSuspendable(
+            'globalThis.__sstsLoadScript(globalThis.__sstsScriptText)');
+      });
+
   _JsSession({
     required this.rt,
     required this.ua,
@@ -1091,7 +1135,7 @@ class _JsSession {
       String sstsId, String jsMethod, List<dynamic> args) async {
     final code =
         'globalThis.__sstsCall(${jsonEncode(sstsId)}, ${jsonEncode(jsMethod)}, ${jsonEncode(args)})';
-    return _runSuspendable(code);
+    return _exclusive(() => _runSuspendable(code));
   }
 
   /// 调一个旧式全局函数，同样走挂起重放（函数里也可能调 host 同步方法）。
@@ -1109,7 +1153,7 @@ class _JsSession {
         'try { return JSON.stringify({__suspend: JSON.parse(msg.substring("__SSTS_SUSPEND__".length))}); } '
         'catch(e2) { return JSON.stringify({__error: msg}); } } '
         'return JSON.stringify({__error: msg}); } })()';
-    return _runSuspendable(code);
+    return _exclusive(() => _runSuspendable(code));
   }
 
   /// 挂起重放环：evaluate 一段返回 {__ok/__error/__suspend} JSON 的代码，
