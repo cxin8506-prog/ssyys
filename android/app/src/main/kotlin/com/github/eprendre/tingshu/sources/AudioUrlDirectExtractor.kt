@@ -5,6 +5,6 @@ package com.github.eprendre.tingshu.sources
  */
 object AudioUrlDirectExtractor : AudioUrlExtractor {
     override fun extract(url: String, autoPlay: Boolean, isCache: Boolean, isDebug: Boolean) {
-        throw RuntimeException("Stub!")
+        Unit
     }
 }

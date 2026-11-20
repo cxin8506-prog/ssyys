@@ -19,27 +19,23 @@ class GradientBackdrop extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final bg = Theme.of(context).scaffoldBackgroundColor;
     final op = topOpacity ?? (dark ? 0.22 : 0.30);
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: bg,
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                scheme.primary.withOpacity(op),
-                scheme.secondary.withOpacity(dark ? 0.14 : 0.22),
-                bg,
-                bg,
-              ],
-              stops: const [0.0, 0.18, 0.42, 1.0],
-            ),
-          ),
+    // DecoratedBox 随子组件撑开，不用 Stack(expand)，避免父级约束异常时报错。
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: bg,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            scheme.primary.withOpacity(op),
+            scheme.secondary.withOpacity(dark ? 0.14 : 0.22),
+            bg,
+            bg,
+          ],
+          stops: const [0.0, 0.16, 0.40, 1.0],
         ),
-        child,
-      ],
+      ),
+      child: child,
     );
   }
 }

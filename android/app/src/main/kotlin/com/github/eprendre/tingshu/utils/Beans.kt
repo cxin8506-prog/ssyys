@@ -25,19 +25,27 @@ data class Book(
     var sourceId: String? = null
     var status: String = ""
     var episodesUpdateTime: Long = 0
-    var isTransientEpisodes: Boolean = false //如果章节列表是动态变化的，把这个参数设置为true。在每次进入播放页时会自动刷新。将在1.8.6后加入
+    var isTransientEpisodes: Boolean = false
     var isCompleted: Boolean = false//是否已完结，如果是，app里面将不再触发章节列表的自动刷新。
 
     override fun equals(other: Any?): Boolean {
-        throw RuntimeException("Stub!")
+        if (this === other) return true
+        if (other !is Book) return false
+        return bookUrl == other.bookUrl && sourceId == other.sourceId
     }
 
-    override fun hashCode(): Int {
-        throw RuntimeException("Stub!")
-    }
+    override fun hashCode(): Int = bookUrl.hashCode() * 31 + (sourceId?.hashCode() ?: 0)
 
     fun copyFrom(book: Book) {
-        throw RuntimeException("Stub!")
+        coverUrl = book.coverUrl
+        title = book.title
+        author = book.author
+        artist = book.artist
+        intro = book.intro
+        id = book.id
+        sourceId = book.sourceId
+        episodeList = book.episodeList
+        status = book.status
     }
 }
 
@@ -58,9 +66,7 @@ data class CategoryTab(
     val url: String
 ) : IMenu {
 
-    override fun getType(): Int {
-        throw RuntimeException("Stub!")
-    }
+    override fun getType(): Int = 0
 }
 
 data class BookDetail(
@@ -83,17 +89,15 @@ data class CategoryMenu(
     val tabs: List<CategoryTab>//子分类
 ) : IMenu {
 
-    override fun getType(): Int {
-        throw RuntimeException("Stub!")
-    }
+    override fun getType(): Int = 0
 
     override fun equals(other: Any?): Boolean {
-        throw RuntimeException("Stub!")
+        if (this === other) return true
+        if (other !is CategoryMenu) return false
+        return title == other.title && tabs == other.tabs
     }
 
-    override fun hashCode(): Int {
-        throw RuntimeException("Stub!")
-    }
+    override fun hashCode(): Int = title.hashCode() * 31 + tabs.hashCode()
 }
 
 data class Category(

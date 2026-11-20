@@ -205,7 +205,7 @@ interface ILrc {
      * bookUrl: 书本地址，和源id一起用来生成独立的配置缓存文件名
      */
     fun saveLrcConfig(hashMap: HashMap<String, String>, sourceId: String, bookUrl: String) {
-        throw RuntimeException("Stub!")
+        Unit
     }
 
     /**

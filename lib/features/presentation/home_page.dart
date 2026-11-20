@@ -166,22 +166,28 @@ class _HomePageState extends ConsumerState<HomePage> {
                     else
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            mainAxisSpacing: 12,
-                            crossAxisSpacing: 10,
-                            mainAxisExtent: 210,
-                          ),
-                          itemCount: sorted.length,
-                          itemBuilder: (_, i) => _BookTile(
-                            item: sorted[i],
-                            onTap: () => _openBook(sorted[i]),
-                            onHide: () => _hide(sorted[i]),
-                          ),
+                        child: LayoutBuilder(
+                          builder: (ctx, cons) {
+                            final tileW = cons.maxWidth.isFinite
+                                ? (cons.maxWidth - 20) / 3
+                                : 100.0;
+                            return Wrap(
+                              spacing: 10,
+                              runSpacing: 12,
+                              children: [
+                                for (final e in sorted)
+                                  SizedBox(
+                                    width: tileW,
+                                    height: 205,
+                                    child: _BookTile(
+                                      item: e,
+                                      onTap: () => _openBook(e),
+                                      onHide: () => _hide(e),
+                                    ),
+                                  ),
+                              ],
+                            );
+                          },
                         ),
                       ),
                     _CornerBanner(
@@ -226,19 +232,24 @@ class _HomePageState extends ConsumerState<HomePage> {
                         final cols = columns < 2 ? 2 : (columns > 4 ? 4 : columns);
                         return Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: cols,
-                              mainAxisSpacing: 10,
-                              crossAxisSpacing: 10,
-                              mainAxisExtent: 96,
-                            ),
-                            itemCount: shownSources.length,
-                            itemBuilder: (_, i) =>
-                                _SourceCard(source: shownSources[i]),
+                          child: LayoutBuilder(
+                            builder: (ctx, cons) {
+                              final tileW = cons.maxWidth.isFinite
+                                  ? (cons.maxWidth - 10 * (cols - 1)) / cols
+                                  : 160.0;
+                              return Wrap(
+                                spacing: 10,
+                                runSpacing: 10,
+                                children: [
+                                  for (final s in shownSources)
+                                    SizedBox(
+                                      width: tileW,
+                                      height: 96,
+                                      child: _SourceCard(source: s),
+                                    ),
+                                ],
+                              );
+                            },
                           ),
                         );
                       },
