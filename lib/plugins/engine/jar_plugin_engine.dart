@@ -33,6 +33,14 @@ class JarPluginEngine implements PluginEngine {
   @override
   String get format => 'jar';
 
+  // 通用 JAR 源没有登录/搜索验证入口，返回空。
+  @override
+  Future<Map<String, dynamic>?> loginInfo() async => null;
+
+  @override
+  Future<Map<String, dynamic>?> verificationInfo(String keyword) async =>
+      null;
+
   @override
   Future<void> attach(PluginSource source) async {
     _source = source;

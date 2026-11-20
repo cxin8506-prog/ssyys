@@ -11,7 +11,6 @@
 /// - 纯计算（DOM 解析、base64、uuid 等）直接在 JS 里做，不挂起。
 /// - render / sniff / AES 这三个要 WebView 或原生加密的，暂不支持，
 ///   抛人话错误，不静默返回空。
-library;
 
 /// 拼出完整的引导脚本。ua 是当前源的 UA（可空），cfg 是运行配置。
 String buildSstsBootstrap(String? ua, Map<String, dynamic> cfg) {
