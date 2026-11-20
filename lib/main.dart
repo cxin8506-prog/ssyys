@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -42,6 +44,10 @@ import 'features/search/source_search_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 先装报错定位：首帧 build 抛错时 release 版只显示灰屏，
+  // 装上后错会写进 error_log.txt，屏上也直接显示报错文字。
+  _installErrorReporting();
 
   final prefs = await SharedPreferences.getInstance();
   await migrateLegacyTheme(prefs);
@@ -117,6 +123,54 @@ Future<void> main() async {
     ],
     child: const MyApp(),
   ));
+}
+
+/// 启动报错定位：release 版首帧 build 抛错时只显示灰屏（ErrorWidget
+/// 的中灰底），看不到错在哪。手机上旧版留的数据（旧 app.db、旧源
+/// 索引）解析时才触发的错，桌面空库复现不了，所以先把报错原文抓出来。
+///
+/// 两路：① 写进应用文档目录的 error_log.txt（追加写，方便连着看
+/// 多次启动的错）；② 屏上直接显示报错文字，用户截图就能看到。
+/// 写日志失败只记 debugPrint，绝不抛错——handler 里再抛错会死循环。
+void _installErrorReporting() {
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final text = '--- ${DateTime.now().toIso8601String()} ---\n'
+        '${details.exception}\n${details.stack ?? ''}\n';
+    debugPrint(text);
+    unawaited(_appendErrorLog(text));
+  };
+
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    // 自带 Directionality：ErrorWidget 可能替掉还没包进 MaterialApp
+    // 的 widget，那时树里没有 Directionality，Text 会再抛错。
+    final message = '启动出错了，请截图发给开发者：\n\n'
+        '${details.exception}\n${details.stack ?? ''}';
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Container(
+        color: Colors.white,
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: Text(
+            message,
+            style: const TextStyle(color: Colors.black, fontSize: 14),
+          ),
+        ),
+      ),
+    );
+  };
+}
+
+/// 把报错文本追加进 error_log.txt（应用文档目录，和 app.db 同目录）。
+/// fire-and-forget：onError 是同步回调，这里不 await；失败只记日志不抛错。
+Future<void> _appendErrorLog(String text) async {
+  try {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/error_log.txt');
+    await file.writeAsString(text, mode: FileMode.append, flush: true);
+  } catch (e) {
+    debugPrint('写 error_log.txt 失败（只记日志）：$e');
+  }
 }
 
 /// 初始化音频后台服务：失败等 800ms 再试一次，两次都不行才降级
