@@ -885,8 +885,13 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
     final themeColor = ref.watch(themeColorProvider);
     final pureBlack = ref.watch(pureBlackProvider);
     final fontScale = ref.watch(fontScaleProvider);
+    // 注意：MyApp 自己就是建 MaterialApp 的那一层，它的 context 上面
+    // 还没有 MediaQuery（MediaQuery 是 MaterialApp 建出来的），所以
+    // 这里不能调 MediaQuery.of(context)，会直接抛空值错误导致灰屏。
+    // 系统深浅改从 window 上读。
     final systemDark =
-        MediaQuery.of(context).platformBrightness == Brightness.dark;
+        WidgetsBinding.instance.window.platformBrightness ==
+            Brightness.dark;
     // 墨夜（下标 4）不开放，themeColor 已钳制在 0..3；这里只做兜底。
     final isNight = themeColor == AppTheme.nightSchemeIndex;
     final effectiveMode =
