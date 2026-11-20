@@ -1,0 +1,13 @@
+<!-- 通知栏小图标：audio_service 的 androidNotificationIcon
+     指 drawable/ic_notification，之前 res 里没有这个文件。
+     通知图标必须是白色镂空图形（系统会按主题着色），这里用一个
+     白色音符（Material music_note 路径），不要改成彩色启动器图。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+</vector>
