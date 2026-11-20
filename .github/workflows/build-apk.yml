@@ -38,11 +38,11 @@ jobs:
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
             cat > android/keystore.properties <<EOF
-            storeFile=release.keystore
-            storePassword=$KEYSTORE_PASSWORD
-            keyAlias=$KEY_ALIAS
-            keyPassword=$KEY_PASSWORD
-            EOF
+          storeFile=release.keystore
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
           fi
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
