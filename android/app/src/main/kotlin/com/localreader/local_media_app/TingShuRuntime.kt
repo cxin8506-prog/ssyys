@@ -819,6 +819,21 @@ object TingShuRuntime {
 
     // ------------------------------------------------------------ 调用
 
+    /** 插件常给相对路径/空串：统一按源主页补齐，避免 "No host specified in URI"。 */
+    private fun absoluteUrl(s: Any, raw: String): String {
+        val base = runCatching {
+            s.javaClass.getMethod("getUrl").invoke(s) as String
+        }.getOrNull() ?: ""
+        val t = raw.trim()
+        if (t.startsWith("http://") || t.startsWith("https://")) return t
+        if (base.isEmpty()) return t
+        return try {
+            java.net.URI(base).resolve(t).toString()
+        } catch (_: Throwable) {
+            if (base.endsWith("/")) base + t else "$base/$t"
+        }
+    }
+
     fun call(
         path: String,
         entryClass: String,
@@ -877,7 +892,8 @@ object TingShuRuntime {
                 JSONObject().put("menus", arr).toString()
             }
             "browse" -> {
-                val url = params["category"] as? String ?: params["url"] as? String ?: ""
+                val raw = params["category"] as? String ?: params["url"] as? String ?: ""
+                val url = absoluteUrl(s, raw)
                 val m = s.javaClass.getMethod("getCategoryList", String::class.java)
                 val c = m.invoke(s, url)
                 val books = runCatching {
@@ -900,7 +916,8 @@ object TingShuRuntime {
                     .toString()
             }
             "detail" -> {
-                val url = params["url"] as? String ?: params["bookUrl"] as? String ?: ""
+                val rawUrl = params["url"] as? String ?: params["bookUrl"] as? String ?: ""
+                val url = absoluteUrl(s, rawUrl)
                 val m = s.javaClass.getMethod(
                     "getBookDetailInfo",
                     String::class.java,
