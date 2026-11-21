@@ -46,64 +46,42 @@ class _MainShellState extends ConsumerState<MainShell> {
 
     return Scaffold(
       body: IndexedStack(index: safeIndex, children: pages),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor.withOpacity(0.96),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Theme.of(context).colorScheme.primary.withOpacity(0.16),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
+      // 诊断版：换回系统标准底栏，先排除“自绘悬浮栏把 body 挤成 0 高”。
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: safeIndex <= 1 ? safeIndex : safeIndex + 1,
+        onTap: (i) {
+          if (i == 2) {
+            _onPlayPressed(handler);
+            return;
+          }
+          _onTap(i <= 1 ? i : i - 1);
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home_rounded),
+            label: '书源',
           ),
-          child: Row(
-            children: [
-              _NavItem(
-                icon: Icons.home_outlined,
-                activeIcon: Icons.home_rounded,
-                label: '书源',
-                selected: safeIndex == 0,
-                onTap: () => _onTap(0),
-              ),
-              _NavItem(
-                icon: Icons.explore_outlined,
-                activeIcon: Icons.explore_rounded,
-                label: _shortSourceName(sourceName),
-                selected: safeIndex == 1,
-                onTap: () => _onTap(1),
-              ),
-              Expanded(
-                child: Center(
-                  child: _CenterPlayButton(
-                    handler: handler,
-                    onTap: () => _onPlayPressed(handler),
-                    onLongPress: () => _showListenStats(context),
-                  ),
-                ),
-              ),
-              _NavItem(
-                icon: Icons.favorite_outline,
-                activeIcon: Icons.favorite_rounded,
-                label: '收藏',
-                selected: safeIndex == 2,
-                onTap: () => _onTap(2),
-              ),
-              _NavItem(
-                icon: Icons.history_outlined,
-                activeIcon: Icons.history_rounded,
-                label: '历史',
-                selected: safeIndex == 3,
-                onTap: () => _onTap(3),
-              ),
-            ],
+          BottomNavigationBarItem(
+            icon: Icon(Icons.explore_outlined),
+            activeIcon: Icon(Icons.explore_rounded),
+            label: '发现',
           ),
-        ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.play_circle_fill_rounded),
+            label: '播放',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.favorite_outline),
+            activeIcon: Icon(Icons.favorite_rounded),
+            label: '收藏',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.history_outlined),
+            activeIcon: Icon(Icons.history_rounded),
+            label: '历史',
+          ),
+        ],
       ),
     );
   }

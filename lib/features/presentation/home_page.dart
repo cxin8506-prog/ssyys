@@ -381,8 +381,10 @@ class _Header extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '/ 我的书架',
-                  style: TextStyle(fontSize: 13, color: context.subtleColor),
+                  '/ 我的书架 · v1.0.10 · '
+                  '${MediaQuery.of(context).size.width.toInt()}x'
+                  '${MediaQuery.of(context).size.height.toInt()}',
+                  style: TextStyle(fontSize: 11, color: context.subtleColor),
                 ),
               ],
             ),
