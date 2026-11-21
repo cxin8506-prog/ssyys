@@ -9,6 +9,7 @@ import '../../plugins/model/plugin_source.dart';
 import '../../plugins/presentation/source_book_page.dart';
 import '../../shared/widgets/bottom_bar_inset.dart';
 import '../../shared/widgets/common.dart';
+import '../../shared/widgets/soft_ui.dart';
 
 /// 发现页：按当前源显示分类（一级 Tab + 二级 Chip）。
 ///
@@ -75,37 +76,10 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
     final sourcesAsync = ref.watch(sourceListProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: InkWell(
-          // 点顶部源名回书源页（源网格）去选源。
-          onTap: () => ref.read(shellTabProvider.notifier).state = 0,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  source?.name ?? '发现',
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Icon(Icons.arrow_drop_down, size: 20),
-            ],
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '搜索',
-            onPressed: () => context.push('/search'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: '刷新',
-            onPressed: source == null ? null : () => _loadCategories(),
-          ),
-        ],
-      ),
-      body: source == null
+      body: GradientBackdrop(
+        child: SafeArea(
+          bottom: false,
+          child: source == null
           ? EmptyState(
               icon: Icons.extension_outlined,
               title: '还没有可用的源',
@@ -115,6 +89,50 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
             )
           : Column(
               children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 12, 16, 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('发现好故事',
+                                style: TextStyle(
+                                    fontSize: 24, fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 2),
+                            InkWell(
+                              onTap: () =>
+                                  ref.read(shellTabProvider.notifier).state = 0,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(source.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            color: context.subtleColor)),
+                                  ),
+                                  Icon(Icons.arrow_drop_down,
+                                      size: 18, color: context.subtleColor),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      CircleIconButton(
+                          icon: Icons.search_rounded,
+                          onTap: () => context.push('/search')),
+                      const SizedBox(width: 10),
+                      CircleIconButton(
+                          icon: Icons.refresh_rounded,
+                          onTap: () => _loadCategories()),
+                    ],
+                  ),
+                ),
                 _SourceBar(
                   source: source,
                   sourcesAsync: sourcesAsync,
@@ -200,6 +218,8 @@ class _DiscoverPageState extends ConsumerState<DiscoverPage> {
                   ),
               ],
             ),
+        ),
+      ),
     );
   }
 
@@ -461,39 +481,36 @@ class _MenuTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 不用 TabBar（需要 TabController，随菜单数量变化容易失配）：
-    // 一级分类用横向滚动的文字行，选中项 3px 主题色下划线。
     final primary = Theme.of(context).colorScheme.primary;
     return SizedBox(
-      height: 44,
+      height: 42,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: menus.length,
         itemBuilder: (_, i) {
           final selected = i == index;
-          return InkWell(
-            onTap: () => onChanged(i),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: selected ? primary : Colors.transparent,
-                    width: 3,
-                  ),
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => onChanged(i),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected ? primary.withOpacity(0.16) : Theme.of(context).cardColor,
+                  borderRadius: BorderRadius.circular(15),
                 ),
-              ),
-              child: Text(
-                '${menus[i]['title'] ?? ''}',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight:
-                      selected ? FontWeight.w600 : FontWeight.normal,
-                  color: selected
-                      ? primary
-                      : Theme.of(context).textTheme.bodyMedium?.color,
+                child: Text(
+                  '${menus[i]['title'] ?? ''}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected
+                        ? primary
+                        : Theme.of(context).textTheme.bodyMedium?.color,
+                  ),
                 ),
               ),
             ),
@@ -594,8 +611,10 @@ class _BookRow extends StatelessWidget {
     final cover = '${book['coverUrl'] ?? book['cover'] ?? ''}';
     final url = '${book['bookUrl'] ?? book['url'] ?? ''}';
     final intro = '${book['intro'] ?? book['description'] ?? ''}';
-    return InkWell(
-      // 点书卡进详情整页，不要只弹详情弹窗。
+    return SoftCard(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      radius: 18,
       onTap: () {
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -610,56 +629,53 @@ class _BookRow extends StatelessWidget {
           ),
         );
       },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CoverImage(url: cover.isEmpty ? null : cover, title: title),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CoverImage(url: cover.isEmpty ? null : cover, title: title),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (author.isNotEmpty) ...[
+                  const SizedBox(height: 3),
                   Text(
-                    title,
-                    maxLines: 2,
+                    author,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.subtleColor,
                     ),
                   ),
-                  if (author.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      author,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.subtleColor,
-                      ),
-                    ),
-                  ],
-                  if (intro.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      intro,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.subtleColor,
-                      ),
-                    ),
-                  ],
                 ],
-              ),
+                if (intro.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    intro,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.subtleColor,
+                    ),
+                  ),
+                ],
+              ],
             ),
-            Icon(Icons.chevron_right, size: 20, color: context.subtleColor),
-          ],
-        ),
+          ),
+          Icon(Icons.chevron_right, size: 20, color: context.subtleColor),
+        ],
       ),
     );
   }

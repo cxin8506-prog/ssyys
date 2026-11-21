@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// 底栏高度（贴底标准 BottomNavigationBar 的实际高度）。
-const double kBottomBarHeight = 56;
+/// 底栏高度（悬浮胶囊条：64 高 + 10 底边距）。
+const double kBottomBarHeight = 74;
 
 /// 页面底部避让高度：系统手势条 + 底栏高度 + 一点余量。
 ///

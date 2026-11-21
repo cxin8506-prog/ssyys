@@ -10,9 +10,11 @@ import '../../core/constants/app_constants.dart';
 import '../../core/database/library_repository.dart';
 import '../../core/di/providers.dart';
 import '../../core/log/app_logger.dart';
+import '../../core/theme/app_theme.dart';
 import '../../plugins/data/plugin_providers.dart';
 import '../../plugins/model/plugin_source.dart';
 import '../../plugins/presentation/source_book_page.dart';
+import '../../shared/widgets/soft_ui.dart';
 
 /// 聚合搜索页（听书 + 视频共用，学随身听书 / Legado / CloudStream）。
 ///
@@ -741,45 +743,85 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
         .length;
     final okSources =
         _states.where((s) => s.books.isNotEmpty).map((s) => s.source.id).toSet().length;
+    final primary = Theme.of(context).colorScheme.primary;
+    final textColor = Theme.of(context).textTheme.bodyMedium?.color;
     return Scaffold(
-      appBar: AppBar(
-        title: TextField(
-          controller: _ctrl,
-          focusNode: _focusNode,
-          autofocus: _history.isEmpty,
-          textInputAction: TextInputAction.search,
-          style: const TextStyle(color: Colors.white, fontSize: 16),
-          cursorColor: Colors.white,
-          decoration: const InputDecoration(
-            hintText: '搜索书名 / 作者 / 视频名',
-            hintStyle: TextStyle(color: Colors.white70, fontSize: 15),
-            border: InputBorder.none,
-          ),
-          onChanged: _onTextChanged,
-          onSubmitted: (v) => _search(v),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(_type == AppConstants.typeAudio
-                ? Icons.audiotrack
-                : Icons.movie),
-            tooltip: _type == AppConstants.typeAudio ? '切到视频' : '切到听书',
-            onPressed: _toggleType,
-          ),
-          IconButton(
-            icon: const Icon(Icons.clear),
-            tooltip: '清空',
-            onPressed: _clearSearch,
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '搜索',
-            onPressed: () => _search(_ctrl.text),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
+      body: GradientBackdrop(
+        child: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 16, 4),
+                child: Row(
+                  children: [
+                    CircleIconButton(
+                      icon: Icons.arrow_back_rounded,
+                      onTap: () => Navigator.of(context).maybePop(),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).cardColor,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: primary.withOpacity(0.12),
+                              blurRadius: 14,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 14),
+                            Icon(Icons.search_rounded,
+                                size: 20, color: context.subtleColor),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: _ctrl,
+                                focusNode: _focusNode,
+                                autofocus: _history.isEmpty,
+                                textInputAction: TextInputAction.search,
+                                style: TextStyle(
+                                    color: textColor, fontSize: 15),
+                                cursorColor: primary,
+                                decoration: InputDecoration(
+                                  hintText: '搜索有声书、作者或播讲员…',
+                                  hintStyle:
+                                      TextStyle(color: context.subtleColor, fontSize: 14),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                ),
+                                onChanged: _onTextChanged,
+                                onSubmitted: (v) => _search(v),
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(
+                                  _type == AppConstants.typeAudio
+                                      ? Icons.headphones_rounded
+                                      : Icons.movie_rounded,
+                                  size: 20,
+                                  color: primary.withOpacity(0.75)),
+                              tooltip: _type == AppConstants.typeAudio ? '切到视频' : '切到听书',
+                              onPressed: _toggleType,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    CircleIconButton(
+                      icon: Icons.tune_rounded,
+                      onTap: () => _search(_ctrl.text),
+                    ),
+                  ],
+                ),
+              ),
           _sourceBar(sources),
           if (_suggestions.isNotEmpty && _focusNode.hasFocus)
             _suggestionsView(),
@@ -801,7 +843,9 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
             ),
           Expanded(child: _buildBody(sources)),
           if (_searched && _merged.isNotEmpty) _loadMoreBar(),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -908,64 +952,60 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
   Widget _mergedTile(_MergedBook book) {
     final first = book.origins.first;
     final url = '${first.book['url'] ?? first.book['bookUrl'] ?? ''}';
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => SourceBookPage(
-              sourceId: first.source.id,
-              bookUrl: url,
-              title: book.title,
-              coverUrl: book.cover.isEmpty ? null : book.cover,
-              author: book.author,
-              intro: book.intro,
-            ),
-          ));
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _cover(book.cover, book.title),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(book.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
-                    Text(
-                      book.author.isEmpty
-                          ? '来自 ${book.origins.length} 个源'
-                          : '${book.author} · 来自 ${book.origins.length} 个源',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    if (book.origins.length > 1) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        book.origins.map((o) => o.source.name).join('、'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(fontSize: 11),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, size: 20),
-            ],
+    return SoftCard(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      radius: 18,
+      onTap: () {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SourceBookPage(
+            sourceId: first.source.id,
+            bookUrl: url,
+            title: book.title,
+            coverUrl: book.cover.isEmpty ? null : book.cover,
+            author: book.author,
+            intro: book.intro,
           ),
-        ),
+        ));
+      },
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _cover(book.cover, book.title),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(book.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text(
+                  book.author.isEmpty
+                      ? '来自 ${book.origins.length} 个源'
+                      : '${book.author} · 来自 ${book.origins.length} 个源',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (book.origins.length > 1) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    book.origins.map((o) => o.source.name).join('、'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(fontSize: 11),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, size: 20, color: context.subtleColor),
+        ],
       ),
     );
   }
@@ -1206,53 +1246,75 @@ class _SearchPageState extends ConsumerState<SourceSearchPage> {
   }
 
   Widget _historyView() {
+    final primary = Theme.of(context).colorScheme.primary;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
         Row(
           children: [
+            Icon(Icons.history_rounded, size: 18, color: primary),
+            const SizedBox(width: 6),
             const Expanded(
-              child: Text('搜索历史',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              child: Text('最近搜索',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
             if (_history.isNotEmpty)
-              TextButton(
+              TextButton.icon(
                 onPressed: _clearHistory,
-                child: const Text('清空'),
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('清空'),
               ),
           ],
         ),
         if (_history.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
             child: Text('输入关键词搜索',
-                style: TextStyle(fontSize: 12.5, color: Colors.grey)),
+                style: TextStyle(fontSize: 12.5, color: context.subtleColor)),
           )
         else
-          ..._history.map((h) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.history, size: 18),
-                title: Text(h, style: const TextStyle(fontSize: 14)),
-                trailing: IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  tooltip: '删除这条',
-                  onPressed: () => _deleteHistoryOne(h),
-                ),
-                onTap: () {
-                  _ctrl.text = h;
-                  _search(h);
-                },
-              )),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: _history
+                .map((h) => GestureDetector(
+                      onTap: () {
+                        _ctrl.text = h;
+                        _search(h);
+                      },
+                      child: Chip(
+                        backgroundColor: Theme.of(context).cardColor,
+                        side: BorderSide(color: context.palette.outline),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        label: Text(h, style: const TextStyle(fontSize: 13)),
+                        onDeleted: () => _deleteHistoryOne(h),
+                        deleteIcon: const Icon(Icons.close, size: 15),
+                      ),
+                    ))
+                .toList(),
+          ),
         if (_hotWords.isNotEmpty) ...[
           const SizedBox(height: 18),
-          const Text('热门搜索',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.auto_awesome_rounded, size: 18, color: primary),
+              const SizedBox(width: 6),
+              const Text('热门搜索',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 10,
+            runSpacing: 10,
             children: _hotWords
                 .map((w) => ActionChip(
+                      backgroundColor: Theme.of(context).cardColor,
+                      side: BorderSide(color: context.palette.outline),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
                       label: Text(w, style: const TextStyle(fontSize: 13)),
                       onPressed: () {
                         _ctrl.text = w;

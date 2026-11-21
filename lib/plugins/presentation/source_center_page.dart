@@ -12,6 +12,7 @@ import '../../plugins/data/plugin_providers.dart';
 import '../../plugins/model/plugin_source.dart';
 import '../../shared/widgets/common.dart';
 import '../../shared/widgets/login_web_page.dart';
+import '../../shared/widgets/soft_ui.dart';
 import 'source_detail_page.dart';
 
 /// 源管理：按插件折叠。
@@ -127,22 +128,12 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(sourceListProvider);
+    final primary = Theme.of(context).colorScheme.primary;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('源管理'),
-        actions: [
-          TextButton.icon(
-            onPressed: _busy ? null : _showImport,
-            icon: Icon(Icons.add, size: 18,
-                color: Theme.of(context).colorScheme.primary),
-            label: Text('导入',
-                style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-      body: async.when(
+      body: GradientBackdrop(
+        child: SafeArea(
+          bottom: false,
+          child: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('读取源失败：$e')),
         data: (list) {
@@ -168,21 +159,74 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
               Column(
                 children: [
                   Padding(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: TextField(
-                      decoration: InputDecoration(
-                        hintText: '筛选源（按名称包含匹配）',
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        suffixIcon: _filter.isEmpty
-                            ? null
-                            : IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: () =>
-                                    setState(() => _filter = ''),
+                    padding: const EdgeInsets.fromLTRB(12, 12, 16, 4),
+                    child: Row(
+                      children: [
+                        CircleIconButton(
+                          icon: Icons.arrow_back_rounded,
+                          onTap: () => Navigator.of(context).maybePop(),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('源管理',
+                                  style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800)),
+                              Text(
+                                '共 ${list.length} 个源 · ${groups.length} 个插件',
+                                style: TextStyle(
+                                    fontSize: 12, color: context.subtleColor),
                               ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: _busy ? null : _showImport,
+                          style: ElevatedButton.styleFrom(
+                            shape: const StadiumBorder(),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
+                          ),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('导入'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: primary.withOpacity(0.10),
+                            blurRadius: 14,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
                       ),
-                      onChanged: (v) => setState(() => _filter = v),
+                      child: TextField(
+                        decoration: InputDecoration(
+                          hintText: '筛选源（按名称包含匹配）',
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          suffixIcon: _filter.isEmpty
+                              ? null
+                              : IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () =>
+                                      setState(() => _filter = ''),
+                                ),
+                          border: InputBorder.none,
+                          filled: false,
+                          isDense: true,
+                        ),
+                        onChanged: (v) => setState(() => _filter = v),
+                      ),
                     ),
                   ),
                   Padding(
@@ -274,6 +318,8 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
             ],
           );
         },
+          ),
+        ),
       ),
     );
   }
@@ -719,8 +765,10 @@ class _PluginCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabledCount = sources.where((s) => s.enabled).length;
     final anyEnabled = enabledCount > 0;
-    return Card(
+    return SoftCard(
       margin: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.zero,
+      radius: 20,
       child: Column(
         children: [
           InkWell(
@@ -991,11 +1039,11 @@ class _LogPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return SoftCard(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+      padding: const EdgeInsets.all(12),
+      radius: 20,
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
@@ -1025,7 +1073,6 @@ class _LogPanel extends StatelessWidget {
             ),
           ],
         ),
-      ),
     );
   }
 }

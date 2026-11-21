@@ -13,6 +13,7 @@ import '../model/plugin_source.dart';
 import '../../shared/widgets/bottom_bar_inset.dart';
 import '../../shared/widgets/common.dart';
 import '../../shared/widgets/login_web_page.dart';
+import '../../shared/widgets/soft_ui.dart';
 
 /// 源书单页：详情整页进（不是详情弹窗）。
 ///
@@ -1051,47 +1052,46 @@ class _ChapterRow extends StatelessWidget {
     final color = playing
         ? primary
         : Theme.of(context).textTheme.bodyMedium?.color;
-    return InkWell(
+    return SoftCard(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      radius: 16,
       onTap: onTap,
-      child: Container(
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            if (playing)
-              Icon(Icons.play_arrow_rounded, size: 18, color: primary)
-            else
-              SizedBox(
-                width: 18,
-                child: Text(
-                  '${index + 1}',
-                  style: TextStyle(fontSize: 11, color: context.subtleColor),
-                ),
-              ),
-            const SizedBox(width: 8),
-            Expanded(
+      child: Row(
+        children: [
+          if (playing)
+            Icon(Icons.play_arrow_rounded, size: 18, color: primary)
+          else
+            SizedBox(
+              width: 18,
               child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: color,
-                  fontWeight:
-                      playing ? FontWeight.w600 : FontWeight.normal,
-                ),
+                '${index + 1}',
+                style: TextStyle(fontSize: 11, color: context.subtleColor),
               ),
             ),
-            if (!free)
-              const Icon(Icons.lock_outline, size: 14)
-            else if (finished)
-              Text('已听完',
-                  style: TextStyle(fontSize: 11, color: context.subtleColor))
-            else if (positionMs != null && positionMs! > 0)
-              Text('听至 ${formatDuration(positionMs!)}',
-                  style: TextStyle(fontSize: 11, color: primary)),
-          ],
-        ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                color: color,
+                fontWeight:
+                    playing ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          if (!free)
+            const Icon(Icons.lock_outline, size: 14)
+          else if (finished)
+            Text('已听完',
+                style: TextStyle(fontSize: 11, color: context.subtleColor))
+          else if (positionMs != null && positionMs! > 0)
+            Text('听至 ${formatDuration(positionMs!)}',
+                style: TextStyle(fontSize: 11, color: primary)),
+        ],
       ),
     );
   }
