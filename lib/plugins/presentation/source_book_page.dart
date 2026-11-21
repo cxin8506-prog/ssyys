@@ -956,7 +956,8 @@ class _LineSelector extends StatelessWidget {
         itemBuilder: (_, i) {
           final line = lines[i];
           final id = '${line['id'] ?? line['name'] ?? ''}';
-          final name = '${line['name'] ?? line['id'] ?? ''}';
+          var name = '${line['name'] ?? line['id'] ?? ''}'.trim();
+          if (name.isEmpty || name == 'null') name = '线路 ${i + 1}';
           final selected = selectedId == id || (selectedId == null && i == 0);
           final primary = Theme.of(context).colorScheme.primary;
           return Padding(
@@ -1001,7 +1002,8 @@ class _VoiceSelector extends StatelessWidget {
         itemBuilder: (_, i) {
           final v = voices[i];
           final id = '${v['id'] ?? v['name'] ?? ''}';
-          final name = '${v['name'] ?? v['id'] ?? ''}';
+          var name = '${v['name'] ?? v['id'] ?? ''}'.trim();
+          if (name.isEmpty || name == 'null') name = '音色 ${i + 1}';
           final selected = selectedId == id || (selectedId == null && i == 0);
           final primary = Theme.of(context).colorScheme.primary;
           return Padding(

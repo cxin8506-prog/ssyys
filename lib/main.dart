@@ -43,6 +43,25 @@ import 'plugins/presentation/source_center_page.dart';
 import 'features/search/source_search_page.dart';
 
 Future<void> main() async {
+  // 诊断：release 下页面构建炸掉时，把真实异常画在页面上，而不是一片白。
+  ErrorWidget.builder = (details) {
+    final text = '${details.exceptionAsString()}\n\n${details.stack ?? ''}';
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.all(14),
+      alignment: Alignment.topLeft,
+      child: SingleChildScrollView(
+        child: Text(
+          '渲染异常（把这段截图发给开发者）：\n$text',
+          style: const TextStyle(
+            color: Color(0xFFB00020),
+            fontSize: 12,
+            height: 1.4,
+          ),
+        ),
+      ),
+    );
+  };
   WidgetsFlutterBinding.ensureInitialized();
 
   // 先装报错定位：首帧 build 抛错时 release 版只显示灰屏，
