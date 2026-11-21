@@ -133,8 +133,12 @@ class _SourceCenterPageState extends ConsumerState<SourceCenterPage> {
         actions: [
           TextButton.icon(
             onPressed: _busy ? null : _showImport,
-            icon: const Icon(Icons.add, size: 18, color: Colors.white),
-            label: const Text('导入', style: TextStyle(color: Colors.white)),
+            icon: Icon(Icons.add, size: 18,
+                color: Theme.of(context).colorScheme.primary),
+            label: Text('导入',
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600)),
           ),
         ],
       ),

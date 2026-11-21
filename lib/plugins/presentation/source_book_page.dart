@@ -866,7 +866,7 @@ class _SourceBookPageState extends ConsumerState<SourceBookPage> {
                       padding: const EdgeInsets.all(24),
                       child: Text(
                         _chapters.isEmpty
-                            ? '还没有章节，源可能没有返回目录。'
+                            ? '还没有章节：这个 JAR 插件没有返回目录（插件详情接口未走通，先点「重试」，仍为空请把插件发我）'
                             : '没有匹配的章节。',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: context.subtleColor),
